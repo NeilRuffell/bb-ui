@@ -17,10 +17,14 @@ baseline, not the older Recents experiments.
 
 - Reuse native `com.android.quickstep.views.RecentsView`, `TaskView`,
   thumbnail loading and task lifecycle. There is no replacement Recents app.
-- Use Quickstep's own `RecentsPagedOrientationHandler.LANDSCAPE` **primary
-  axis only**, giving PagedView native Y scrolling, snapping, flings and wheel
-  navigation. Delegate portrait-only rendering and task dismiss directions to
-  the native portrait handler, so thumbnails are not rotated.
+- Use Quickstep's native landscape primary axis for vertical scrolling,
+  snapping, flings and wheel navigation, while delegating portrait-only
+  rendering and thumbnail rotation to the portrait handler.
+- Use the same orientation adapter for both `RecentsView` and `TaskView`.
+  Quickstep's native task-dismiss and swipe-launch controllers then use
+  horizontal gesture detectors and X-axis dismiss translations, leaving
+  vertical gestures for native scrolling. In left-to-right layouts, swipe
+  right dismisses, and swipe left is the native swipe-launch gesture.
 - Use native two-panel grouping and TaskView measurement.
 - At `RecentsView.getPageScrolls()`, while Quickstep is already laying out
   children, arrange existing TaskViews in two columns and return matching
@@ -78,7 +82,8 @@ fails, the error log identifies the missing class or hook.
 ### Device acceptance checks
 
 - Two portrait columns, task previews displayed correctly
-- Native vertical touch dragging and trackpad wheel navigation
+- Native vertical touch dragging and trackpad wheel navigation without dismissing an app
+- Horizontal task swipe dismiss and native reverse-direction swipe-launch behavior
 - Tapping an app launches that exact task
 - Swipe-to-dismiss and Clear All work
 - Running task preview is not duplicated/overlaid by a live tile
