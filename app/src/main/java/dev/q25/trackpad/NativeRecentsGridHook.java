@@ -48,6 +48,8 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
     private static int enabled = -1;
     private static boolean firstLayoutLogged;
     private static boolean firstTaskOrientationLogged;
+    private static String lastScrollGeometry;
+    private static final WeakHashMap<Object, Object> ORIENTATION_STATES = new WeakHashMap<>();
     private static final WeakHashMap<View, Boolean> SCREENSHOT_PENDING = new WeakHashMap<>();
 
     @Override public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lp) {
@@ -75,10 +77,26 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
             final AtomicReference<Object> adaptedHandler = new AtomicReference<>(
                     orientationProxy(handler, portrait, landscape, loader));
 
-            // TaskView obtains its orientation directly from RecentsOrientedState,
-            // not from the PagedView field. Redirect its native primary/secondary
-            // translation properties to the same axis as the grid. Without this,
-            // horizontal dismissal would still animate on the vertical axis.
+            // TaskViews obtain their handler from RecentsOrientedState, not from
+            // PagedView. Returning the same adapter from this single shared
+            // source prevents native dismissal from using a vertical translation
+            // while the drag detector is horizontal. Scope this to the specific
+            // RecentsOrientedState used by our active Quickstep RecentsView.
+            Class<?> orientedState = XposedHelpers.findClass(
+                    "com.android.quickstep.util.RecentsOrientedState", loader);
+            XposedHelpers.findAndHookMethod(orientedState, "getOrientationHandler",
+                    new XC_MethodHook() {
+                @Override protected void afterHookedMethod(MethodHookParam p) {
+                    Object adapted;
+                    synchronized (ORIENTATION_STATES) {
+                        adapted = ORIENTATION_STATES.get(p.thisObject);
+                    }
+                    if (adapted != null) p.setResult(adapted);
+                }
+            });
+
+            // Also cover direct TaskView calls; native optimized Kotlin code
+            // may read orientedState.orientationHandler without this getter.
             XposedHelpers.findAndHookMethod(task, "getPagedOrientationHandler",
                     new XC_MethodHook() {
                 @Override protected void afterHookedMethod(MethodHookParam p) {
@@ -86,10 +104,42 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
                     p.setResult(adaptedHandler.get());
                     if (!firstTaskOrientationLogged) {
                         firstTaskOrientationLogged = true;
-                        Log.w(TAG, "Native TaskView horizontal gestures active");
+                        Log.w(TAG, "Native TaskView orientation synchronized");
                     }
                 }
             });
+
+            // Native swipe-to-dismiss springs consume TaskView's secondary
+            // dismiss translation property. Return its existing X-axis native
+            // property directly; don't rely on Kotlin getter inlining.
+            final Object dismissX = XposedHelpers.getStaticObjectField(
+                    task, "DISMISS_TRANSLATION_X");
+            XposedHelpers.findAndHookMethod(task,
+                    "getSecondaryDismissTranslationProperty", new XC_MethodHook() {
+                @Override protected void afterHookedMethod(MethodHookParam p) {
+                    if (active((View) p.thisObject)) p.setResult(dismissX);
+                }
+            });
+
+            // In the portrait vertical grid, a reverse horizontal swipe must
+            // not reopen an app. Keep tap-to-launch; disable only the stock
+            // landscape swipe-to-launch controller for this layout.
+            Class<?> launchTouch = XposedHelpers.findClassIfExists(
+                    "com.android.launcher3.uioverrides.touchcontrollers.TaskViewLaunchTouchController",
+                    loader);
+            if (launchTouch != null) {
+                XposedBridge.hookAllMethods(launchTouch,
+                        "onControllerInterceptTouchEvent", new XC_MethodHook() {
+                    @Override protected void beforeHookedMethod(MethodHookParam p) {
+                        Object owner = XposedHelpers.getObjectField(
+                                p.thisObject, "recentsView");
+                        if (owner instanceof View && recents.isInstance(owner)
+                                && active((View) owner)) p.setResult(false);
+                    }
+                });
+            } else {
+                Log.w(TAG, "Native swipe-launch controller absent");
+            }
 
             // Replace the pager axis at its own native configuration point.
             // This is invoked by RecentsView during initialization and rotation.
@@ -107,6 +157,11 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
                     // lifecycle instead of retaining a stale swipe detector.
                     Object next = orientationProxy(handler, portrait, landscape, loader);
                     adaptedHandler.set(next);
+                    Object state = XposedHelpers.getObjectField(
+                            p.thisObject, "mOrientationState");
+                    synchronized (ORIENTATION_STATES) {
+                        ORIENTATION_STATES.put(state, next);
+                    }
                     p.args[0] = next;
                 }
             });
@@ -217,7 +272,9 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
                         Log.w(TAG, "Vertical grid layout reached; children="
                                 + ((ViewGroup) root).getChildCount()
                                 + " handler=" + orientation.getClass().getName()
-                                + " scrollY=" + root.getScrollY());
+                                + " scrollY=" + root.getScrollY()
+                                + " nativeMaxScroll=" + XposedHelpers.getIntField(
+                                        root, "mMaxScroll"));
                     }
                     requestNativeRunningTaskScreenshot(root);
                 }
@@ -407,6 +464,15 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
         if (clearAll != null)
             contentHeight += clearAll.getMeasuredHeight() + gap;
         int maxScroll = Math.max(0, contentHeight - root.getHeight());
+        if (place) {
+            String geometry = "tasks=" + cards.size()
+                    + " rows=" + rows + " rowStep=" + rowStep
+                    + " height=" + root.getHeight() + " maxScroll=" + maxScroll;
+            if (!geometry.equals(lastScrollGeometry)) {
+                lastScrollGeometry = geometry;
+                Log.w(TAG, "Native vertical grid geometry: " + geometry);
+            }
+        }
 
         // Existing TaskViews are direct children of RecentsView. Do not reparent,
         // recreate previews or change task snapshot data.
