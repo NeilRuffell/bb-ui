@@ -64,6 +64,9 @@ interactive behind the replacement after takeover is enabled.
    actual native stack geometry and maintain a tested two-page navigation
    state model. This version is intentionally headless: neither stock UI
    suppression nor a second notification pane is activated.
+   Version 0.2.3 avoids reliance on `getEntryAdapter()` (missing on the
+   tested Q25 runtime) by using existing `mEntryAdapter`/`mEntry` fields
+   where available, without modifying native notification objects.
 3. **Replaceable host and native notification pane:** Develop and test
    the single-surface two-column interface and native notification row
    handoff; detect actual Q25 shade mode before activating.
