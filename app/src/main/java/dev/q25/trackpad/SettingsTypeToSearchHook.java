@@ -3,6 +3,7 @@ package dev.q25.trackpad;
 import android.app.Activity;
 import android.content.Intent;
 import android.os.Bundle;
+import android.util.Log;
 import android.view.InputDevice;
 import android.view.KeyEvent;
 import android.view.View;
@@ -21,6 +22,7 @@ import de.robv.android.xposed.callbacks.XC_LoadPackage;
  * Scope in LSPosed to com.android.settings and com.android.settings.intelligence.
  */
 public final class SettingsTypeToSearchHook implements IXposedHookLoadPackage {
+    private static final String TAG = "BB-UI-Settings";
     private static final String SETTINGS = "com.android.settings";
     private static final String SEARCH_PACKAGE = "com.android.settings.intelligence";
     private static final String HOMEPAGE = "com.android.settings.homepage.SettingsHomepageActivity";
@@ -39,6 +41,14 @@ public final class SettingsTypeToSearchHook implements IXposedHookLoadPackage {
 
     private void hookHomepage(ClassLoader loader) {
         try {
+            XposedHelpers.findAndHookMethod(HOMEPAGE, loader, "onCreate", Bundle.class,
+                    new XC_MethodHook() {
+                @Override
+                protected void afterHookedMethod(MethodHookParam param) {
+                    Log.i(TAG, "Homepage onCreate hook reached");
+                    hideIdleHomepageSearchBar((Activity) param.thisObject);
+                }
+            });
             XposedBridge.hookAllMethods(Activity.class, "dispatchKeyEvent", new XC_MethodHook() {
                 @Override
                 protected void beforeHookedMethod(MethodHookParam param) {
@@ -63,8 +73,46 @@ public final class SettingsTypeToSearchHook implements IXposedHookLoadPackage {
             });
             XposedBridge.log("BB UI: Settings homepage type-to-search enabled");
         } catch (Throwable t) {
+            Log.e(TAG, "Homepage hook registration failed", t);
             XposedBridge.log("BB UI: homepage hook unavailable: " + t);
         }
+    }
+
+    /**
+     * LineageOS 24.0 keeps the homepage search card inside an AppBarLayout.
+     * Hide the card, not the whole app bar: its container also owns the
+     * system status-bar inset needed by the scrolling settings list.
+     */
+    private static void hideIdleHomepageSearchBar(Activity activity) {
+        int searchId = activity.getResources().getIdentifier("search_action_bar", "id", SETTINGS);
+        int containerId = activity.getResources().getIdentifier("app_bar_container", "id", SETTINGS);
+        if (searchId == 0 || containerId == 0) {
+            Log.w(TAG, "Homepage search view ID missing: search=" + searchId
+                    + " container=" + containerId);
+            return;
+        }
+
+        View search = activity.findViewById(searchId);
+        View container = activity.findViewById(containerId);
+        if (search == null || container == null || !(search.getParent() instanceof View)) {
+            Log.w(TAG, "Homepage search views unavailable: search=" + search
+                    + " container=" + container);
+            return;
+        }
+        View searchCard = (View) search.getParent();
+        // Avoid changing unrelated views if a future ROM rearranges the layout.
+        if (searchCard.getParent() != container) {
+            Log.w(TAG, "Homepage search card parent differs from stock LineageOS layout");
+            return;
+        }
+
+        searchCard.setVisibility(View.GONE);
+        // Keep the top system-bar inset and horizontal padding, but reclaim
+        // the unused padding beneath the now-hidden search card.
+        container.setPaddingRelative(container.getPaddingStart(), container.getPaddingTop(),
+                container.getPaddingEnd(), 0);
+        Log.i(TAG, "Homepage idle search bar hidden");
+        XposedBridge.log("BB UI: Settings homepage idle search bar hidden");
     }
 
     private static boolean eligible(KeyEvent key) {
