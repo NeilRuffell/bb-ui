@@ -103,11 +103,20 @@ final class ShadeSceneBridge {
         try {
             Object interactor = XposedHelpers.getObjectField(controller, "sceneInteractor");
             if (interactor == null) return "interactor-null";
-            Object flow = XposedHelpers.callMethod(interactor, "getCurrentScene");
+            // Prefer backing fields. Q25's optimized SystemUI has already
+            // removed some Kotlin property accessors from the runtime.
+            Object flow;
+            try {
+                flow = XposedHelpers.getObjectField(interactor, "currentScene");
+            } catch (NoSuchFieldError unavailableField) {
+                flow = XposedHelpers.callMethod(interactor, "getCurrentScene");
+            }
             if (flow == null) return "scene-flow-null";
             Object key = XposedHelpers.callMethod(flow, "getValue");
             if (key == null) return "scene-null";
-            return String.valueOf(XposedHelpers.callMethod(key, "getDebugName"));
+            // SceneKey.toString() includes the underlying debugName and does
+            // not depend on an optimized-away Kotlin property accessor.
+            return String.valueOf(key);
         } catch (Throwable error) {
             return "unknown(" + error.getClass().getSimpleName() + ")";
         }
