@@ -214,7 +214,7 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
     private static void requestNativeRunningTaskScreenshot(View root) {
         if (!active(root)
                 || !XposedHelpers.getBooleanField(root, "mOverviewStateEnabled")
-                || !XposedHelpers.getBooleanField(root, "mEnableDrawingLiveTile")
+                || XposedHelpers.getObjectField(root, "mActiveGestureGroupedTaskInfo") != null
                 || XposedHelpers.getBooleanField(root, "mRunningTaskShowScreenshot")
                 || XposedHelpers.getObjectField(root, "mRecentsAnimationController") == null
                 || XposedHelpers.callMethod(root, "getRunningTaskView") == null) {
@@ -239,17 +239,21 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
                         if (XposedHelpers.getObjectField(root, "mRecentsAnimationController") != null) {
                             XposedHelpers.callMethod(root, "finishRecentsAnimation",
                                     true, false, (Runnable) () -> {
-                                        XposedHelpers.callMethod(root,
-                                                "setEnableDrawingLiveTile", false);
-                                        Log.w(TAG, "Running task converted to native grid thumbnail");
+                                        try {
+                                            XposedHelpers.callMethod(root,
+                                                    "setEnableDrawingLiveTile", false);
+                                            Log.w(TAG, "Running task converted to native grid thumbnail");
+                                        } finally {
+                                            clearScreenshotPending(root);
+                                        }
                                     });
                         } else {
                             XposedHelpers.callMethod(root, "setEnableDrawingLiveTile", false);
                             Log.w(TAG, "Running task screenshot ready; no remote animation");
+                            clearScreenshotPending(root);
                         }
                     } catch (Throwable error) {
                         Log.e(TAG, "Failed to finish running task live tile", error);
-                    } finally {
                         clearScreenshotPending(root);
                     }
                 });
