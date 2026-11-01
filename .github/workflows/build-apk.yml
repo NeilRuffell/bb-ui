@@ -2,7 +2,7 @@ name: Build BB UI debug APK
 
 on:
   push:
-    branches: [main]
+    branches: [main, feat/native-vertical-recents]
   pull_request:
   workflow_dispatch:
 

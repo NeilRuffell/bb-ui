@@ -1,46 +1,82 @@
 # BB UI
 
-Experimental LSPosed module for BlackBerry-inspired Android UI improvements.
+LSPosed module for physical-keyboard Android improvements.
 
-## v0.1 prototype: Type to search in Android Settings
+## Settings type-to-search
 
-On the **main Settings homepage**, pressing a letter or number on a detected **physical alphabetic keyboard** starts the existing Settings search and attempts to prefill it with that first character. No need to move focus to the search bar. Up/Down/Enter/Back and modifier shortcuts are not intercepted.
+The existing Settings search implementation is **unchanged** from `main`.
+Keep scope to `com.android.settings` and `com.android.settings.intelligence`.
 
-### Scope and limitations
+## Experimental vertical native-TaskView Recents
 
-- LSPosed scope: `com.android.settings` **and** `com.android.settings.intelligence`.
-- Hooks the Settings homepage keyboard dispatcher and the separate Settings Intelligence search screen.
-- Does **not** change behavior in other apps, submenus or edit fields.
-- Only the initiating character is explicitly transferred; rapid additional typing during the activity transition may be missed.
-- Uses AOSP/LineageOS internal class names; **not yet compiled or tested on LineageOS 24.0/Q25**.
-- No ROM patching or reflashing.
-- Previous Quick Settings experiment remains in source but is not activated.
+Branch: `feat/native-vertical-recents` (from `main`, **not** from the
+previous Recents `dev` branch).
+
+This experiment uses **existing Quickstep TaskView objects** and the existing
+thumbnail loader, click handling and app state. It does not draw duplicate
+screenshots, build its own task list, or install a second Recents activity.
+
+The goal is two portrait columns in vertically scrolling rows.
+The adapter inserts geometry *during* native `getPageScrolls` layout, before
+native `RecentsView.onLayout` finishes; it uses PagedView's own
+`computeMaxScroll`/`scrollTo` methods, and lets Quickstep supply TaskView
+measurement, previews and other task functions.
+
+**Important:** LineageOS Quickstep natively provides a horizontal pager and
+a horizontal two-row grid, **not** a switch for a portrait two-column vertical
+overview. An LSPosed adapter must still change Quickstep paging geometry and
+handle vertical input. This code is source-reviewed but has **not** been proven
+on the Q25. Animation, task dismissal, keyboard focus and rotations need device
+tests. Do not call it a fully native, verified Recents mode.
+
+### Scope
+
+Add the active Quickstep/Recents provider package to LSPosed scope in addition
+to the independent Settings scopes. The module detects
+`com.android.quickstep.views.RecentsView` in that process.
+
+### Enable for testing
+
+```sh
+adb shell settings put global bb_ui_vertical_recents 1
+adb reboot
+```
+
+### Restore the stock Quickstep Recents layout
+
+```sh
+adb shell settings put global bb_ui_vertical_recents 0
+adb reboot
+```
+
+The default is OFF. The setting is cached per RecentsView instance; reboot
+after changing it.
+
+### Inspect
+
+```sh
+adb logcat -d -s BB-UI-Recents:W '*:S'
+adb shell settings get global bb_ui_vertical_recents
+```
+
+Verify: two columns; vertical wheel scrolling; drag from background; previews
+(including running app); app launch; swipe dismissal; clear all; return to home;
+recents re-entry; rotation; physical keyboard; trackpad hit targets. Report any
+failures before merging.
 
 ### Build
 
-Install JDK 17, Android SDK Platform 35, and compatible Gradle tooling. Then:
+JDK 17, Android SDK Platform 35 and Gradle 8.11.1:
 
 ```sh
 gradle :app:assembleDebug
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
-This repository currently contains no Gradle Wrapper. Use a compatible local Gradle installation.
+GitHub Actions builds an APK artifact on pushes to this feature branch.
 
-### Enable and test
+## Branch policy
 
-1. Open LSPosed and enable **BB UI**.
-2. Scope the module to **Settings** (`com.android.settings`) and **Settings Intelligence** (`com.android.settings.intelligence`).
-3. Reboot.
-4. Open the top-level Settings page with no text field focused.
-5. Press a hardware letter key: search should open with that character prefilled.
-6. Confirm arrow-key navigation still works, and Settings submenus are unaffected.
-7. If there is an issue, disable BB UI in LSPosed and reboot.
-
-## Project status
-
-Research prototype. Compatibility and functionality must be verified on the actual device before calling this a working release.
-
-## Continuous integration
-
-Every push to `main` triggers [Build BB UI debug APK](https://github.com/NeilRuffell/bb-ui/actions). Open the latest successful workflow run and download the `bb-ui-debug-apk` artifact. GitHub Actions artifacts are ZIP files containing the installable `app-debug.apk`. This is a debug build, not a signed production release.
+- `main`: unchanged Settings baseline
+- `dev`: archived/experimental old Recents attempts, not reused
+- `feat/native-vertical-recents`: isolated Recents replacement for testing
