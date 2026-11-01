@@ -4,11 +4,16 @@
 
 The `feat/bb7-shade` branch adds `:bb7shade`, a **third, separate APK**
 (`dev.q25.bb7shade`), alongside `:app` and `:bb7focus`.
-Version `0.3.0-visible-app-rail-dev` is the first **visible partial UI**:
+Version `0.3.1-native-stack-attach-dev` is the first **visible partial UI**:
 it inserts a narrow native BB7 app-icon/count rail into the existing SystemUI
 notification container, and constrains Android's original notification stack
 to the right of it while the phone is unlocked. It does not add another
-window or duplicate native notification rows. **Native rows are deliberately
+window or duplicate native notification rows.
+Version 0.3.1 adds a second attachment path from the verified native
+notification stack's layout callback, scheduled after layout. This covers
+cases where the container inflation hook misses the view. The module logs
+which attachment path actually succeeded and whether the rail is shown.
+ **Native rows are deliberately
 not filtered yet** when an app is highlighted; per-app presentation filtering
 and the separate Quick Settings page remain future work.
 
