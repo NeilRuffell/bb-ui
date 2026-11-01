@@ -18,9 +18,9 @@ remain `com.android.settings` and `com.android.settings.intelligence`.
 
 ## Two-column vertical Recents — native Quickstep adapter (experimental)
 
-**Branch:** `feat/native-vertical-recents`. `main` and the older `dev`
-Recents branch are unchanged. This branch is built from the working Settings
-baseline, not the older Recents experiments.
+**Branch:** `feat/recents-grid-keyboard-focus`, created from the current
+`master` baseline with its working vertical Recents and Settings changes.
+This feature branch leaves `master`, `main` and `dev` unchanged.
 
 **Technical approach (LineageOS 24 Quickstep):**
 
