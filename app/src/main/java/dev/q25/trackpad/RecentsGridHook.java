@@ -51,7 +51,9 @@ public final class RecentsGridHook implements IXposedHookLoadPackage {
 
         final Class<?> recents = XposedHelpers.findClassIfExists(RECENTS, lp.classLoader);
         final Class<?> task = XposedHelpers.findClassIfExists(TASK, lp.classLoader);
-        if (recents == null || task == null) return;
+        final Class<?> paged = XposedHelpers.findClassIfExists(
+                "com.android.launcher3.PagedView", lp.classLoader);
+        if (recents == null || task == null || paged == null) return;
 
         try {
             XposedBridge.hookAllMethods(recents, "onLayout", new XC_MethodHook() {
@@ -77,7 +79,7 @@ public final class RecentsGridHook implements IXposedHookLoadPackage {
                 }
             });
 
-            XposedBridge.hookAllMethods(View.class, "onGenericMotionEvent", new XC_MethodHook() {
+            XposedBridge.hookAllMethods(paged, "onGenericMotionEvent", new XC_MethodHook() {
                 @Override protected void beforeHookedMethod(MethodHookParam p) {
                     ViewGroup root = (ViewGroup) p.thisObject;
                     if (!recents.isInstance(root) || !enabled(root)) return;
