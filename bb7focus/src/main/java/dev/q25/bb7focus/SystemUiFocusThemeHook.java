@@ -110,6 +110,17 @@ public final class SystemUiFocusThemeHook implements IXposedHookLoadPackage {
     }
 
     private static void onFocus(ViewTreeObserver observer, View focused) {
+        if (focused != null) {
+            // Diagnostic only: class names and focus state, never notification text.
+            View nearestRow = findNotificationAncestor(focused);
+            Log.i(TAG, "Focused view=" + focused.getClass().getName()
+                    + " notificationAncestor=" + (nearestRow != null)
+                    + " rowItself=" + (nearestRow == focused)
+                    + " attached=" + focused.isAttachedToWindow()
+                    + " shown=" + focused.isShown());
+        } else {
+            Log.i(TAG, "Focused view=null");
+        }
         Highlight existing = ACTIVE.get(observer);
         if (existing != null && existing.row == focused && focused != null
                 && focused.isAttachedToWindow() && focused.isShown()) return;
@@ -137,6 +148,16 @@ public final class SystemUiFocusThemeHook implements IXposedHookLoadPackage {
         ACTIVE.put(observer, highlight);
         highlight.apply();
         Log.i(TAG, "Native notification row blue focus applied");
+    }
+
+    private static View findNotificationAncestor(View focused) {
+        for (View v = focused; v != null; ) {
+            if (isClassOrSubclass(v.getClass(), NOTIFICATION_ROW)) return v;
+            ViewParent parent = v.getParent();
+            if (!(parent instanceof View)) break;
+            v = (View) parent;
+        }
+        return null;
     }
 
     private static boolean isClassOrSubclass(Class<?> cls, String name) {
