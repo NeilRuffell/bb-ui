@@ -595,6 +595,35 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
                 }
             });
 
+            // Keep Quickstep's own DPAD/TAB focus, snap animations, focus
+            // border, Enter-to-launch and Delete-to-dismiss. Only replace the
+            // destination returned by its grid navigation helper: its stock
+            // top/bottom-row arrays describe the HORIZONTAL tablet grid and
+            // do not represent this portrait ROW-MAJOR two-column layout.
+            Class<?> navDirection = XposedHelpers.findClassIfExists(
+                    "com.android.quickstep.util.TaskGridNavHelper$TaskNavDirection",
+                    loader);
+            if (navDirection != null) {
+                XposedHelpers.findAndHookMethod(recents, "getNextPageInternal",
+                        int.class, navDirection, boolean.class,
+                        new XC_MethodHook() {
+                    @Override protected void beforeHookedMethod(MethodHookParam p) {
+                        ViewGroup root = (ViewGroup) p.thisObject;
+                        if (!active(root)) return;
+                        int delta = (Integer) p.args[0];
+                        String direction = ((Enum<?>) p.args[1]).name();
+                        boolean cycle = (Boolean) p.args[2];
+                        int next = nextGridFocusPage(root, task, direction, delta, cycle);
+                        if (next < 0) return; // fall back to native behavior
+                        p.setResult(next);
+                        Log.w(TAG, "Native grid focus: direction=" + direction
+                                + " targetPage=" + next);
+                    }
+                });
+            } else {
+                Log.e(TAG, "Native task navigation enum absent");
+            }
+
             // Disarm the entry latch as part of the native exit state.
             // The same RecentsView may be reused on the next BlackBerry
             // button press, which must again select page zero.
@@ -618,6 +647,20 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
             Class<?> launcherRecents = XposedHelpers.findClassIfExists(
                     "com.android.quickstep.views.LauncherRecentsView", loader);
             if (launcherRecents != null) {
+                // Stock TOGGLE_WITH_FOCUS/Alt+Tab sets native keyboard focus.
+                // A physical BB overview button normally uses TOGGLE instead;
+                // focus the first native TaskView once that transition has
+                // settled so arrow keys reach RecentsView.dispatchKeyEvent().
+                XposedBridge.hookAllMethods(launcherRecents,
+                        "onStateTransitionComplete", new XC_MethodHook() {
+                    @Override protected void afterHookedMethod(MethodHookParam p) {
+                        ViewGroup root = (ViewGroup) p.thisObject;
+                        if (!active(root) || p.args.length == 0
+                                || !XposedHelpers.getBooleanField(p.args[0],
+                                        "isRecentsViewVisible")) return;
+                        root.post(() -> focusInitialGridTask(root, task));
+                    }
+                });
                 XposedBridge.hookAllMethods(launcherRecents,
                         "onStateTransitionStart", new XC_MethodHook() {
                     @Override protected void beforeHookedMethod(MethodHookParam p) {
@@ -703,6 +746,103 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
      * Using the built-in page-initialized callback also handles task loads
      * occurring after the overview command begins.
      */
+    /**
+     * The rendered grid is row-major: [0,1] [2,3] [4,5] ...
+     * Return the actual child index, not an index from Quickstep's native
+     * HORIZONTAL tablet grid row arrays. The caller retains Quickstep's
+     * snapToPageRelative(), native focus request, key handling and animations.
+     */
+    private static int nextGridFocusPage(ViewGroup root, Class<?> task,
+            String direction, int delta, boolean cycle) {
+        List<View> cards = new ArrayList<>();
+        View clearAll = null;
+        for (int i = 0; i < root.getChildCount(); i++) {
+            View child = root.getChildAt(i);
+            if (task.isInstance(child)) cards.add(child);
+            else if (child.getClass().getName().endsWith(".ClearAllButton")
+                    && child.getVisibility() == View.VISIBLE) clearAll = child;
+        }
+        if (cards.isEmpty()) return -1;
+
+        // A focused TaskView is authoritative even if multiple cards share
+        // a native scroll position and mCurrentPage has not changed yet.
+        View focused = root.findFocus();
+        while (focused != null && focused != root
+                && !task.isInstance(focused) && focused != clearAll) {
+            if (!(focused.getParent() instanceof View)) break;
+            focused = (View) focused.getParent();
+        }
+        int current = cards.indexOf(focused);
+        if (current < 0 && focused == clearAll) current = cards.size();
+        if (current < 0) {
+            int nextPage = (Integer) XposedHelpers.callMethod(root, "getNextPage");
+            current = cards.indexOf(root.getChildAt(nextPage));
+            if (current < 0 && root.getChildAt(nextPage) == clearAll)
+                current = cards.size();
+        }
+        if (current < 0) current = 0;
+
+        int count = cards.size();
+        boolean includeClearAll = clearAll != null && clearAll.isFocusable();
+        int last = includeClearAll ? count : count - 1;
+        int target = current;
+        switch (direction) {
+            case "LEFT":
+                target = current - 1;
+                if (target < 0) target = cycle ? last : 0;
+                break;
+            case "RIGHT":
+                target = current + 1;
+                if (target > last) target = cycle ? 0 : last;
+                break;
+            case "TAB":
+                target = current + (delta < 0 ? -1 : 1);
+                if (target < 0) target = cycle ? last : 0;
+                if (target > last) target = cycle ? 0 : last;
+                break;
+            case "UP":
+                if (current == count) target = count - 1;
+                else target = current >= 2 ? current - 2 : current;
+                break;
+            case "DOWN":
+                if (current < count) {
+                    int below = current + 2;
+                    target = below < count ? below
+                            : includeClearAll ? count : current;
+                }
+                break;
+            default:
+                return -1;
+        }
+        View targetView = target == count ? clearAll : cards.get(target);
+        return root.indexOfChild(targetView);
+    }
+
+    /**
+     * Stock Quickstep sets borders on onStateTransitionComplete(), but its
+     * ordinary overview toggle does not request keyboard focus. Establish
+     * focus only if the view has none; retain existing native focused child.
+     */
+    private static void focusInitialGridTask(ViewGroup root, Class<?> task) {
+        if (!active(root)
+                || !XposedHelpers.getBooleanField(root, "mOverviewStateEnabled")
+                || root.hasFocus()) return;
+        View first = (View) XposedHelpers.callMethod(root, "getFirstTaskView");
+        if (first == null || !task.isInstance(first)) return;
+        try {
+            if (root.isInTouchMode()) {
+                Object viewRoot = XposedHelpers.callMethod(root, "getViewRootImpl");
+                if (viewRoot != null)
+                    XposedHelpers.callMethod(viewRoot, "touchModeChanged", false);
+            }
+            if (first.requestFocus()) {
+                Log.w(TAG, "Native grid keyboard focus initialized");
+            }
+        } catch (Throwable error) {
+            Log.e(TAG, "Native grid initial focus failed", error);
+        }
+    }
+
     /**
      * Inspects the native GroupedTaskInfo without changing the gesture state.
      * 2 = ACTIVITY_TYPE_HOME, 1 = ACTIVITY_TYPE_STANDARD,
