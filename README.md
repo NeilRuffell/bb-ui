@@ -20,19 +20,23 @@ Google Messages or other apps.
 
 ### SystemUI: native notification-row focus
 
-The separate `SystemUiFocusThemeHook` uses the existing ViewTreeObserver focus
-dispatch, without requesting focus or intercepting key presses. When a native
-`ExpandableNotificationRow` itself receives focus, the existing
-`NotificationBackgroundView` draws the BB7 blue gradient **after** its normal
-background and **before** notification content. Text colours are restored on
-focus loss. No native background drawable is replaced. Child action buttons
-and reply fields retain their stock focus appearance.
+The accessibility dump from the Q25 confirms keyboard focus on
+`com.android.systemui:id/expandableNotificationRow`. The LineageOS 24
+`status_bar_notification_row.xml` layout confirms that ID identifies an
+`ExpandableNotificationRow` with its native `NotificationBackgroundView`
+child (`duplicateParentState=true`).
 
-LineageOS 24's Quick Settings tiles use Jetpack Compose (`QSFragmentCompose`
-/`TileGrid`), not the old `QSTileViewImpl`; this phase deliberately does
-**not** hook Compose tiles. SystemUI's keyboard-focusable notification rows
-require on-device validation. If no native notification gains focus, this
-module cannot make it focusable by design.
+The earlier global `ViewTreeObserver` approach missed the focused row.
+Version `0.2.2-native-row-focus-dev` instead reads `row.isFocused()` in
+the native notification background's normal `onDraw` and
+`drawableStateChanged` calls. The same BB7 gradient draws after the
+stock notification background and before notification content. Text colours
+are restored when a native row loses focus. No focus, key, touch, click, or
+scroll properties are changed, and the existing Settings styling is untouched.
+
+Quick Settings tiles are Compose-based and remain outside this phase.
+The updated SystemUI hook is **build-tested only**, pending Q25 visual
+verification.
 
 For SystemUI testing, enable `com.android.systemui` in **BB7 Appearance** in
 Vector, preserving Settings and all existing BB UI scopes, then run:
