@@ -8,26 +8,42 @@ On the Settings homepage, typing a character on a physical alphabetic keyboard o
 
 LSPosed scopes: `com.android.settings` and `com.android.settings.intelligence`.
 
-## Experimental feature: Two visible Recent Apps cards
+## Recent Apps: two native columns and experimental vertical list
 
-The abandoned RecentsGridHook and all of its custom layout, input, translation, scroll and preview code were deleted. The new implementation is `RecentsTwoColumnHook.java` only.
+**Working baseline:** The original native two-panel Recents implementation is preserved on
+`recents-two-up-baseline` (v0.3.0-dev). It displays two complete previews side by side,
+with original horizontal paging, and was confirmed working on the Q25.
 
-The replacement asks Quickstep's existing `PagedView` to show **two native panels horizontally** and adjusts the native task-size Rect to fit two previews. It does not touch `TaskView`, snapshots, click listeners, animations, scrolling, or gesture dispatch. **Horizontal scrolling remains the native Quickstep behavior.** This is not a vertically scrolling grid.
+**New experimental option (v0.4.0-dev):** `RecentsVerticalListHook` puts Quickstep's
+existing two-up TaskView objects into vertically stacked rows. It preserves the existing
+TaskView thumbnail implementations, transforms, click handlers and dismissal listeners.
+It does not reparent tasks, replace previews or modify screenshot data.
 
-**Off by default; untested on the device.** The native two-panel API is present in LineageOS 24 Launcher3 source, but correct Quickstep rendering with two panels has not yet been verified on the Q25.
+Vertical navigation: trackpad wheel; touch drag starting in the background; or
+two-finger drag. One-finger swipes beginning on task previews remain handled by Quickstep.
+This is an experimental geometry/input adaptation over Quickstep's horizontal PagedView,
+**not** a native vertical Recents mode. Native animations, live tiles, screen rotation,
+and task dismissal still require device testing.
 
-LSPosed scope additionally needs the package implementing the **system Quickstep overview**. It does not require changing the default home launcher.
-
-Enable or disable:
+Enable both flags:
 
 ```sh
-adb shell settings put global bb_ui_recents_grid 0    # retire old flag
-adb shell settings put global bb_ui_recents_two_up 1  # enable new two-panel experiment
-# Disable:
-adb shell settings put global bb_ui_recents_two_up 0
+adb shell settings put global bb_ui_recents_two_up 1
+adb shell settings put global bb_ui_recents_vertical_list 1
+adb reboot
 ```
 
-Restart Quickstep (or reboot) after changing the setting.
+**Immediate fallback to the tested horizontal two-up implementation:**
+
+```sh
+adb shell settings put global bb_ui_recents_vertical_list 0
+adb reboot
+```
+
+All Recents work remains on `dev`. `master` is unchanged.
+
+LSPosed requires scope to the installed **Quickstep/Recents provider** (plus Settings scopes
+for the independent Settings search feature). It does not require changing the home launcher.
 
 ## Local build
 
