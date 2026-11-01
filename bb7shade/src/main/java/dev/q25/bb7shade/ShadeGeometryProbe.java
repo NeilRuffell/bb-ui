@@ -77,6 +77,10 @@ final class ShadeGeometryProbe {
     private static final Map<Object, Long> LAST_ALPHA_TIME =
             Collections.synchronizedMap(new WeakHashMap<>());
     private static final long ALPHA_INTERVAL_MS = 2000L;
+    private static final Map<Object, Boolean> LAST_PANEL_QS =
+            Collections.synchronizedMap(new WeakHashMap<>());
+    private static final Map<Object, Long> LAST_PANEL_SAMPLE =
+            Collections.synchronizedMap(new WeakHashMap<>());
 
     static void onControllerAlpha(Object controller) {
         Object viewObject;
@@ -113,6 +117,13 @@ final class ShadeGeometryProbe {
             Object qs = XposedHelpers.getObjectField(panel, "mQsController");
             boolean qsExpanded = qs != null &&
                     XposedHelpers.getBooleanField(qs, "mFullyExpanded");
+            long now = SystemClock.uptimeMillis();
+            Boolean previous = LAST_PANEL_QS.get(panel);
+            Long lastTime = LAST_PANEL_SAMPLE.get(panel);
+            if (previous != null && previous == qsExpanded
+                    && lastTime != null && now - lastTime < 2500L) return;
+            LAST_PANEL_QS.put(panel, qsExpanded);
+            LAST_PANEL_SAMPLE.put(panel, now);
             Log.i(TAG, "Native shade expansion: showingKeyguard=" + showingKeyguard
                     + " fullyExpandedQS=" + qsExpanded
                     + " appRailActive=" + ShadeRailHost.isRailActive());
