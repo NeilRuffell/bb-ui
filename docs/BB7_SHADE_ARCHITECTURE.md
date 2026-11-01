@@ -53,7 +53,11 @@ interactive behind the replacement after takeover is enabled.
 2. **Live index and state model (v0.2; implemented):** Hook the
    already-constructed ShadeListBuilder's `dispatchOnBeforeRenderList`
    callback (the v0.1 pipeline constructor observer did not receive events
-   on the Q25); preserve per-app ordered notification references. Probe the
+   on the Q25); preserve per-app ordered notification references.
+   Version 0.2.1 also builds a fallback snapshot from *existing native*
+   `ExpandableNotificationRow` children on stack layout/add/remove when the
+   callback has not fired since process startup. Once finalized data arrives,
+   the authoritative pipeline snapshot supersedes native-row fallback. Probe the
    actual native stack geometry and maintain a tested two-page navigation
    state model. This version is intentionally headless: neither stock UI
    suppression nor a second notification pane is activated.
