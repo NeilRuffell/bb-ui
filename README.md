@@ -38,6 +38,15 @@ baseline, not the older Recents experiments.
   existing `getPageScrolls()` grid geometry. The original pager still
   handles scrolling, fling, and snap.
 - Use native two-panel grouping and TaskView measurement.
+- Enter Overview at its **native page zero**, resetting its previous page
+  selection at the start of the state transition or gesture. Never snap back
+  after the overview is displayed.
+- Fix `TaskViewSimulator.calculateTaskSize()` to use the same first-column,
+  first-row card geometry as the grid; the app-window surface now has a
+  grid destination **before** its opening animation is created.
+- Prevent stock non-grid horizontal task translations at the TaskView setter,
+  instead of subtracting them inside `layoutNativeTasks()`. TaskView's native
+  X/Y translation animations are left intact.
 - At `RecentsView.getPageScrolls()`, while Quickstep is already laying out
   children, arrange existing TaskViews in two columns and return matching
   vertical page offsets. No post-layout card offsets or manual scrollY state.
@@ -91,6 +100,10 @@ A gesture over the grid should log
 A zero `maxScroll` means all rows fit on screen; scrolling is not possible
 until there are more recent tasks. The `Native pager bounds: min=0 max=...` diagnostic must now
 match the grid's `maxScroll=...` when the native layout is active.
+The entry animation path logs `Native entry animation target=[...]`
+when its simulator destination is configured. On overview entry the native
+page-selection path logs `Native overview initial page=0 scrollY=0`.
+If these messages are missing, the relevant paths did not execute.
 Check for `Native bidirectional task dismissal registered` and the per-swipe `Native dismiss drag direction=left/right` messages. A bounds mismatch is a bug in the hook; no pager touch event suggests
 the parent did not receive the gesture. Android runtime validation
 is still required even if Gradle succeeds.
@@ -107,6 +120,8 @@ fails, the error log identifies the missing class or hook.
 - Tapping an app launches that exact task
 - Swipe-to-dismiss and Clear All work
 - Running task preview is not duplicated/overlaid by a live tile
+- Recents always opens at the top of the list; repeated entry from a previous bottom scroll works
+- Entering from an app shrinks and moves directly into that app's grid card without a carousel detour or pop
 - Recents opens and closes reliably; no horizontal snap
 - App task order and thumbnail loading update after dismiss
 - Rotation, accessibility, keyboard focus and Android back/home still work
