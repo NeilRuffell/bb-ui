@@ -2,7 +2,7 @@ name: Build BB UI debug APK
 
 on:
   push:
-    branches: [main, feat/native-vertical-recents, feat/settings-hide-idle-search-bar]
+    branches: [main, feat/native-vertical-recents, feat/settings-hide-idle-search-bar, feat/recents-grid-keyboard-focus]
   pull_request:
   workflow_dispatch:
 
