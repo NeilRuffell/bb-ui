@@ -1,6 +1,7 @@
 package dev.q25.trackpad;
 
 import android.graphics.Rect;
+import android.content.Context;
 import android.provider.Settings;
 import android.util.Log;
 import android.view.View;
@@ -17,6 +18,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.WeakHashMap;
 import java.util.concurrent.atomic.AtomicReference;
+import java.lang.ref.WeakReference;
 
 import de.robv.android.xposed.IXposedHookLoadPackage;
 import de.robv.android.xposed.XC_MethodHook;
@@ -57,6 +59,9 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
     private static final WeakHashMap<Object, Integer> DISMISS_SWIPE_SIGNS = new WeakHashMap<>();
     private static final ThreadLocal<Integer> ACTIVE_NATIVE_DISMISS_SIGN = new ThreadLocal<>();
     private static final WeakHashMap<View, Boolean> SCREENSHOT_PENDING = new WeakHashMap<>();
+    // Reference only: simulator exists independently of RecentsView's layout.
+    private static WeakReference<View> currentRecents = new WeakReference<>(null);
+    private static boolean firstEntryRectLogged;
 
     @Override public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lp) {
         if (!TARGET.equals(lp.packageName)) return;
@@ -374,6 +379,75 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
                 }
             });
 
+            // The live app entrance animator has its OWN task destination.
+            // Quickstep's TaskViewSimulator calculates an unmodified carousel
+            // rectangle via BaseContainerInterface, independently of our
+            // RecentsView.getTaskSize() hook. That causes its remote app leash
+            // to shrink toward the old carousel position and then pop when
+            // the real grid TaskView is drawn.
+            //
+            // Correct the actual simulator destination rectangle before its
+            // animation is constructed, using the same card measurement and
+            // first-row origin as layoutNativeTasks(). No post-animation
+            // translation, overlay or visibility workaround is involved.
+            Class<?> simulator = XposedHelpers.findClassIfExists(
+                    "com.android.quickstep.util.TaskViewSimulator", loader);
+            if (simulator != null) {
+                XposedBridge.hookAllMethods(simulator, "calculateTaskSize",
+                        new XC_MethodHook() {
+                    @Override protected void afterHookedMethod(MethodHookParam p) {
+                        Object sim = p.thisObject;
+                        if (XposedHelpers.getBooleanField(sim, "mIsDesktopTask")
+                                || XposedHelpers.getObjectField(sim, "mSplitBounds") != null)
+                            return;
+                        Context context = (Context) XposedHelpers.getObjectField(
+                                sim, "mContext");
+                        if (!active(context)) return;
+                        Rect full = (Rect) XposedHelpers.getObjectField(
+                                sim, "mFullTaskSize");
+                        if (full == null || full.isEmpty()) return;
+                        Object dp = XposedHelpers.getObjectField(sim, "mDp");
+                        if (dp == null) return;
+                        Object properties = XposedHelpers.callMethod(dp,
+                                "getDeviceProperties");
+                        int screenWidth = (Integer) XposedHelpers.callMethod(
+                                properties, "getWidthPx");
+                        View root = currentRecents.get();
+                        int rootWidth = root != null && root.getWidth() > 0
+                                ? root.getWidth() : screenWidth;
+                        Rect target = firstGridCell(full, rootWidth,
+                                context.getResources().getDisplayMetrics().density);
+                        if (target.isEmpty()) return;
+                        full.set(target);
+                        ((Rect) XposedHelpers.getObjectField(sim, "mTaskRect"))
+                                .set(target);
+                        ((Rect) XposedHelpers.getObjectField(sim, "mCarouselTaskSize"))
+                                .set(target);
+                        // The simulator recomputes its thumbnail matrix and
+                        // fullscreen pivot from the new destination.
+                        XposedHelpers.setBooleanField(sim, "mLayoutValid", false);
+                        if (!firstEntryRectLogged) {
+                            firstEntryRectLogged = true;
+                            Log.w(TAG, "Native entry animation target=" + target);
+                        }
+                    }
+                });
+            } else {
+                Log.w(TAG, "TaskViewSimulator absent; native entry animation unchanged");
+            }
+
+            // Prevent the stock carousel's per-task X accumulation at source.
+            // The two-column grid itself supplies the exact child positions;
+            // subtracting already-applied translations in layout() was a
+            // compensation and caused inconsistent animation geometry.
+            XposedBridge.hookAllMethods(task, "setNonGridTranslationX",
+                    new XC_MethodHook() {
+                @Override protected void beforeHookedMethod(MethodHookParam p) {
+                    View card = (View) p.thisObject;
+                    if (active(card)) p.args[0] = 0f;
+                }
+            });
+
             // Resize native TaskViews via Quickstep's existing updateTaskSize().
             XposedHelpers.findAndHookMethod(recents, "getTaskSize", Rect.class,
                     new XC_MethodHook() {
@@ -385,13 +459,14 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
                     int width = root.getWidth() > 0
                             ? root.getWidth() : root.getResources()
                                     .getDisplayMetrics().widthPixels;
-                    int gap = dp(root, 8);
-                    int cardWidth = (width - gap * 3) / 2;
-                    if (cardWidth <= 0 || size.width() <= 0) return;
-                    int height = Math.max(1, Math.round(size.height()
-                            * cardWidth / (float) size.width()));
-                    int top = size.centerY() - height / 2;
-                    size.set(gap, top, gap + cardWidth, top + height);
+                    Rect cell = firstGridCell(size, width,
+                            root.getResources().getDisplayMetrics().density);
+                    if (cell.isEmpty()) return;
+                    // The card dimensions must match the simulator target.
+                    // Preserve Quickstep's logical vertical alignment; only
+                    // the child layout sets its final grid row position.
+                    int top = size.centerY() - cell.height() / 2;
+                    size.set(cell.left, top, cell.right, top + cell.height());
                 }
             });
 
@@ -465,6 +540,7 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
                 @Override protected void afterHookedMethod(MethodHookParam p) {
                     View root = (View) p.thisObject;
                     if (!active(root)) return;
+                    currentRecents = new WeakReference<>(root);
                     if (!firstLayoutLogged) {
                         firstLayoutLogged = true;
                         Object orientation = XposedHelpers.getObjectField(
@@ -561,9 +637,13 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
     }
 
     private static boolean active(View view) {
+        return active(view.getContext());
+    }
+
+    private static boolean active(Context context) {
         if (enabled == -1) {
             try {
-                enabled = Settings.Global.getInt(view.getContext()
+                enabled = Settings.Global.getInt(context
                         .getContentResolver(), FLAG, 0) == 1 ? 1 : 0;
             } catch (Throwable error) {
                 enabled = 0; // fail closed: untouched native overview
@@ -703,11 +783,11 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
             View card = cards.get(i);
             int col = i % 2;
             int row = i / 2;
+            // Layout coordinates are authoritative. Native animations own
+            // translationX/Y; never cancel those transforms inside layout.
             int x = gap + col * (width + gap)
-                    + (width - card.getMeasuredWidth()) / 2
-                    - Math.round(card.getTranslationX());
-            int y = gap + row * rowStep
-                    - Math.round(card.getTranslationY());
+                    + (width - card.getMeasuredWidth()) / 2;
+            int y = gap + row * rowStep;
             if (place) card.layout(x, y, x + card.getMeasuredWidth(),
                     y + card.getMeasuredHeight());
         }
@@ -739,6 +819,18 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
             }
         }
         return changed;
+    }
+
+    /** Shared source-of-truth for grid card measurement and animation landing. */
+    private static Rect firstGridCell(Rect nativeTaskSize, int rootWidth,
+            float density) {
+        if (nativeTaskSize == null || nativeTaskSize.isEmpty()) return new Rect();
+        int gap = Math.round(8f * density);
+        int cardWidth = (rootWidth - gap * 3) / 2;
+        if (cardWidth <= 0) return new Rect();
+        int cardHeight = Math.max(1, Math.round(nativeTaskSize.height()
+                * cardWidth / (float) nativeTaskSize.width()));
+        return new Rect(gap, gap, gap + cardWidth, gap + cardHeight);
     }
 
     private static int dp(View view, int size) {
