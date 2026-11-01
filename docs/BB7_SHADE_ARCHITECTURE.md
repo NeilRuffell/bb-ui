@@ -75,6 +75,11 @@ interactive behind the replacement after takeover is enabled.
    experimental layout is enabled by default and can be disabled before
    process restart with `adb shell setprop debug.bb7shade.layout false`.
    The rail is hidden and the original stack layout restored on keyguard.
+   Version 0.3.4 attempts to collapse native fully expanded Quick
+   Settings when the experimental notification rail is active. This uses
+   SystemUI's own closeQs() and does not create or move native rows.
+   It also logs bounded stack/QS geometry for on-device verification of
+   card visibility. Separate QS page wiring remains pending.
    Version 0.3.3 reads notifyKeyguardState(showing, occluded)'s showing
    argument directly, since the optimized Q25 runtime no longer has
    KeyguardStateControllerImpl.isShowing(). The shade-expansion observer

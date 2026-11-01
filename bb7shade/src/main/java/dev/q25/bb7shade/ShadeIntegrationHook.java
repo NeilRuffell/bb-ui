@@ -43,7 +43,7 @@ public final class ShadeIntegrationHook implements IXposedHookLoadPackage {
     @Override
     public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lp) {
         if (!PACKAGE.equals(lp.packageName) || !PACKAGE.equals(lp.processName)) return;
-        Log.i(TAG, "BB7 Shade stage 3.3 loaded; keyguard callback argument reader");
+        Log.i(TAG, "BB7 Shade stage 3.4 loaded; native QS collapse and stack diagnostics");
         observeFinalRenderList(lp);
         observeShadeHost(lp);
         observeNativeStack(lp);
@@ -168,6 +168,7 @@ public final class ShadeIntegrationHook implements IXposedHookLoadPackage {
                                             keyguard, "mShowing");
                                     ShadeRailHost.onSystemUiKeyguardState(
                                             showing, "shade-expansion");
+                                    ShadeQsPageBridge.onShadeExpansion(param.thisObject, showing);
                                 } catch (Throwable error) {
                                     // Do not interrupt stock shade expansion.
                                     if (!sPanelKeyguardReadWarningLogged) {
@@ -203,6 +204,7 @@ public final class ShadeIntegrationHook implements IXposedHookLoadPackage {
                     if (!(param.thisObject instanceof View)) return;
                     View view = (View) param.thisObject;
                     if (view.getWidth() <= 0 || view.getHeight() <= 0) return;
+                    ShadeGeometryProbe.onStackLayout(view);
                     // Only the actual native stack is touched. Keyguard
                     // transitions restore the platform's original layout.
                     try {

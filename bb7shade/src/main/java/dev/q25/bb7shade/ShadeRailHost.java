@@ -285,6 +285,16 @@ final class ShadeRailHost {
         }
     }
 
+    static boolean isRailActive() {
+        synchronized (HOSTS) {
+            for (WeakReference<ShadeRailHost> ref : HOSTS.values()) {
+                ShadeRailHost host = ref.get();
+                if (host != null && host.railVisible && host.rail.isShown()) return true;
+            }
+        }
+        return false;
+    }
+
     private void refreshKeyguardState() {
         KeyguardManager keyguard = (KeyguardManager)
                 parent.getContext().getSystemService(Context.KEYGUARD_SERVICE);

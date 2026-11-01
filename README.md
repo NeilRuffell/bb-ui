@@ -4,11 +4,21 @@
 
 The `feat/bb7-shade` branch adds `:bb7shade`, a **third, separate APK**
 (`dev.q25.bb7shade`), alongside `:app` and `:bb7focus`.
-Version `0.3.3-keyguard-callback-dev` is the first **visible partial UI**:
+Version `0.3.4-native-qs-collapse-dev` is the first **visible partial UI**:
 it inserts a narrow native BB7 app-icon/count rail into the existing SystemUI
 notification container, and constrains Android's original notification stack
 to the right of it while the phone is unlocked. It does not add another
 window or duplicate native notification rows.
+Version 0.3.4 addresses the Q25 report that only the left icon rail and
+stock QS appear, with no visible notification rows. When the experimental
+rail is visible and native QS is fully expanded, it asks SystemUI's own
+`QuickSettingsControllerImpl.closeQs()` to restore the notification
+presentation (no manual manipulation of notification card geometry).
+It also logs bounded `Shade presentation: ...` diagnostics with native
+QS fullscreen state, stack alpha/visibility, and first-row position.
+Quick Settings page routing is not yet implemented. This change should
+be validated on the device before further UI alterations.
+
 Version 0.3.3 fixes an Android 17 optimization mismatch: the runtime no longer exposes KeyguardStateControllerImpl.isShowing(). The hook now reads the showing boolean directly from notifyKeyguardState() and uses the controller's backing field during shade expansion. Version 0.3.2 began observing SystemUI's native keyguard state and shade expansion lifecycle, so a rail mounted while the device initially reports locked is re-evaluated when the shade opens or the phone unlocks. The rail remains hidden while the lock screen is active.
 Version 0.3.1 adds a second attachment path from the verified native
 notification stack's layout callback, scheduled after layout. This covers
