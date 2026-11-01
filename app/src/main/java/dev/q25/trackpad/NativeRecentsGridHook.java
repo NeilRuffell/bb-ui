@@ -595,6 +595,21 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
                 }
             });
 
+            // The stock ClearAllButton must remain owned by Quickstep so
+            // its task lifecycle and child indexing stay intact. Suppress
+            // only its interaction and rendering, and remove its extra grid
+            // space. applyLoadPlan() removes/re-adds the same native control,
+            // so enforce this at the native child-addition boundary.
+            XposedBridge.hookAllMethods(recents, "onViewAdded",
+                    new XC_MethodHook() {
+                @Override protected void afterHookedMethod(MethodHookParam p) {
+                    ViewGroup root = (ViewGroup) p.thisObject;
+                    if (!active(root) || p.args.length == 0
+                            || !(p.args[0] instanceof View)) return;
+                    suppressClearAll((View) p.args[0]);
+                }
+            });
+
             // Keep Quickstep's own DPAD/TAB focus, snap animations, focus
             // border, Enter-to-launch and Delete-to-dismiss. Only replace the
             // destination returned by its grid navigation helper: its stock
@@ -647,6 +662,22 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
             Class<?> launcherRecents = XposedHelpers.findClassIfExists(
                     "com.android.quickstep.views.LauncherRecentsView", loader);
             if (launcherRecents != null) {
+                // The stock launcher may re-enable scrolling to Clear All
+                // when entering Overview. Keep the control disabled without
+                // changing its internal task-list ownership.
+                XposedBridge.hookAllMethods(launcherRecents,
+                        "setOverviewStateEnabled", new XC_MethodHook() {
+                    @Override protected void afterHookedMethod(MethodHookParam p) {
+                        ViewGroup root = (ViewGroup) p.thisObject;
+                        if (!active(root) || p.args.length == 0
+                                || !Boolean.TRUE.equals(p.args[0])) return;
+                        suppressClearAll((View) XposedHelpers.callMethod(
+                                root, "getClearAllButton"));
+                        XposedHelpers.callMethod(root,
+                                "setDisallowScrollToClearAll", true);
+                    }
+                });
+
                 // Stock TOGGLE_WITH_FOCUS/Alt+Tab sets native keyboard focus.
                 // A physical BB overview button normally uses TOGGLE instead;
                 // focus the first native TaskView once that transition has
@@ -746,6 +777,16 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
      * Using the built-in page-initialized callback also handles task loads
      * occurring after the overview command begins.
      */
+    /** Suppress the native Clear All control without removing its TaskView siblings. */
+    private static void suppressClearAll(View view) {
+        if (view == null || !view.getClass().getName().endsWith(".ClearAllButton"))
+            return;
+        view.setFocusable(false);
+        view.setFocusableInTouchMode(false);
+        view.setClickable(false);
+        view.setVisibility(View.GONE);
+    }
+
     /**
      * The rendered grid is row-major: [0,1] [2,3] [4,5] ...
      * Return the actual child index, not an index from Quickstep's native
@@ -755,67 +796,55 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
     private static int nextGridFocusPage(ViewGroup root, Class<?> task,
             String direction, int delta, boolean cycle) {
         List<View> cards = new ArrayList<>();
-        View clearAll = null;
         for (int i = 0; i < root.getChildCount(); i++) {
             View child = root.getChildAt(i);
             if (task.isInstance(child)) cards.add(child);
-            else if (child.getClass().getName().endsWith(".ClearAllButton")
-                    && child.getVisibility() == View.VISIBLE) clearAll = child;
         }
         if (cards.isEmpty()) return -1;
 
         // A focused TaskView is authoritative even if multiple cards share
         // a native scroll position and mCurrentPage has not changed yet.
         View focused = root.findFocus();
-        while (focused != null && focused != root
-                && !task.isInstance(focused) && focused != clearAll) {
+        while (focused != null && focused != root && !task.isInstance(focused)) {
             if (!(focused.getParent() instanceof View)) break;
             focused = (View) focused.getParent();
         }
         int current = cards.indexOf(focused);
-        if (current < 0 && focused == clearAll) current = cards.size();
         if (current < 0) {
             int nextPage = (Integer) XposedHelpers.callMethod(root, "getNextPage");
             current = cards.indexOf(root.getChildAt(nextPage));
-            if (current < 0 && root.getChildAt(nextPage) == clearAll)
-                current = cards.size();
         }
         if (current < 0) current = 0;
 
         int count = cards.size();
-        boolean includeClearAll = clearAll != null && clearAll.isFocusable();
-        int last = includeClearAll ? count : count - 1;
+        int last = count - 1;
         int target = current;
         switch (direction) {
             case "LEFT":
-                target = current - 1;
-                if (target < 0) target = cycle ? last : 0;
+                // The leftmost card in each row has no LEFT neighbor.
+                if ((current & 1) != 0) target = current - 1;
                 break;
             case "RIGHT":
-                target = current + 1;
-                if (target > last) target = cycle ? 0 : last;
+                // The rightmost card in each row has no RIGHT neighbor.
+                if ((current & 1) == 0 && current + 1 < count)
+                    target = current + 1;
                 break;
             case "TAB":
+                // TAB remains a linear traversal and may change rows.
                 target = current + (delta < 0 ? -1 : 1);
                 if (target < 0) target = cycle ? last : 0;
                 if (target > last) target = cycle ? 0 : last;
                 break;
             case "UP":
-                if (current == count) target = count - 1;
-                else target = current >= 2 ? current - 2 : current;
+                if (current >= 2) target = current - 2;
                 break;
             case "DOWN":
-                if (current < count) {
-                    int below = current + 2;
-                    target = below < count ? below
-                            : includeClearAll ? count : current;
-                }
+                if (current + 2 < count) target = current + 2;
                 break;
             default:
                 return -1;
         }
-        View targetView = target == count ? clearAll : cards.get(target);
-        return root.indexOfChild(targetView);
+        return root.indexOfChild(cards.get(target));
     }
 
     /**
@@ -1072,7 +1101,7 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
         int rowStep = rowHeight + gap;
         int rows = (cards.size() + 1) / 2;
         int contentHeight = gap + rows * rowStep + gap;
-        if (clearAll != null)
+        if (clearAll != null && clearAll.getVisibility() == View.VISIBLE)
             contentHeight += clearAll.getMeasuredHeight() + gap;
         int maxScroll = Math.max(0, contentHeight - root.getHeight());
         // PagedView.onLayout invokes getPageScrolls() before computing its
@@ -1102,7 +1131,7 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
             if (place) card.layout(x, y, x + card.getMeasuredWidth(),
                     y + card.getMeasuredHeight());
         }
-        if (clearAll != null && place) {
+        if (clearAll != null && clearAll.getVisibility() == View.VISIBLE && place) {
             int x = (root.getWidth() - clearAll.getMeasuredWidth()) / 2;
             int y = gap + rows * rowStep;
             clearAll.layout(x, y, x + clearAll.getMeasuredWidth(),
