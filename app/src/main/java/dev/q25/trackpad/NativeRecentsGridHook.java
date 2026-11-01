@@ -62,6 +62,7 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
     // Reference only: simulator exists independently of RecentsView's layout.
     private static WeakReference<View> currentRecents = new WeakReference<>(null);
     private static final WeakHashMap<Object, Rect> LOGGED_ANIMATION_TARGETS = new WeakHashMap<>();
+    private static final WeakHashMap<Object, Boolean> HOME_SIMULATORS = new WeakHashMap<>();
     private static final WeakHashMap<View, Boolean> OVERVIEW_ENTRY_SELECTED = new WeakHashMap<>();
 
     @Override public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lp) {
@@ -394,11 +395,36 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
             Class<?> simulator = XposedHelpers.findClassIfExists(
                     "com.android.quickstep.util.TaskViewSimulator", loader);
             if (simulator != null) {
+                // A home-to-overview transition may include the Home window
+                // itself in RemoteAnimationTargets. It is not a recent app,
+                // so never redirect that window into a grid thumbnail.
+                // The native setPreview() entry point identifies its task
+                // before calculating the final simulator geometry.
+                XposedBridge.hookAllMethods(simulator, "setPreview",
+                        new XC_MethodHook() {
+                    @Override protected void beforeHookedMethod(MethodHookParam p) {
+                        if (p.args.length == 0 || p.args[0] == null) return;
+                        Object target = p.args[0];
+                        Object taskInfo = XposedHelpers.getObjectField(
+                                target, "taskInfo");
+                        boolean home = taskInfo != null
+                                && (Integer) XposedHelpers.callMethod(
+                                        taskInfo, "getActivityType") == 2;
+                        if (home) {
+                            HOME_SIMULATORS.put(p.thisObject, Boolean.TRUE);
+                            Log.w(TAG, "Native HOME target: leaving simulator "
+                                    + "geometry unchanged");
+                        } else {
+                            HOME_SIMULATORS.remove(p.thisObject);
+                        }
+                    }
+                });
                 XposedBridge.hookAllMethods(simulator, "calculateTaskSize",
                         new XC_MethodHook() {
                     @Override protected void afterHookedMethod(MethodHookParam p) {
                         Object sim = p.thisObject;
-                        if (XposedHelpers.getBooleanField(sim, "mIsDesktopTask")
+                        if (HOME_SIMULATORS.containsKey(sim)
+                                || XposedHelpers.getBooleanField(sim, "mIsDesktopTask")
                                 || XposedHelpers.getObjectField(sim, "mSplitBounds") != null)
                             return;
                         Context context = (Context) XposedHelpers.getObjectField(
