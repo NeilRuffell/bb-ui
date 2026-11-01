@@ -1,5 +1,66 @@
 # BB UI
 
+## BB7 Appearance — Settings blue focus highlight (experimental)
+
+The `feat/bb7-focus-settings` branch builds a **separate, compatible Vector/LSPosed APK**
+named **BB7 Appearance** from the Gradle target `:bb7focus`. The original `:app`
+and its behavior hooks are unchanged.
+
+BB7 Appearance observes Android Settings' **existing** focus changes and
+draws a BlackBerry OS 7-inspired blue gradient on the currently focused
+AndroidX Preference row, making its text readable against the blue.
+Focus order, key handling, touch handling, selection, scrolling, and
+button behavior are **not intentionally changed**. It does not add focus
+to an item that lacks keyboard focus. On focus loss, the row background,
+padding and text colours are restored.
+
+**Current scope:** `com.android.settings` only. This does not change
+SystemUI, Settings Intelligence, Google Messages or other apps.
+Non-AndroidX preference lists and custom-rendered views are excluded
+until tested. The module needs **device validation on Q25/LineageOS 24.0**.
+
+### Build and test
+
+```sh
+git fetch origin
+git switch feat/bb7-focus-settings
+git pull --ff-only
+./gradlew :bb7focus:assembleDebug
+adb install -r bb7focus/build/outputs/apk/debug/bb7focus-debug.apk
+```
+
+In Vector, enable **BB7 Appearance**, and scope it to **Settings**
+(`com.android.settings`) only. Leave the existing **BB UI** module
+enabled with its existing scopes.
+
+Then restart the Settings app, **not the whole phone**:
+
+```sh
+adb shell am force-stop com.android.settings
+adb shell am start -a android.settings.SETTINGS
+```
+
+Use the Q25 keyboard/trackpad to move focus across Settings rows. The
+current row should become blue; the previous row should immediately
+return to its normal background. Verify switches, touch, Enter/Back,
+scrolling and the existing type-to-search. If no blue appears, retrieve
+diagnostics:
+
+```sh
+adb logcat -d -s BB7-Focus:I '*:S'
+```
+
+To roll back, disable **BB7 Appearance** in Vector, then force-stop and
+restart Settings. The module does not modify persisted Android settings.
+
+**Note:** A successful build does not verify which controls LineageOS
+marks focusable. This module styles only detected focus; it does not
+alter navigation or force otherwise-unfocusable controls to gain focus.
+
+---
+
+# BB UI
+
 Vector/LSPosed module for physical-keyboard Android improvements.
 
 ## Settings type-to-search
