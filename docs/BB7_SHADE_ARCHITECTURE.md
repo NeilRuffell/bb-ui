@@ -67,12 +67,24 @@ interactive behind the replacement after takeover is enabled.
    Version 0.2.3 avoids reliance on `getEntryAdapter()` (missing on the
    tested Q25 runtime) by using existing `mEntryAdapter`/`mEntry` fields
    where available, without modifying native notification objects.
-3. **Replaceable host and native notification pane:** Develop and test
-   the single-surface two-column interface and native notification row
-   handoff; detect actual Q25 shade mode before activating.
-4. **Quick Settings right page:** Integrate existing Compose QS
+3. **Visible single-container prototype (v0.3; implemented):** Mount
+   the existing app rail directly as a child of the stock
+   `NotificationsQuickSettingsContainer`, then constrain the original
+   `NotificationStackScrollLayout` to the right. Use its original native
+   notification rows and actions. Do not create a second window. The
+   experimental layout is enabled by default and can be disabled before
+   process restart with `adb shell setprop debug.bb7shade.layout false`.
+   The rail is hidden and the original stack layout restored on keyguard.
+   **Known incomplete:** native notifications are not yet filtered on
+   application selection, the original QQS is still present, and page
+   navigation is not wired. This intentionally exposes a partial UI for
+   physical Q25 testing before deeper SystemUI integration.
+4. **Native notification filtering:** Filter only the visible native
+   presentation, preserving grouping, reply, heads-up and dismissal
+   under platform control, with reliable restoration.
+5. **Quick Settings right page:** Integrate existing Compose QS
    controllers/tiles and explicit keyboard/trackpad page navigation.
-5. **Atomic takeover:** Enable custom shade **only** after both pages and
+6. **Atomic takeover:** Enable custom shade **only** after both pages and
    notification actions are functional. Then suppress stock visual
    presentation and test expansion, collapse, lock screen, shade gestures,
    lifecycle restart and rollback. No simultaneous stock/custom surfaces.

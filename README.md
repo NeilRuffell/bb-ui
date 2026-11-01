@@ -4,11 +4,37 @@
 
 The `feat/bb7-shade` branch adds `:bb7shade`, a **third, separate APK**
 (`dev.q25.bb7shade`), alongside `:app` and `:bb7focus`.
-Version `0.2.3-native-fields-dev` remains **headless**: it observes
+Version `0.3.0-visible-app-rail-dev` is the first **visible partial UI**:
+it inserts a narrow native BB7 app-icon/count rail into the existing SystemUI
+notification container, and constrains Android's original notification stack
+to the right of it while the phone is unlocked. It does not add another
+window or duplicate native notification rows. **Native rows are deliberately
+not filtered yet** when an app is highlighted; per-app presentation filtering
+and the separate Quick Settings page remain future work.
+
+Disable the experimental layout immediately via ADB (no reboot):
+
+```sh
+adb shell setprop debug.bb7shade.layout false
+adb shell am crash com.android.systemui
+```
+
+Restore the experimental layout:
+
+```sh
+adb shell setprop debug.bb7shade.layout true
+adb shell am crash com.android.systemui
+```
+
+The app rail is hidden and the original notification stack constraints are
+restored on the lock screen. The current layout is an **early test** and will
+still show stock Quick Settings. If a device behaves unexpectedly, use the
+rollback property above or disable the BB7 Shade SystemUI scope in Vector.
+
+The module also observes
 the finalized SystemUI notification render list after filtering/grouping,
 preserves the ordered notification references for each application, detects
-the native shade window and logs notification stack geometry. It does **not** add a new shade, intercept input, hide the stock
-shade or change its notifications. The future replacement is deliberately
+the native shade window and logs notification stack geometry. It does **not** add another shade window, intercept system input, or alter notification contents. The future replacement is deliberately
 gated on both pages being functional, avoiding two competing interfaces.
 
 Build and install only the new module:

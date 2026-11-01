@@ -119,6 +119,10 @@ final class ShadeNotificationIndex {
         Snapshot next = new Snapshot(byApp);
         Snapshot previous = snapshot;
         snapshot = next;
+        if (!next.appCounts.equals(previous.appCounts)
+                || next.notificationCount != previous.notificationCount) {
+            ShadeRailHost.onSnapshotChanged(next);
+        }
         if (!nativeRowsLogged || !next.appCounts.equals(previous.appCounts)
                 || next.notificationCount != previous.notificationCount) {
             nativeRowsLogged = true;
@@ -232,6 +236,7 @@ final class ShadeNotificationIndex {
         Snapshot previous = snapshot;
         snapshot = next;
         finalizedListObserved = true;
+        ShadeRailHost.onSnapshotChanged(next);
         boolean isFirst = firstUpdate;
         firstUpdate = false;
         if (isFirst || !next.appCounts.equals(previous.appCounts)

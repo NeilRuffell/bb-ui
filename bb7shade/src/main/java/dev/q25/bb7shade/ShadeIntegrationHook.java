@@ -41,10 +41,11 @@ public final class ShadeIntegrationHook implements IXposedHookLoadPackage {
     @Override
     public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lp) {
         if (!PACKAGE.equals(lp.packageName) || !PACKAGE.equals(lp.processName)) return;
-        Log.i(TAG, "BB7 Shade stage 2 loaded; stock shade remains the only visible UI");
+        Log.i(TAG, "BB7 Shade stage 3 loaded; native partial layout gated by debug.bb7shade.layout");
         observeFinalRenderList(lp);
         observeShadeHost(lp);
         observeNativeStack(lp);
+        ShadeRailHost.installHooks(lp.classLoader);
     }
 
     /**
@@ -118,6 +119,13 @@ public final class ShadeIntegrationHook implements IXposedHookLoadPackage {
                     if (!(param.thisObject instanceof View)) return;
                     View view = (View) param.thisObject;
                     if (view.getWidth() <= 0 || view.getHeight() <= 0) return;
+                    // Only the actual native stack is touched. Keyguard
+                    // transitions restore the platform's original layout.
+                    try {
+                        ShadeRailHost.onNativeStackLayout(view);
+                    } catch (Throwable error) {
+                        Log.e(TAG, "Cannot update BB7 rail keyguard state", error);
+                    }
                     if (view instanceof android.view.ViewGroup) {
                         try {
                             ShadeNotificationIndex.updateFromNativeRows(

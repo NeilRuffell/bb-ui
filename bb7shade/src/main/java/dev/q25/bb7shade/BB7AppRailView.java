@@ -23,9 +23,9 @@ import java.util.Map;
  * BlackBerry OS 7-style notification application rail.
  *
  * This is a reusable native View, not an overlay or another shade window.
- * It is NOT installed in the SystemUI view hierarchy yet. The future
- * single-surface host will place it to the left of Android's existing
- * NotificationStackScrollLayout and keep the original notification actions.
+ * The stage-3 single-surface host installs this view directly beside
+ * Android's native NotificationStackScrollLayout, without a second window
+ * or duplicated notification cards.
  *
  * Items use Android's normal focus system. No DPAD, touch or trackpad key
  * events are intercepted, and the native notification list is not mutated.
