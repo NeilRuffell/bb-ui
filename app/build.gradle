@@ -7,8 +7,8 @@ android {
         applicationId 'dev.q25.trackpad'
         minSdk 33
         targetSdk 28
-        versionCode 20
-        versionName '0.8.2-home-entry-dev'
+        versionCode 21
+        versionName '0.8.3-home-source-dev'
     }
 }
 
