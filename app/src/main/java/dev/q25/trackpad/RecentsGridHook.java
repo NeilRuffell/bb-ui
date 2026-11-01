@@ -201,9 +201,9 @@ public final class RecentsGridHook implements IXposedHookLoadPackage {
                     p.setResult(true);
                 }
             });
-            XposedBridge.log("BB UI: RecentsGridHook v3 hooked " + lp.packageName);
+            XposedBridge.log("BB UI: RecentsGridHook v4 hooked " + lp.packageName);
         } catch (Throwable error) {
-            XposedBridge.log("BB UI: RecentsGridHook v3 unavailable: " + error);
+            XposedBridge.log("BB UI: RecentsGridHook v4 unavailable: " + error);
         }
     }
 
@@ -254,8 +254,8 @@ public final class RecentsGridHook implements IXposedHookLoadPackage {
         if (state.layingOut || root.getWidth() <= 0 || root.getHeight() <= 0) return;
         state.layingOut = true;
         try {
-            int margin = dp(root, 12);
-            int gap = dp(root, 10);
+            int margin = dp(root, 2);
+            int gap = dp(root, 6);
             int width = Math.max(1, (root.getWidth() - 2 * margin - gap) / COLUMNS);
             int count = countTasks(root, task);
             if (count == 0) return;
@@ -271,7 +271,7 @@ public final class RecentsGridHook implements IXposedHookLoadPackage {
             // Reset PagedView's horizontal origin rather than compensate only one frame.
             if (root.getScrollX() != 0) root.scrollTo(0, 0);
             root.setClipChildren(true);
-            root.setClipToPadding(true);
+            root.setClipToPadding(false);
             // Remove the horizontally positioned Clear All affordance from this mode.
             for (int childIndex = 0; childIndex < root.getChildCount(); childIndex++) {
                 View child = root.getChildAt(childIndex);
@@ -284,8 +284,10 @@ public final class RecentsGridHook implements IXposedHookLoadPackage {
                 View tile = getTask(root, task, i);
                 if (tile == null || tile.getWidth() <= 0 || tile.getHeight() <= 0) continue;
 
+                // Fit the complete source card inside its column; do not crop the edges.
                 float scale = Math.min(1f, (float) width / tile.getWidth());
-                int x = margin + (i % COLUMNS) * (width + gap);
+                int x = margin + (i % COLUMNS) * (width + gap)
+                        + Math.max(0, Math.round((width - tile.getWidth() * scale) / 2f));
                 int y = margin + (i / COLUMNS) * state.rowHeight - state.offset;
 
                 // Actual child coordinates, not translations, are used by hit-testing.
@@ -295,6 +297,12 @@ public final class RecentsGridHook implements IXposedHookLoadPackage {
                 if (tile.getTranslationY() != 0f) tile.setTranslationY(0f);
                 tile.setPivotX(0f);
                 tile.setPivotY(0f);
+                // Task thumbnails are nested inside Quickstep containers which may
+                // retain edge clipping from the original full-size carousel.
+                if (tile instanceof ViewGroup) {
+                    ((ViewGroup) tile).setClipChildren(false);
+                    ((ViewGroup) tile).setClipToPadding(false);
+                }
                 if (tile.getLeft() != x || tile.getTop() != y) {
                     tile.layout(x, y, x + originalW, y + originalH);
                 }
@@ -303,7 +311,7 @@ public final class RecentsGridHook implements IXposedHookLoadPackage {
                 tile.setFocusable(true);
             }
         } catch (Throwable error) {
-            XposedBridge.log("BB UI: RecentsGridHook v3 layout error: " + error);
+            XposedBridge.log("BB UI: RecentsGridHook v4 layout error: " + error);
         } finally {
             state.layingOut = false;
         }
