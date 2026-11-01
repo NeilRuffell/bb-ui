@@ -2,7 +2,7 @@
 
 Experimental LSPosed module for BlackBerry-inspired Android UI improvements.
 
-## v0.1 prototype: Type to search in Android Settings
+## Feature 1: Type to search in Android Settings
 
 On the **main Settings homepage**, pressing a letter or number on a detected **physical alphabetic keyboard** starts the existing Settings search and attempts to prefill it with that first character. No need to move focus to the search bar. Up/Down/Enter/Back and modifier shortcuts are not intercepted.
 
@@ -44,3 +44,37 @@ Research prototype. Compatibility and functionality must be verified on the actu
 ## Continuous integration
 
 Every push to `main` triggers [Build BB UI debug APK](https://github.com/NeilRuffell/bb-ui/actions). Open the latest successful workflow run and download the `bb-ui-debug-apk` artifact. GitHub Actions artifacts are ZIP files containing the installable `app-debug.apk`. This is a debug build, not a signed production release.
+
+## Feature 2 (v0.2.0-dev): Experimental two-column Recents grid
+
+**This is unverified development code. Do not enable on devices you cannot recover using ADB.**
+
+The module hooks the existing Quickstep `com.android.quickstep.views.RecentsView` where available. It visually repositions its existing task views in a two-column layout, with vertical wheel/touch scrolling and DPAD movement. It does **not** replace the home launcher or create its own replacement task switcher.
+
+Existing Quickstep animations and dismissal calculations still assume horizontal paging. Their compatibility with this prototype is **unknown**. This should not be considered production-ready, and thumbnails or hit targets may misbehave.
+
+1. Build from `dev` using `./gradlew :app:assembleDebug` (or your local Gradle 8.11.1).
+2. Install with `adb install -r app/build/outputs/apk/debug/app-debug.apk`.
+3. In LSPosed, scope BB UI to **Settings**, **Settings Intelligence**, and the **system Quickstep/Recents provider**. On LineageOS this is typically the system Launcher3/Trebuchet component, **not** your chosen third-party home launcher.
+4. Reboot so the Quickstep process loads the new hook.
+5. The grid is **off by default**. Enable it from a computer with ADB:
+
+```sh
+adb shell settings put global bb_ui_recents_grid 1
+```
+
+Open Recent Apps. Exercise vertical swipe/wheel scrolling, trackpad selection, app launch, dismissal, and returning to home. If anything is unstable, disable immediately:
+
+```sh
+adb shell settings put global bb_ui_recents_grid 0
+```
+
+Then restart the Quickstep process or reboot. If necessary, disable the BB UI scope for the Quickstep provider in LSPosed and reboot.
+
+### Important limitations
+
+- This first iteration **repositions the original task-card views** rather than rewriting Quickstep's pagination/animation internals. It is an experimental visual prototype, not a complete native vertical Recents implementation.
+- Task animations, dismissal, rotated layouts, split-task cards, and touch hit testing need actual-device validation.
+- The hook has **not been compiled or tested** on LineageOS 24.0 here.
+- The prototype does not add notifications to Recents.
+- The tested Settings type-to-search feature is unchanged.
