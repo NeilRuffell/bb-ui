@@ -82,3 +82,7 @@ Then restart the Quickstep process or reboot. If necessary, disable the BB UI sc
 ### Grid v2 correction (experimental)
 
 The first grid prototype shifted task cards via translations while Quickstep continued paging horizontally; this caused off-screen and missing cards. v0.2.1-dev positions the actual task view bounds, resets horizontal scroll, and intercepts background vertical gestures. It is **not yet device-tested**. Quickstep's internal task animations, dismissal, and transforms still require validation; this is not a complete replacement of horizontal paging. Keep the global toggle off until ready to test, and disable immediately if the overview behaves incorrectly.
+
+### v0.2.2-dev experiment
+
+Quickstep's internal horizontal PagedView scroll and TaskView translations are now constrained in grid mode. The horizontally positioned Clear All button is hidden in this experiment. This is still a hook-based prototype, **not a native replacement of PagedView**; animations or interactions may remain inconsistent. Reboot after disabling grid mode to restore native task-view properties and visibility. **Do not merge to master until validated.**
