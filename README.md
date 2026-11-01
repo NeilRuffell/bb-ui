@@ -20,11 +20,15 @@ baseline, not the older Recents experiments.
 - Use Quickstep's native landscape primary axis for vertical scrolling,
   snapping, flings and wheel navigation, while delegating portrait-only
   rendering and thumbnail rotation to the portrait handler.
-- Use the same orientation adapter for both `RecentsView` and `TaskView`.
-  Quickstep's native task-dismiss and swipe-launch controllers then use
-  horizontal gesture detectors and X-axis dismiss translations, leaving
-  vertical gestures for native scrolling. In left-to-right layouts, swipe
-  right dismisses, and swipe left is the native swipe-launch gesture.
+- Synchronize the orientation adapter across Quickstep's `RecentsView`,
+  `RecentsOrientedState`, and `TaskView` so drag detection, dismissal
+  translation, and native animations use the **same** axes.
+- Use Quickstep's native horizontal task-dismiss controller for swipe-right
+  removal in LTR layouts. Disable its opposite-direction swipe-to-launch
+  controller in this experimental portrait grid; **tap still launches**.
+- Do not implement separate custom touch handling. Log the native
+  scroll range and whether `PagedView` intercepts a vertical drag to
+  identify any remaining device-specific scrolling failure.
 - Use native two-panel grouping and TaskView measurement.
 - At `RecentsView.getPageScrolls()`, while Quickstep is already laying out
   children, arrange existing TaskViews in two columns and return matching
@@ -73,7 +77,13 @@ adb logcat -d -s BB-UI-Recents:W '*:S'
 
 Expected sequence: `BB UI entry reached`, `Vertical Recents setting=1`,
 `Two-column vertical Quickstep adapter registered`, and
-`Vertical grid layout reached`.
+`Native vertical grid geometry: tasks=... rows=... maxScroll=...`.
+A gesture over the grid should log
+`Native pager touch: deltaX=... deltaY=... intercepted=... maxScroll=...`.
+A zero `maxScroll` means all rows fit on screen; scrolling is not possible
+until there are more recent tasks. A nonzero range with no pager touch log
+suggests an ancestor consumed the gesture. This is runtime evidence,
+not something Gradle can validate.
 
 If the first log is absent, check that Vector actually injects the module
 into the active `com.android.launcher3` Quickstep process. If registration
@@ -83,7 +93,7 @@ fails, the error log identifies the missing class or hook.
 
 - Two portrait columns, task previews displayed correctly
 - Native vertical touch dragging and trackpad wheel navigation without dismissing an app
-- Horizontal task swipe dismiss and native reverse-direction swipe-launch behavior
+- Right-swipe task dismissal visibly moves right (LTR); swipe-left does not launch
 - Tapping an app launches that exact task
 - Swipe-to-dismiss and Clear All work
 - Running task preview is not duplicated/overlaid by a live tile
