@@ -272,6 +272,13 @@ public final class RecentsGridHook implements IXposedHookLoadPackage {
             if (root.getScrollX() != 0) root.scrollTo(0, 0);
             root.setClipChildren(true);
             root.setClipToPadding(true);
+            // Remove the horizontally positioned Clear All affordance from this mode.
+            for (int childIndex = 0; childIndex < root.getChildCount(); childIndex++) {
+                View child = root.getChildAt(childIndex);
+                if (child.getClass().getName().endsWith(".ClearAllButton")) {
+                    child.setVisibility(View.INVISIBLE);
+                }
+            }
 
             for (int i = 0; i < count; ++i) {
                 View tile = getTask(root, task, i);
