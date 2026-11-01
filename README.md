@@ -1,6 +1,6 @@
 # BB UI
 
-## BB7 Appearance — Settings blue focus highlight (experimental)
+## BB7 Appearance — Settings and SystemUI native notification focus (experimental)
 
 The `feat/bb7-focus-settings` branch builds a **separate, compatible Vector/LSPosed APK**
 named **BB7 Appearance** from the Gradle target `:bb7focus`. The original `:app`
@@ -14,8 +14,43 @@ button behavior are **not intentionally changed**. It does not add focus
 to an item that lacks keyboard focus. On focus loss, the row background,
 padding and text colours are restored.
 
-**Current scope:** `com.android.settings` only. This does not change
-SystemUI, Settings Intelligence, Google Messages or other apps.
+**Current scopes:** `com.android.settings` (Settings) and `com.android.systemui`
+(SystemUI native notification rows). It does not change Settings Intelligence,
+Google Messages or other apps.
+
+### SystemUI: native notification-row focus
+
+The separate `SystemUiFocusThemeHook` uses the existing ViewTreeObserver focus
+dispatch, without requesting focus or intercepting key presses. When a native
+`ExpandableNotificationRow` itself receives focus, the existing
+`NotificationBackgroundView` draws the BB7 blue gradient **after** its normal
+background and **before** notification content. Text colours are restored on
+focus loss. No native background drawable is replaced. Child action buttons
+and reply fields retain their stock focus appearance.
+
+LineageOS 24's Quick Settings tiles use Jetpack Compose (`QSFragmentCompose`
+/`TileGrid`), not the old `QSTileViewImpl`; this phase deliberately does
+**not** hook Compose tiles. SystemUI's keyboard-focusable notification rows
+require on-device validation. If no native notification gains focus, this
+module cannot make it focusable by design.
+
+For SystemUI testing, enable `com.android.systemui` in **BB7 Appearance** in
+Vector, preserving Settings and all existing BB UI scopes, then run:
+
+```sh
+adb shell su -c 'killall com.android.systemui'
+# After SystemUI restarts, open the notification shade and navigate the
+# existing notification rows using the Q25 keyboard/trackpad.
+adb logcat -d -s BB7-SystemUI:I '*:S'
+```
+
+**Warning:** Restarting SystemUI can temporarily blank the status bar and
+notification shade. If the new hook causes a SystemUI crash loop, disable the
+SystemUI scope for BB7 Appearance in Vector and restart SystemUI, or use
+Vector's module recovery method. No reboot is required for routine tests.
+
+For rollback, uncheck only `com.android.systemui` in BB7 Appearance's scopes
+and restart SystemUI; the working Settings highlight is independent.
 Non-AndroidX preference lists and custom-rendered views are excluded
 until tested. The module needs **device validation on Q25/LineageOS 24.0**.
 
@@ -30,7 +65,8 @@ adb install -r bb7focus/build/outputs/apk/debug/bb7focus-debug.apk
 ```
 
 In Vector, enable **BB7 Appearance**, and scope it to **Settings**
-(`com.android.settings`) only. Leave the existing **BB UI** module
+(`com.android.settings`) and optionally **SystemUI** (`com.android.systemui`).
+Leave the existing **BB UI** module
 enabled with its existing scopes.
 
 Then restart the Settings app, **not the whole phone**:
