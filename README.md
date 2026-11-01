@@ -59,6 +59,14 @@ This feature branch leaves `master`, `main` and `dev` unchanged.
   keyboard quick-switch entry, does not request focus by default). Use
   Quickstep's own touch-mode-to-keyboard-focus mechanism, and do not override
   existing focus.
+- Horizontal D-pad focus is **row-bounded**: LEFT on the leftmost card and
+  RIGHT on the rightmost card leave focus unchanged, including a final row
+  containing one card. UP/DOWN retain the same column. TAB/Shift+TAB remain
+  linear across rows, with native Quickstep focus and activation.
+- Temporarily hide the native ClearAllButton (GONE, nonfocusable and
+  nonclickable). Keep the original child owned by Quickstep for its
+  lifecycle, disable native scrolling to Clear All, omit its trailing
+  vertical space from the grid, and exclude it from keyboard traversal.
 - Enter Overview at its **native page zero**, resetting its previous page
   selection at the start of the state transition or gesture. The two native
   entry callbacks share an idempotent latch so selection executes **once per
@@ -175,8 +183,11 @@ fails, the error log identifies the missing class or hook.
 - Entering from an app shrinks and moves directly into that app's grid card without a carousel detour or pop
 - Recents opens and closes reliably; no horizontal snap
 - App task order and thumbnail loading update after dismiss
-- Arrow keys move selection: LEFT/RIGHT adjacent card; UP/DOWN same column
-  in adjacent row; native border follows selection and offscreen selection scrolls
+- Arrow keys move selection: LEFT/RIGHT within each row only, with no
+  movement at their respective column edges; UP/DOWN same column in the
+  adjacent row; native border follows focus and offscreen focus scrolls
+- Clear All is absent from display, focus traversal and trailing scroll
+  space; native per-task dismissal remains functional
 - Tab and Shift+Tab move through tasks using the original native in-task focus
   behavior; Enter/DPAD-center launches the focused task; Delete dismisses it
 - BB button from Home focuses the first visible task after the Overview

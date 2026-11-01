@@ -7,8 +7,8 @@ android {
         applicationId 'dev.q25.trackpad'
         minSdk 33
         targetSdk 28
-        versionCode 26
-        versionName '0.8.8-recents-grid-focus-dev'
+        versionCode 27
+        versionName '0.8.9-grid-focus-bounds-dev'
     }
 }
 
