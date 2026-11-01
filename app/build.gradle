@@ -7,8 +7,8 @@ android {
         applicationId 'dev.q25.trackpad'
         minSdk 33
         targetSdk 28
-        versionCode 16
-        versionName '0.7.1-native-scroll-dev'
+        versionCode 17
+        versionName '0.7.2-native-bidirectional-dev'
     }
 }
 

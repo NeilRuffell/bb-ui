@@ -23,9 +23,13 @@ baseline, not the older Recents experiments.
 - Synchronize the orientation adapter across Quickstep's `RecentsView`,
   `RecentsOrientedState`, and `TaskView` so drag detection, dismissal
   translation, and native animations use the **same** axes.
-- Use Quickstep's native horizontal task-dismiss controller for swipe-right
-  removal in LTR layouts. Disable its opposite-direction swipe-to-launch
-  controller in this experimental portrait grid; **tap still launches**.
+- Use Quickstep's native horizontal task-dismiss controller for **both**
+  swipe-left and swipe-right removal. Its own SingleAxisSwipeDetector already
+  provides DIRECTION_BOTH. Adjust the native dismissal factor and distance
+  for whichever edge the swipe approaches, retaining Quickstep's standard
+  task-removal spring and threshold behavior.
+- Disable the separate swipe-to-launch controller in the portrait grid.
+  **Tap still launches**; neither horizontal swipe should launch an app.
 - Use native PagedView's vertical scrolling without custom touch handlers.
   LineageOS RecentsView's original `computeMinScroll()` and
   `computeMaxScroll()` rely on carousel task indices and produced a
@@ -87,7 +91,7 @@ A gesture over the grid should log
 A zero `maxScroll` means all rows fit on screen; scrolling is not possible
 until there are more recent tasks. The `Native pager bounds: min=0 max=...` diagnostic must now
 match the grid's `maxScroll=...` when the native layout is active.
-A mismatch is a bug in the hook; no pager touch event suggests
+Check for `Native bidirectional task dismissal registered` and the per-swipe `Native dismiss drag direction=left/right` messages. A bounds mismatch is a bug in the hook; no pager touch event suggests
 the parent did not receive the gesture. Android runtime validation
 is still required even if Gradle succeeds.
 
@@ -99,7 +103,7 @@ fails, the error log identifies the missing class or hook.
 
 - Two portrait columns, task previews displayed correctly
 - Native vertical touch dragging and trackpad wheel navigation without dismissing an app
-- Right-swipe task dismissal visibly moves right (LTR); swipe-left does not launch
+- Both horizontal swipes dismiss and animate toward their respective edges; neither launches
 - Tapping an app launches that exact task
 - Swipe-to-dismiss and Clear All work
 - Running task preview is not duplicated/overlaid by a live tile
