@@ -61,7 +61,8 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
     private static final WeakHashMap<View, Boolean> SCREENSHOT_PENDING = new WeakHashMap<>();
     // Reference only: simulator exists independently of RecentsView's layout.
     private static WeakReference<View> currentRecents = new WeakReference<>(null);
-    private static boolean firstEntryRectLogged;
+    private static final WeakHashMap<Object, Rect> LOGGED_ANIMATION_TARGETS = new WeakHashMap<>();
+    private static final WeakHashMap<View, Boolean> OVERVIEW_ENTRY_SELECTED = new WeakHashMap<>();
 
     @Override public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lp) {
         if (!TARGET.equals(lp.packageName)) return;
@@ -450,8 +451,11 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
                         // The simulator recomputes its thumbnail matrix and
                         // fullscreen pivot from the new destination.
                         XposedHelpers.setBooleanField(sim, "mLayoutValid", false);
-                        if (!firstEntryRectLogged) {
-                            firstEntryRectLogged = true;
+                        // Log each simulator's actual destination when it
+                        // changes, not just the first target in the process.
+                        Rect previous = LOGGED_ANIMATION_TARGETS.get(sim);
+                        if (!target.equals(previous)) {
+                            LOGGED_ANIMATION_TARGETS.put(sim, new Rect(target));
                             Log.w(TAG, "Native entry animation target=" + target);
                         }
                     }
@@ -544,6 +548,20 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
                 });
             }
 
+            // Disarm the entry latch as part of the native exit state.
+            // The same RecentsView may be reused on the next BlackBerry
+            // button press, which must again select page zero.
+            XposedBridge.hookAllMethods(recents,
+                    "setOverviewStateEnabled", new XC_MethodHook() {
+                @Override protected void afterHookedMethod(MethodHookParam p) {
+                    View root = (View) p.thisObject;
+                    if (!active(root)) return;
+                    if (p.args.length > 0 && Boolean.FALSE.equals(p.args[0])) {
+                        OVERVIEW_ENTRY_SELECTED.remove(root);
+                    }
+                }
+            });
+
             // Overview entry is a native page-selection operation, not a
             // late scroll correction. Keep page zero as the requested initial
             // page BEFORE the existing overview transition animates.
@@ -629,10 +647,12 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
      * occurring after the overview command begins.
      */
     private static void selectInitialGridPage(View root) {
-        if (!active(root)) return;
+        if (!active(root) || OVERVIEW_ENTRY_SELECTED.containsKey(root)) return;
+        OVERVIEW_ENTRY_SELECTED.put(root, Boolean.TRUE);
         XposedHelpers.callMethod(root, "runOnPageScrollsInitialized",
                 (Runnable) () -> {
-                    if (!active(root)) return;
+                    if (!active(root) || !OVERVIEW_ENTRY_SELECTED.containsKey(root))
+                        return;
                     XposedHelpers.callMethod(root, "setCurrentPageScrollDiff", 0);
                     XposedHelpers.callMethod(root, "setCurrentPage", 0);
                     Log.w(TAG, "Native overview initial page=0 scrollY="
