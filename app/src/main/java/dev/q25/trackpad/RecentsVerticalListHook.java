@@ -226,7 +226,8 @@ public final class RecentsVerticalListHook implements IXposedHookLoadPackage {
             return Settings.Global.getInt(view.getContext().getContentResolver(),
                     TOGGLE, 0) == 1
                     && Settings.Global.getInt(view.getContext().getContentResolver(),
-                    "bb_ui_recents_two_up", 0) == 1;
+                    "bb_ui_recents_two_up", 0) == 1
+                    && XposedHelpers.getBooleanField(view, "mOverviewStateEnabled");
         } catch (Throwable ignored) {
             return false;
         }
