@@ -27,9 +27,10 @@ import de.robv.android.xposed.callbacks.XC_LoadPackage;
  * PagedView scrolling. No replacement thumbnail/task renderer.
  *
  * The orientation adapter uses Quickstep's landscape PRIMARY AXIS (Y) for
- * scrolling, snapping, fling and accessibility. Portrait orientation remains
- * responsible for task appearance, dismiss direction and thumbnail rotations.
- * The only custom layout is the required mapping of task indices to 2 columns.
+ * scrolling, snapping, fling and accessibility. Quickstep's landscape
+ * task-gesture methods provide horizontal dismissal and launch gestures.
+ * Portrait-specific rendering remains upright. The only custom layout is
+ * the required mapping of task indices to 2 columns.
  *
  * This is an experimental Xposed compatibility layer, not a stock setting.
  */
@@ -69,6 +70,18 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
         try {
             final Object portrait = XposedHelpers.getStaticObjectField(handler, "PORTRAIT");
             final Object landscape = XposedHelpers.getStaticObjectField(handler, "LANDSCAPE");
+            final Object adapted = orientationProxy(handler, portrait, landscape, loader);
+
+            // TaskView obtains its orientation directly from RecentsOrientedState,
+            // not from the PagedView field. Redirect its native primary/secondary
+            // translation properties to the same axis as the grid. Without this,
+            // horizontal dismissal would still animate on the vertical axis.
+            XposedHelpers.findAndHookMethod(task, "getPagedOrientationHandler",
+                    new XC_MethodHook() {
+                @Override protected void afterHookedMethod(MethodHookParam p) {
+                    if (active((View) p.thisObject)) p.setResult(adapted);
+                }
+            });
 
             // Replace the pager axis at its own native configuration point.
             // This is invoked by RecentsView during initialization and rotation.
@@ -79,8 +92,8 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
                 @Override protected void beforeHookedMethod(MethodHookParam p) {
                     if (!recents.isInstance(p.thisObject)
                             || !active((View) p.thisObject)) return;
-                    if (Proxy.isProxyClass(p.args[0].getClass())) return;
-                    p.args[0] = orientationProxy(handler, portrait, landscape, loader);
+                    if (p.args[0] == adapted) return;
+                    p.args[0] = adapted;
                 }
             });
 
@@ -285,8 +298,9 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
     }
 
     /**
-     * AOSP's native landscape paging methods implement a vertical primary axis.
-     * Its portrait methods maintain upright previews and native task dismissal.
+     * Use the native landscape primary (Y) pager axis and horizontal task
+     * dismiss/launch detector while delegating rendering/rotation to portrait.
+     * The same proxy is supplied to RecentsView and TaskView.
      */
     private static Object orientationProxy(Class<?> type, Object portrait,
             Object landscape, ClassLoader loader) {
@@ -299,7 +313,8 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
                     if ("hashCode".equals(name)) return System.identityHashCode(proxy);
                     return "BBUIVerticalPrimaryAxis";
                 }
-                Object delegate = isPagingAxisMethod(name) ? landscape : portrait;
+                Object delegate = isVerticalGridAxisOrGestureMethod(name)
+                        ? landscape : portrait;
                 try {
                     return method.invoke(delegate, args);
                 } catch (InvocationTargetException e) {
@@ -310,7 +325,7 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
         return Proxy.newProxyInstance(loader, new Class<?>[]{type}, adapter);
     }
 
-    private static boolean isPagingAxisMethod(String method) {
+    private static boolean isVerticalGridAxisOrGestureMethod(String method) {
         switch (method) {
             case "getPrimaryValue":
             case "getSecondaryValue":
@@ -334,6 +349,19 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
             case "getSecondaryViewTranslate":
             case "setPrimary":
             case "setMaxScroll":
+            // Native Quickstep task gesture controllers construct their
+            // SingleAxisSwipeDetector from these interface methods.
+            // Landscape means HORIZONTAL dismiss/launch on a portrait display.
+            case "getUpDownSwipeDirection":
+            case "getUpDirection":
+            case "getDownDirection":
+            case "isGoingUp":
+            case "getTaskDragDisplacementFactor":
+            case "getTaskDismissVerticalDirection":
+            case "getTaskDismissLength":
+            case "getTaskLaunchLength":
+            case "extendRectForPrimaryTranslation":
+            case "extendRectForSecondaryTranslation":
                 return true;
             default:
                 return false;
