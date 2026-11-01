@@ -46,6 +46,10 @@ final class ShadeRailHost {
     private static final Map<ViewGroup, Boolean> ATTEMPTED_NATIVE_ATTACH =
             Collections.synchronizedMap(new WeakHashMap<>());
     private static volatile boolean layoutEnabled;
+    // Android KeyguardManager can report a locked startup state while
+    // SystemUI is restarting. KeyguardStateController is the authoritative
+    // state used by SystemUI itself once its callbacks begin.
+    private static volatile Boolean systemUiKeyguardShowing;
 
     private final ViewGroup parent;
     private final View nativeStack;
@@ -199,7 +203,12 @@ final class ShadeRailHost {
         rail.update(ShadeNotificationIndex.current());
         host.refreshKeyguardState();
         if (!host.railVisible) {
-            Log.i(TAG, "BB7 rail initially hidden: keyguard locked or unavailable");
+            Log.i(TAG, "BB7 rail initially hidden: keyguard controller="
+                    + systemUiKeyguardShowing
+                    + " AndroidKeyguardManager="
+                    + ((KeyguardManager) context.getSystemService(Context.KEYGUARD_SERVICE) == null
+                            ? "unavailable"
+                            : "available"));
         }
         Log.i(TAG, "BB7 app rail mounted in native shade container"
                 + " via=" + source + " widthPx=" + railWidth
@@ -252,14 +261,39 @@ final class ShadeRailHost {
         }
     }
 
+    /**
+     * Called from native SystemUI lifecycle events rather than inferred
+     * from initial inflation. The on-shade path is important because the
+     * device can start SystemUI while KeyguardManager still says locked.
+     */
+    static void onSystemUiKeyguardState(boolean showing, String source) {
+        if (!layoutEnabled) return;
+        Boolean previous = systemUiKeyguardShowing;
+        if (previous != null && previous.booleanValue() == showing) return;
+        systemUiKeyguardShowing = showing;
+        Log.i(TAG, "SystemUI keyguard state: showing=" + showing
+                + " source=" + source);
+        List<ShadeRailHost> current = new ArrayList<>();
+        synchronized (HOSTS) {
+            for (WeakReference<ShadeRailHost> ref : HOSTS.values()) {
+                ShadeRailHost host = ref.get();
+                if (host != null) current.add(host);
+            }
+        }
+        for (ShadeRailHost host : current) {
+            host.rail.post(host::refreshKeyguardState);
+        }
+    }
+
     private void refreshKeyguardState() {
         KeyguardManager keyguard = (KeyguardManager)
                 parent.getContext().getSystemService(Context.KEYGUARD_SERVICE);
-        // Keep both the icon rail and the notification stack's stock width
-        // unchanged on the lock screen. Never override the platform's
-        // notification privacy or keyguard rendering.
-        boolean locked = keyguard == null || keyguard.isKeyguardLocked();
-        boolean wantVisible = !locked;
+        boolean platformLocked = keyguard == null || keyguard.isKeyguardLocked();
+        // The system-owned keyguard controller is authoritative after its
+        // first state report. Never expose the experimental rail on an
+        // active lock screen. This doesn't change notification privacy.
+        boolean wantVisible = ShadeRailVisibilityPolicy.shouldShow(
+                systemUiKeyguardShowing, platformLocked);
         if (wantVisible == railVisible) return;
 
         ViewGroup.LayoutParams params = nativeStack.getLayoutParams();
