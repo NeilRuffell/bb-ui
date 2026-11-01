@@ -45,23 +45,23 @@ final class ShadeRailHost {
     private final ViewGroup parent;
     private final View nativeStack;
     private final BB7AppRailView rail;
-    private final BB7NotificationPageModel model = new BB7NotificationPageModel();
+    private final BB7NotificationPageModel model;
     private final int originalStartToStart;
     private final int originalStartToEnd;
     private final int originalWidth;
-    private final boolean originalVisibility;
     private boolean railVisible;
     private boolean pendingRefresh;
 
-    private ShadeRailHost(ViewGroup container, View stack, BB7AppRailView appRail) {
+    private ShadeRailHost(ViewGroup container, View stack, BB7AppRailView appRail,
+            BB7NotificationPageModel pageModel) {
         parent = container;
+        model = pageModel;
         nativeStack = stack;
         rail = appRail;
         ViewGroup.LayoutParams originalParams = stack.getLayoutParams();
         originalStartToStart = XposedHelpers.getIntField(originalParams, "startToStart");
         originalStartToEnd = XposedHelpers.getIntField(originalParams, "startToEnd");
         originalWidth = originalParams.width;
-        originalVisibility = appRail.getVisibility() == View.VISIBLE;
     }
 
     static void installHooks(ClassLoader loader) {
@@ -154,7 +154,7 @@ final class ShadeRailHost {
         XposedHelpers.setIntField(railLayout, "topToTop", PARENT_ID);
         XposedHelpers.setIntField(railLayout, "bottomToBottom", PARENT_ID);
 
-        ShadeRailHost host = new ShadeRailHost(parent, nativeStack, rail);
+        ShadeRailHost host = new ShadeRailHost(parent, nativeStack, rail, pageModel);
         // The rail is inserted before the stack so notification cards retain
         // their normal drawing order. There is no extra window or duplicate
         // card list.
