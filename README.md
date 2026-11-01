@@ -4,7 +4,7 @@
 
 The `feat/bb7-shade` branch adds `:bb7shade`, a **third, separate APK**
 (`dev.q25.bb7shade`), alongside `:app` and `:bb7focus`.
-Version `0.2.0-render-index-state-dev` remains **headless**: it observes
+Version `0.2.1-native-index-fallback-dev` remains **headless**: it observes
 the finalized SystemUI notification render list after filtering/grouping,
 preserves the ordered notification references for each application, detects
 the native shade window and logs notification stack geometry. It does **not** add a new shade, intercept input, hide the stock
@@ -28,7 +28,7 @@ adb logcat -d -s BB7-Shade:I '*:S'
 
 Expect `BB7 Shade stage 2 loaded`,
 `Finalized notification render-list observer registered`, and
-`Rendered notification index updated: apps=... entries=...`.
+`Rendered notification index updated: apps=... entries=...` when Android rebuilds the finalized list. If no rebuild occurs, expect `Native notification rows indexed: rows=... apps=... entries=...` from the live native stack. Both paths are read-only.
 `Native stack geometry: ...` identifies the actual notification layout
 for later UI placement. Log output contains only counts and geometry, not
 notification content. Run `./gradlew :bb7shade:testDebugUnitTest` for
