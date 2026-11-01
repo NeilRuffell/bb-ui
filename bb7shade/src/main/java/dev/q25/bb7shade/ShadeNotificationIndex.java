@@ -2,6 +2,8 @@ package dev.q25.bb7shade;
 
 import android.service.notification.StatusBarNotification;
 import android.util.Log;
+import android.os.SystemClock;
+import android.view.ViewGroup;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -65,6 +67,16 @@ final class ShadeNotificationIndex {
     private static volatile boolean firstUpdate = true;
     private static volatile boolean finalizedListObserved = false;
     private static volatile boolean nativeRowsLogged = false;
+    // The stock NSSL can invoke onLayout many times per frame. Repeatedly
+    // reflecting every row is unnecessary and caused repeated warnings on
+    // the Q25. A structural add/remove bypasses this throttle.
+    private static final long NATIVE_SCAN_INTERVAL_MS = 1500L;
+    private static ViewGroup lastScannedStack;
+    private static long lastNativeScanUptime;
+    private static int lastNativeChildCount = -1;
+    // Diagnostics are deliberately bounded, without notification data.
+    private static final Set<String> loggedNativeFailures = new HashSet<>();
+    private static final int MAX_DISTINCT_NATIVE_FAILURES = 5;
 
     private ShadeNotificationIndex() {}
 
@@ -80,8 +92,17 @@ final class ShadeNotificationIndex {
      * Native rows expose EntryAdapter.getSbn/getKey; we do not read, store
      * or log notification contents. Android still owns the rows and actions.
      */
-    static void updateFromNativeRows(android.view.ViewGroup stack) {
+    static void updateFromNativeRows(ViewGroup stack, boolean structureChanged) {
         if (finalizedListObserved) return;
+        final long now = SystemClock.uptimeMillis();
+        final int childCount = stack.getChildCount();
+        if (!structureChanged && stack == lastScannedStack
+                && childCount == lastNativeChildCount
+                && now >= lastNativeScanUptime
+                && now - lastNativeScanUptime < NATIVE_SCAN_INTERVAL_MS) return;
+        lastScannedStack = stack;
+        lastNativeChildCount = childCount;
+        lastNativeScanUptime = now;
         LinkedHashMap<String, List<NotificationRef>> byApp = new LinkedHashMap<>();
         Set<String> keys = new HashSet<>();
         int directRows = 0;
@@ -108,6 +129,7 @@ final class ShadeNotificationIndex {
 
     private static void collectNativeRow(android.view.View row,
             LinkedHashMap<String, List<NotificationRef>> byApp, Set<String> keys) {
+        String stage = "getAttachedChildren";
         try {
             Object children = XposedHelpers.callMethod(row, "getAttachedChildren");
             if (children instanceof List && !((List<?>) children).isEmpty()) {
@@ -118,11 +140,16 @@ final class ShadeNotificationIndex {
                 }
                 return;
             }
+            stage = "getEntryAdapter";
             Object adapter = XposedHelpers.callMethod(row, "getEntryAdapter");
+            // This is normal for rows still being constructed.
             if (adapter == null) return;
+            stage = "getKey";
             String key = (String) XposedHelpers.callMethod(adapter, "getKey");
+            stage = "getSbn";
             StatusBarNotification sbn = (StatusBarNotification)
                     XposedHelpers.callMethod(adapter, "getSbn");
+            // Bundle/placeholder rows can have no StatusBarNotification.
             if (key == null || sbn == null) return;
             String packageName = sbn.getPackageName();
             if (packageName == null || packageName.isEmpty() || !keys.add(key)) return;
@@ -133,9 +160,19 @@ final class ShadeNotificationIndex {
             }
             refs.add(new NotificationRef(key, packageName));
         } catch (Throwable error) {
-            // Some entry types (such as dynamic bundles) lack notification
-            // SBNs. Skip only that row and leave stock UI behavior intact.
-            Log.w(TAG, "Skipping native row without a compatible notification adapter");
+            // Never log package names, message data, keys, or exception
+            // messages. Exception types and failing API stage are enough
+            // to distinguish a missing method from other incompatibilities.
+            Throwable root = error;
+            while (root.getCause() != null && root.getCause() != root) {
+                root = root.getCause();
+            }
+            String signature = stage + ":" + root.getClass().getSimpleName();
+            if (loggedNativeFailures.size() < MAX_DISTINCT_NATIVE_FAILURES
+                    && loggedNativeFailures.add(signature)) {
+                Log.w(TAG, "Native row reader failed at " + stage
+                        + " (" + root.getClass().getSimpleName() + ")");
+            }
         }
     }
 
