@@ -42,20 +42,18 @@ baseline, not the older Recents experiments.
   selection at the start of the state transition or gesture. The two native
   entry callbacks share an idempotent latch so selection executes **once per
   overview entry**, and the latch clears on exit.
-- For an Overview transition **from Home**, classify the native
-  `GroupedTaskInfo` in `RecentsView.showCurrentTask()` and veto ONLY that
-  method for `ACTIVITY_TYPE_HOME`. The native gesture-start state, running
-  task metadata, and app entry animations are otherwise unchanged. This
-  covers both the existing-running-card and new-placeholder paths.
-- The previous `shouldAvoidAddingStubTaskView()` gate was ineffective on
-  existing-card paths and has been removed. The subsequent attempt to null
-  the `onGestureAnimationStart()` input was also removed because it was
-  broader than necessary.
-- At native Overview entry, log the source's activity type and running-task
-  index. At the exact insertion/reuse boundary log
-  `Native HOME running task skipped at showCurrentTask`. If no such line
-  occurs when opening from Home, the user-visible motion must be traced
-  elsewhere; this build does not mask the motion with any offset.
+- For an Overview transition **from Home**, preserve Quickstep's native
+  `RecentsView.showCurrentTask()` lifecycle. Reject Home at its existing-card
+  lookup (`RecentsViewUtils.getRunningTaskViewFromGroupTaskInfo()`) and at its
+  placeholder decision (`RecentsView.shouldAvoidAddingStubTaskView()`).
+  Native running-task cleanup, page selection, thumbnail state and
+  gesture initialization still execute. No grid translation/compensation.
+- The earlier wholesale `showCurrentTask()` interception was removed
+  because it skipped native lifecycle bookkeeping. The even earlier
+  native placeholder-only veto missed the existing-card path.
+- Native Overview entry logs the source activity type; for a Home task,
+  expect `Native HOME entry: not selecting existing running TaskView`
+  and `Native HOME entry: native placeholder vetoed`.
 - Preserve stock `TaskViewSimulator` geometry for
   `ACTIVITY_TYPE_HOME` remote animation targets; only app windows are
   redirected toward their corresponding recent-task card.
@@ -119,8 +117,9 @@ A zero `maxScroll` means all rows fit on screen; scrolling is not possible
 until there are more recent tasks. The `Native pager bounds: min=0 max=...` diagnostic must now
 match the grid's `maxScroll=...` when the native layout is active.
 On entry from Home, look for
-`Native overview gesture source: activityType=2` and
-`Native HOME running task skipped at showCurrentTask`.
+`Native overview gesture source: activityType=2`,
+`Native HOME entry: not selecting existing running TaskView`, and
+`Native HOME entry: native placeholder vetoed`.
 If a Home remote surface is present it logs
 `Native HOME target: leaving simulator geometry unchanged`.
 The entry animation path logs `Native entry animation target=[...]`
