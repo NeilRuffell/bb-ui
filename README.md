@@ -4,8 +4,17 @@ Vector/LSPosed module for physical-keyboard Android improvements.
 
 ## Settings type-to-search
 
-**Unchanged from `main`.** Its existing scopes remain
-`com.android.settings` and `com.android.settings.intelligence`.
+**Branch:** `feat/settings-hide-idle-search-bar`, created from `master`.
+
+On the Settings homepage the idle search card is hidden, reclaiming its
+height and bottom spacing. The app-bar container keeps the system status-bar
+inset so homepage content is not drawn underneath the status bar.
+
+The existing physical-keyboard type-to-search and search-query seeding
+are unchanged: type a letter or digit on the Settings homepage to open the
+regular Settings search activity with that first character inserted. The
+search activity retains its editable search field. The existing Vector scopes
+remain `com.android.settings` and `com.android.settings.intelligence`.
 
 ## Two-column vertical Recents — native Quickstep adapter (experimental)
 
