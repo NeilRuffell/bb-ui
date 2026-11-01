@@ -15,6 +15,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.WeakHashMap;
+import java.util.concurrent.atomic.AtomicReference;
 
 import de.robv.android.xposed.IXposedHookLoadPackage;
 import de.robv.android.xposed.XC_MethodHook;
@@ -46,6 +47,7 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
 
     private static int enabled = -1;
     private static boolean firstLayoutLogged;
+    private static boolean firstTaskOrientationLogged;
     private static final WeakHashMap<View, Boolean> SCREENSHOT_PENDING = new WeakHashMap<>();
 
     @Override public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lp) {
@@ -70,7 +72,8 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
         try {
             final Object portrait = XposedHelpers.getStaticObjectField(handler, "PORTRAIT");
             final Object landscape = XposedHelpers.getStaticObjectField(handler, "LANDSCAPE");
-            final Object adapted = orientationProxy(handler, portrait, landscape, loader);
+            final AtomicReference<Object> adaptedHandler = new AtomicReference<>(
+                    orientationProxy(handler, portrait, landscape, loader));
 
             // TaskView obtains its orientation directly from RecentsOrientedState,
             // not from the PagedView field. Redirect its native primary/secondary
@@ -79,7 +82,12 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
             XposedHelpers.findAndHookMethod(task, "getPagedOrientationHandler",
                     new XC_MethodHook() {
                 @Override protected void afterHookedMethod(MethodHookParam p) {
-                    if (active((View) p.thisObject)) p.setResult(adapted);
+                    if (!active((View) p.thisObject)) return;
+                    p.setResult(adaptedHandler.get());
+                    if (!firstTaskOrientationLogged) {
+                        firstTaskOrientationLogged = true;
+                        Log.w(TAG, "Native TaskView horizontal gestures active");
+                    }
                 }
             });
 
@@ -92,8 +100,14 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
                 @Override protected void beforeHookedMethod(MethodHookParam p) {
                     if (!recents.isInstance(p.thisObject)
                             || !active((View) p.thisObject)) return;
-                    if (p.args[0] == adapted) return;
-                    p.args[0] = adapted;
+                    if (p.args[0] == adaptedHandler.get()) return;
+                    // RecentsView checks handler equality to decide when to
+                    // recreate its native drag-layer gesture controllers.
+                    // Replacing the proxy on orientation updates preserves that
+                    // lifecycle instead of retaining a stale swipe detector.
+                    Object next = orientationProxy(handler, portrait, landscape, loader);
+                    adaptedHandler.set(next);
+                    p.args[0] = next;
                 }
             });
 
