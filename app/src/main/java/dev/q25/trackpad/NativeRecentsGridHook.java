@@ -714,16 +714,9 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
     }
 
     /**
-     * Set the native page selection before overview's entrance animation.
-     * Unlike a post-layout scrollTo(0, 0), this is the state used by
-     * PagedView, task snapping, RecentsView scroll offsets and animation.
-     * Using the built-in page-initialized callback also handles task loads
-     * occurring after the overview command begins.
-     */
-    /**
-     * Inspects the native GroupedTaskInfo without changing the gesture state.
-     * 2 = ACTIVITY_TYPE_HOME, 1 = ACTIVITY_TYPE_STANDARD,
-     * -1 = absent or unclassifiable.
+     * Inspects native GroupedTaskInfo without modifying the gesture state.
+     * Activity type 2 is ACTIVITY_TYPE_HOME, type 1 is STANDARD.
+     * Returns -1 if no primary task can be classified.
      */
     private static int groupedTaskActivityType(Object grouped) {
         if (grouped == null) return -1;
@@ -737,6 +730,10 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
         }
     }
 
+    /**
+     * Select native page zero once per overview entry. PagedView uses the
+     * same state for snapping, scroll offsets, and overview transitions.
+     */
     private static void selectInitialGridPage(View root) {
         if (!active(root) || OVERVIEW_ENTRY_SELECTED.containsKey(root)) return;
         OVERVIEW_ENTRY_SELECTED.put(root, Boolean.TRUE);
