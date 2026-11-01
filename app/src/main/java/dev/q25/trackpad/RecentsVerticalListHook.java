@@ -140,9 +140,10 @@ public final class RecentsVerticalListHook implements IXposedHookLoadPackage {
                             return;
                         case MotionEvent.ACTION_CANCEL:
                         case MotionEvent.ACTION_UP:
-                            st.dragging = false;
-                            st.horizontalDrag = false;
-                            p.setResult(false);
+                            // Let onTouchEvent consume the terminal event before clearing
+                            // dragging, or Quickstep may treat the release as a home tap.
+                            p.setResult(st.dragging);
+                            if (!st.dragging) st.horizontalDrag = false;
                             return;
                         default:
                             p.setResult(false);
@@ -167,6 +168,7 @@ public final class RecentsVerticalListHook implements IXposedHookLoadPackage {
                     } else if (event.getActionMasked() == MotionEvent.ACTION_UP
                             || event.getActionMasked() == MotionEvent.ACTION_CANCEL) {
                         st.dragging = false;
+                        st.horizontalDrag = false;
                     }
                     p.setResult(true);
                 }
