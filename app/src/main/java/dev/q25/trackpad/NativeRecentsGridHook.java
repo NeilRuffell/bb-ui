@@ -520,6 +520,40 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
                 });
             }
 
+            // Overview entry is a native page-selection operation, not a
+            // late scroll correction. Keep page zero as the requested initial
+            // page BEFORE the existing overview transition animates.
+            //
+            // A button-triggered transition runs onStateTransitionStart;
+            // an in-app overview gesture goes through onGestureAnimationStart.
+            Class<?> launcherRecents = XposedHelpers.findClassIfExists(
+                    "com.android.quickstep.views.LauncherRecentsView", loader);
+            if (launcherRecents != null) {
+                XposedBridge.hookAllMethods(launcherRecents,
+                        "onStateTransitionStart", new XC_MethodHook() {
+                    @Override protected void beforeHookedMethod(MethodHookParam p) {
+                        View root = (View) p.thisObject;
+                        Object toState = p.args[0];
+                        boolean entering = active(root)
+                                && !XposedHelpers.getBooleanField(
+                                        root, "mOverviewStateEnabled")
+                                && XposedHelpers.getBooleanField(
+                                        toState, "isRecentsViewVisible");
+                        p.setObjectExtra("bbuiEnteringOverview", entering);
+                    }
+                    @Override protected void afterHookedMethod(MethodHookParam p) {
+                        if (Boolean.TRUE.equals(p.getObjectExtra("bbuiEnteringOverview")))
+                            selectInitialGridPage((View) p.thisObject);
+                    }
+                });
+            }
+            XposedBridge.hookAllMethods(recents, "onGestureAnimationStart",
+                    new XC_MethodHook() {
+                @Override protected void afterHookedMethod(MethodHookParam p) {
+                    selectInitialGridPage((View) p.thisObject);
+                }
+            });
+
             // Quickstep deliberately hides the running task's screenshot and
             // composites its live remote app surface instead. That surface
             // follows the stock fullscreen simulator, not our two-column
@@ -561,6 +595,25 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
             Log.e(TAG, "Quickstep hook installation failed", error);
             XposedBridge.log("BB UI: Quickstep hook installation failed: " + error);
         }
+    }
+
+    /**
+     * Set the native page selection before overview's entrance animation.
+     * Unlike a post-layout scrollTo(0, 0), this is the state used by
+     * PagedView, task snapping, RecentsView scroll offsets and animation.
+     * Using the built-in page-initialized callback also handles task loads
+     * occurring after the overview command begins.
+     */
+    private static void selectInitialGridPage(View root) {
+        if (!active(root)) return;
+        XposedHelpers.callMethod(root, "runOnPageScrollsInitialized",
+                (Runnable) () -> {
+                    if (!active(root)) return;
+                    XposedHelpers.callMethod(root, "setCurrentPageScrollDiff", 0);
+                    XposedHelpers.callMethod(root, "setCurrentPage", 0);
+                    Log.w(TAG, "Native overview initial page=0 scrollY="
+                            + root.getScrollY());
+                });
     }
 
     /**
