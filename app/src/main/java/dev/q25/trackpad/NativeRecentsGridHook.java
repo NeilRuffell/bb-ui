@@ -54,6 +54,8 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
     private static final WeakHashMap<View, Integer> NATIVE_SCROLL_LIMITS = new WeakHashMap<>();
     private static final WeakHashMap<View, String> NATIVE_SCROLL_BOUND_LOG = new WeakHashMap<>();
     private static final WeakHashMap<Object, Object> ORIENTATION_STATES = new WeakHashMap<>();
+    private static final WeakHashMap<Object, Integer> DISMISS_SWIPE_SIGNS = new WeakHashMap<>();
+    private static final ThreadLocal<Integer> ACTIVE_NATIVE_DISMISS_SIGN = new ThreadLocal<>();
     private static final WeakHashMap<View, Boolean> SCREENSHOT_PENDING = new WeakHashMap<>();
 
     @Override public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lp) {
@@ -130,6 +132,115 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
                 // Keep the Recents module active. The synchronized orientation
                 // state above still supplies the native horizontal property.
                 Log.w(TAG, "Native dismiss X property not found; using shared orientation");
+            }
+
+            // The native dismiss controller deliberately registers only the
+            // "up" direction, which maps to horizontal right on the landscape
+            // gesture axis. Its detector already supports DIRECTION_BOTH.
+            // Extend the SAME detector/controller to accept either left or
+            // right; keep Quickstep's native haptics, springs, and task removal.
+            //
+            // The controller's single-sided implementation also assumes
+            // all dismissals travel right. Adjust its native factor and off-
+            // screen distance at drag start according to the touch direction.
+            Class<?> dismissTouch = XposedHelpers.findClassIfExists(
+                    "com.android.launcher3.uioverrides.touchcontrollers.TaskViewDismissTouchController",
+                    loader);
+            if (dismissTouch != null) {
+                XposedBridge.hookAllMethods(dismissTouch, "onActionDown",
+                        new XC_MethodHook() {
+                    @Override protected void afterHookedMethod(MethodHookParam p) {
+                        if (!Boolean.TRUE.equals(p.getResult())
+                                || !activeDismissController(p.thisObject)) return;
+                        Object detector = XposedHelpers.getObjectField(
+                                p.thisObject, "detector");
+                        // SingleAxisSwipeDetector.DIRECTION_BOTH = 1 | 2.
+                        XposedHelpers.callMethod(detector,
+                                "setDetectableScrollConditions", 3, false);
+                    }
+                });
+
+                XposedBridge.hookAllMethods(dismissTouch, "onDragStart",
+                        new XC_MethodHook() {
+                    @Override protected void beforeHookedMethod(MethodHookParam p) {
+                        if (!activeDismissController(p.thisObject)) return;
+                        Object detector = XposedHelpers.getObjectField(
+                                p.thisObject, "detector");
+                        boolean positive = (Boolean) XposedHelpers.callMethod(
+                                detector, "wasInitialTouchPositive");
+                        int detectorSign = positive ? 1 : -1;
+                        boolean rtl = XposedHelpers.getBooleanField(
+                                p.thisObject, "isRtl");
+                        int physicalSign = rtl ? -detectorSign : detectorSign;
+                        synchronized (DISMISS_SWIPE_SIGNS) {
+                            DISMISS_SWIPE_SIGNS.put(p.thisObject, detectorSign);
+                        }
+                        XposedHelpers.setIntField(
+                                p.thisObject, "verticalFactor", physicalSign);
+
+                        if (physicalSign < 0) {
+                            // Native landscape dismissal length measures to
+                            // the RIGHT edge. Use the matching LEFT-edge
+                            // distance so a left swipe fully removes the card.
+                            Rect thumbnail = (Rect) XposedHelpers.getObjectField(
+                                    p.thisObject, "tempTaskThumbnailBounds");
+                            Object container = XposedHelpers.getObjectField(
+                                    p.thisObject, "container");
+                            View dragLayer = (View) XposedHelpers.callMethod(
+                                    container, "getDragLayer");
+                            int rightDistance = Math.max(1,
+                                    dragLayer.getWidth() - thumbnail.left);
+                            int leftDistance = Math.max(1, thumbnail.right);
+                            int nativeLength = XposedHelpers.getIntField(
+                                    p.thisObject, "dismissLength");
+                            int leftLength = Math.max(1, Math.round(
+                                    nativeLength * (leftDistance
+                                            / (float) rightDistance)));
+                            XposedHelpers.setIntField(
+                                    p.thisObject, "dismissLength", leftLength);
+                        }
+                        Log.w(TAG, "Native dismiss drag direction="
+                                + (physicalSign < 0 ? "left" : "right"));
+                    }
+                });
+
+                XC_MethodHook nativeDismissMotion = new XC_MethodHook() {
+                    @Override protected void beforeHookedMethod(MethodHookParam p) {
+                        if (!activeDismissController(p.thisObject)) return;
+                        synchronized (DISMISS_SWIPE_SIGNS) {
+                            ACTIVE_NATIVE_DISMISS_SIGN.set(
+                                    DISMISS_SWIPE_SIGNS.get(p.thisObject));
+                        }
+                    }
+                    @Override protected void afterHookedMethod(MethodHookParam p) {
+                        ACTIVE_NATIVE_DISMISS_SIGN.remove();
+                    }
+                };
+                XposedBridge.hookAllMethods(dismissTouch,
+                        "onDrag", nativeDismissMotion);
+                XposedBridge.hookAllMethods(dismissTouch,
+                        "onDragEnd", nativeDismissMotion);
+
+                // The native detector already received this event and the
+                // native listener is already animating the card. Bypass only
+                // the final one-sided check in the stock controller so the
+                // drag layer can take ownership for either swipe direction.
+                XposedBridge.hookAllMethods(dismissTouch,
+                        "onControllerInterceptTouchEvent", new XC_MethodHook() {
+                    @Override protected void afterHookedMethod(MethodHookParam p) {
+                        if (Boolean.TRUE.equals(p.getResult())
+                                || !activeDismissController(p.thisObject)) return;
+                        Object detector = XposedHelpers.getObjectField(
+                                p.thisObject, "detector");
+                        if (Boolean.TRUE.equals(XposedHelpers.callMethod(
+                                detector, "isDraggingState"))) {
+                            p.setResult(true);
+                        }
+                    }
+                });
+                Log.w(TAG, "Native bidirectional task dismissal registered");
+            } else {
+                Log.e(TAG, "Native task dismissal controller not found");
             }
 
             // In the portrait vertical grid, a reverse horizontal swipe must
@@ -443,6 +554,12 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
         }
     }
 
+    private static boolean activeDismissController(Object controller) {
+        Object recents = XposedHelpers.getObjectField(
+                controller, "recentsView");
+        return recents instanceof View && active((View) recents);
+    }
+
     private static boolean active(View view) {
         if (enabled == -1) {
             try {
@@ -472,6 +589,17 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
                     if ("equals".equals(name)) return proxy == args[0];
                     if ("hashCode".equals(name)) return System.identityHashCode(proxy);
                     return "BBUIVerticalPrimaryAxis";
+                }
+                // The stock dismiss controller's notion of "up" always
+                // means its one configured dismiss direction. While its native
+                // onDrag/onDragEnd runs, interpret "up" as movement toward the
+                // active left/right dismissal edge, including reverse flings.
+                if ("isGoingUp".equals(name)) {
+                    Integer sign = ACTIVE_NATIVE_DISMISS_SIGN.get();
+                    if (sign != null && args != null && args.length > 0
+                            && args[0] instanceof Number) {
+                        return ((Number) args[0]).floatValue() * sign > 0f;
+                    }
                 }
                 Object delegate = isVerticalGridAxisOrGestureMethod(name)
                         ? landscape : portrait;
