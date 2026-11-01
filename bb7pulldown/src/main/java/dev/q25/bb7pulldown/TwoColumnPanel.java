@@ -5,6 +5,8 @@ import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
+import android.text.TextUtils;
+import android.text.format.DateFormat;
 import android.util.Log;
 import android.view.Gravity;
 import android.view.KeyEvent;
@@ -14,14 +16,17 @@ import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
+import android.widget.TextView;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Date;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * Independent 15/85 notification panel. The left side is a selectable
- * presentation-only list; the right side remains empty at this stage.
+ * presentation-only list; the right side displays selected-app summaries.
  * Android owns notification lifecycle and keyguard privacy as before.
  */
 final class TwoColumnPanel extends FrameLayout {
@@ -30,8 +35,14 @@ final class TwoColumnPanel extends FrameLayout {
     private static final String TAG = "BB7-PullDown";
     private final CloseListener onClose;
     private final LinearLayout iconList;
+    private final LinearLayout notificationList;
+    private final ScrollView notificationScroller;
+    private final TextView selectedAppHeading;
     private final List<FrameLayout> iconRows = new ArrayList<>();
     private List<String> renderedPackages = Collections.emptyList();
+    private List<NotificationItem> notifications = Collections.emptyList();
+    private List<NotificationItem> renderedCards = Collections.emptyList();
+    private String renderedCardPackage;
     private String selectedPackage;
     private float touchStartY;
     private boolean trackingClose;
@@ -60,6 +71,7 @@ final class TwoColumnPanel extends FrameLayout {
         iconScroller.setVerticalScrollBarEnabled(false);
         iconScroller.setClipToPadding(false);
         iconScroller.setPadding(0, dp(10), 0, dp(10));
+        addSwipeUpDismiss(iconScroller);
         left.addView(iconScroller, new FrameLayout.LayoutParams(
                 LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
 
@@ -78,6 +90,45 @@ final class TwoColumnPanel extends FrameLayout {
         right.setBackgroundColor(Color.rgb(22, 28, 36));
         columns.addView(right, new LinearLayout.LayoutParams(
                 0, LinearLayout.LayoutParams.MATCH_PARENT, PanelRatio.RIGHT_WEIGHT));
+
+        LinearLayout rightContent = new LinearLayout(context);
+        rightContent.setOrientation(LinearLayout.VERTICAL);
+        right.addView(rightContent, new FrameLayout.LayoutParams(
+                LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
+
+        selectedAppHeading = new TextView(context);
+        selectedAppHeading.setTextColor(Color.rgb(215, 231, 244));
+        selectedAppHeading.setTextSize(14);
+        selectedAppHeading.setGravity(Gravity.CENTER_VERTICAL);
+        selectedAppHeading.setPadding(dp(12), dp(7), dp(12), dp(7));
+        selectedAppHeading.setBackgroundColor(Color.rgb(28, 37, 48));
+        rightContent.addView(selectedAppHeading, new LinearLayout.LayoutParams(
+                LayoutParams.MATCH_PARENT, dp(44)));
+
+        notificationScroller = new ScrollView(context);
+        notificationScroller.setFillViewport(true);
+        notificationScroller.setClipToPadding(false);
+        notificationScroller.setPadding(dp(10), dp(10), dp(10), dp(10));
+        addSwipeUpDismiss(notificationScroller);
+        rightContent.addView(notificationScroller, new LinearLayout.LayoutParams(
+                LayoutParams.MATCH_PARENT, 0, 1f));
+
+        notificationList = new LinearLayout(context);
+        notificationList.setOrientation(LinearLayout.VERTICAL);
+        notificationScroller.addView(notificationList, new ScrollView.LayoutParams(
+                LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
+    }
+
+    /** Update the two columns from the same notification snapshot. */
+    void setNotifications(List<NotificationItem> items) {
+        notifications = items == null ? Collections.emptyList()
+                : Collections.unmodifiableList(new ArrayList<>(items));
+        List<String> packages = new ArrayList<>();
+        for (NotificationItem item : notifications) {
+            if (item != null) packages.add(item.packageName);
+        }
+        setNotificationPackages(packages);
+        renderSelectedNotifications();
     }
 
     /**
@@ -166,9 +217,136 @@ final class TwoColumnPanel extends FrameLayout {
         if (pkg.equals(selectedPackage)) return;
         selectedPackage = pkg;
         updateSelectedHighlight();
+        renderSelectedNotifications();
         Log.i(TAG, "App icon selected: index="
                 + (renderedPackages.indexOf(pkg) + 1)
                 + " of=" + renderedPackages.size());
+    }
+
+    private void renderSelectedNotifications() {
+        List<NotificationItem> selected = NotificationSelectionPolicy.forPackage(
+                notifications, selectedPackage);
+        if (Objects.equals(renderedCardPackage, selectedPackage)
+                && renderedCards.equals(selected)) return;
+
+        renderedCardPackage = selectedPackage;
+        renderedCards = selected;
+        notificationList.removeAllViews();
+
+        if (selectedPackage == null) {
+            selectedAppHeading.setText("Notifications");
+            addPlaceholder("No active notifications");
+            return;
+        }
+
+        CharSequence appName = selectedPackage;
+        try {
+            PackageManager pm = getContext().getPackageManager();
+            appName = pm.getApplicationLabel(pm.getApplicationInfo(selectedPackage, 0));
+        } catch (PackageManager.NameNotFoundException | RuntimeException ignored) { }
+        selectedAppHeading.setText(appName + " (" + selected.size() + ")");
+
+        if (selected.isEmpty()) {
+            addPlaceholder("No notifications for this app");
+        } else {
+            for (NotificationItem item : selected) {
+                notificationList.addView(createNotificationCard(item));
+            }
+        }
+        notificationScroller.scrollTo(0, 0);
+        Log.i(TAG, "Selected app notifications displayed: count=" + selected.size());
+    }
+
+    private void addPlaceholder(String message) {
+        TextView placeholder = text(message, 13, Color.rgb(151, 168, 182));
+        placeholder.setPadding(dp(8), dp(20), dp(8), dp(16));
+        notificationList.addView(placeholder);
+    }
+
+    private View createNotificationCard(NotificationItem item) {
+        LinearLayout card = new LinearLayout(getContext());
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(dp(12), dp(11), dp(12), dp(11));
+        GradientDrawable background = new GradientDrawable();
+        background.setColor(Color.rgb(40, 52, 66));
+        background.setCornerRadius(dp(5));
+        card.setBackground(background);
+
+        TextView title = text(item.title.isEmpty() ? "Notification" : item.title,
+                14, Color.WHITE);
+        title.setTypeface(null, android.graphics.Typeface.BOLD);
+        title.setMaxLines(2);
+        title.setEllipsize(TextUtils.TruncateAt.END);
+        card.addView(title);
+
+        if (!item.text.isEmpty()) {
+            TextView body = text(item.text, 12, Color.rgb(213, 221, 230));
+            body.setMaxLines(8);
+            body.setEllipsize(TextUtils.TruncateAt.END);
+            LinearLayout.LayoutParams bodyParams = new LinearLayout.LayoutParams(
+                    LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT);
+            bodyParams.topMargin = dp(5);
+            card.addView(body, bodyParams);
+        }
+
+        if (item.postedAt > 0) {
+            TextView time = text(DateFormat.getTimeFormat(getContext())
+                    .format(new Date(item.postedAt)),
+                    10, Color.rgb(153, 170, 184));
+            LinearLayout.LayoutParams timeParams = new LinearLayout.LayoutParams(
+                    LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT);
+            timeParams.topMargin = dp(6);
+            card.addView(time, timeParams);
+        }
+
+        card.setContentDescription((item.title.isEmpty() ? "Notification" : item.title)
+                + (item.text.isEmpty() ? "" : ", " + item.text));
+        LinearLayout.LayoutParams cardParams = new LinearLayout.LayoutParams(
+                LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT);
+        cardParams.bottomMargin = dp(9);
+        card.setLayoutParams(cardParams);
+        return card;
+    }
+
+    private TextView text(String value, float size, int color) {
+        TextView text = new TextView(getContext());
+        text.setText(value);
+        text.setTextSize(size);
+        text.setTextColor(color);
+        return text;
+    }
+
+    /**
+     * Swipe-up dismiss remains available when the column has no more
+     * content below. If it can scroll further, ordinary scrolling wins.
+     * A gesture that begins while scrollable cannot dismiss mid-scroll.
+     */
+    private void addSwipeUpDismiss(ScrollView scroller) {
+        scroller.setOnTouchListener(new View.OnTouchListener() {
+            private float startY;
+            private boolean canDismiss;
+            private boolean dismissed;
+
+            @Override public boolean onTouch(View view, MotionEvent event) {
+                switch (event.getActionMasked()) {
+                    case MotionEvent.ACTION_DOWN:
+                        startY = event.getRawY();
+                        canDismiss = !view.canScrollVertically(1);
+                        dismissed = false;
+                        return false;
+                    case MotionEvent.ACTION_MOVE:
+                        if (canDismiss && !dismissed
+                                && startY - event.getRawY() > dp(65)) {
+                            dismissed = true;
+                            onClose.onClose();
+                            return true;
+                        }
+                        return false;
+                    default:
+                        return false;
+                }
+            }
+        });
     }
 
     private void updateSelectedHighlight() {
