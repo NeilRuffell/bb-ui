@@ -7,8 +7,8 @@ android {
         applicationId 'dev.q25.trackpad'
         minSdk 33
         targetSdk 28
-        versionCode 12
-        versionName '0.6.0-native-pager-dev'
+        versionCode 13
+        versionName '0.6.1-native-pager-dev'
     }
 }
 

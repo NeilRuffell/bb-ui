@@ -29,6 +29,10 @@ baseline, not the older Recents experiments.
   the vertical viewport.
 - Use Android/Quickstep's own gesture interception. No custom swipe,
   trackpad-scroll or fling implementations.
+- Convert the currently running app's live SurfaceControl into a real
+  Quickstep screenshot when Overview settles; only then finish the remote
+  Recents animation so the original-size live app cannot remain behind the
+  grid while its task card shows no image.
 
 This is **still a platform-specific LSPosed compatibility hook**, not an
 upstream feature flag. A successful build does **not** prove that every Quickstep
