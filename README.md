@@ -1,6 +1,6 @@
 # BB UI
 
-## BB7 Pull-down — app-icon enumeration prototype (v0.2.1)
+## BB7 Pull-down — selectable app-icon prototype (v0.3.0)
 
 **Branch:** `feat/bb7-pulldown` (fresh from `master`). No code from the abandoned
 `feat/bb7-shade` notification/QS hooks is included.
@@ -20,8 +20,12 @@ live posted/removed callbacks. An additional refresh occurs when opening
 the panel. Duplicate notifications from the same package show one icon,
 in first-seen order. This enumerates active notifications rather than the
 shade's filtered/rendered list, so some system/silent entries may appear.
-The right side has no notification cards or QS yet; selecting an icon is
-not implemented.
+The icon column is now selectable by touch, trackpad and keyboard:
+Up/Down moves the selection, trackpad click/Enter selects, and the currently
+selected row has a blue BB7-inspired gradient. The first icon is focused on
+opening. Selection persists across live notification updates when its app
+remains active. The right 85% panel stays empty; no notification actions
+or filtering are implemented.
 
 **Initial gesture limitation:** This prototype consumes finger touches that
 begin on the visible status bar while enabled. Fullscreen immersive apps

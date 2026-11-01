@@ -182,7 +182,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
             root.post(() -> {
                 root.animate().translationY(0f).setDuration(220).withEndAction(() -> {
                     openingOrClosing = false;
-                    root.requestFocus();
+                    root.focusSelectedAppIcon();
                 }).start();
             });
         } catch (Throwable error) {
