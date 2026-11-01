@@ -108,6 +108,18 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
                 }
             });
 
+            // After native RecentsView.onLayout has updated its task simulator,
+            // request the appropriate vertical thumbnails from its native model.
+            // No task geometry is changed here.
+            XposedBridge.hookAllMethods(recents, "onLayout", new XC_MethodHook() {
+                @Override protected void afterHookedMethod(MethodHookParam p) {
+                    View root = (View) p.thisObject;
+                    if (!active(root) || state(root).rowStep == 0) return;
+                    root.scrollTo(0, state(root).offset);
+                    XposedHelpers.callMethod(root, "loadVisibleTaskData");
+                }
+            });
+
             // Let PagedView update mMaxScroll itself using its normal layout flow.
             // The only changed value is the *actual vertical* content extent.
             XposedHelpers.findAndHookMethod(paged, "computeMaxScroll",
