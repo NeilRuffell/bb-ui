@@ -2,7 +2,7 @@ name: Build BB UI debug APK
 
 on:
   push:
-    branches: [main, feat/native-vertical-recents, feat/settings-hide-idle-search-bar]
+    branches: [main, master, 'feat/**']
   pull_request:
   workflow_dispatch:
 
@@ -47,7 +47,15 @@ jobs:
           gradle-version: '8.11.1'
 
       - name: Compile debug APK
-        run: gradle :app:assembleDebug --no-daemon --stacktrace
+        run: gradle :app:assembleDebug :bb7focus:assembleDebug --no-daemon --stacktrace
+
+      - name: Upload BB7 Appearance debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: bb7-appearance-debug-apk
+          path: bb7focus/build/outputs/apk/debug/bb7focus-debug.apk
+          if-no-files-found: error
+          retention-days: 14
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
