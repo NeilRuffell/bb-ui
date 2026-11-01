@@ -5,6 +5,7 @@ import android.provider.Settings;
 import android.util.Log;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.MotionEvent;
 
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.InvocationTargetException;
@@ -49,6 +50,7 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
     private static boolean firstLayoutLogged;
     private static boolean firstTaskOrientationLogged;
     private static String lastScrollGeometry;
+    private static final WeakHashMap<View, float[]> NATIVE_TOUCH_PROBES = new WeakHashMap<>();
     private static final WeakHashMap<Object, Object> ORIENTATION_STATES = new WeakHashMap<>();
     private static final WeakHashMap<View, Boolean> SCREENSHOT_PENDING = new WeakHashMap<>();
 
@@ -112,14 +114,21 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
             // Native swipe-to-dismiss springs consume TaskView's secondary
             // dismiss translation property. Return its existing X-axis native
             // property directly; don't rely on Kotlin getter inlining.
-            final Object dismissX = XposedHelpers.getStaticObjectField(
-                    task, "DISMISS_TRANSLATION_X");
-            XposedHelpers.findAndHookMethod(task,
-                    "getSecondaryDismissTranslationProperty", new XC_MethodHook() {
-                @Override protected void afterHookedMethod(MethodHookParam p) {
-                    if (active((View) p.thisObject)) p.setResult(dismissX);
-                }
-            });
+            java.lang.reflect.Field dismissXField =
+                    XposedHelpers.findFieldIfExists(task, "DISMISS_TRANSLATION_X");
+            if (dismissXField != null) {
+                final Object dismissX = dismissXField.get(null);
+                XposedHelpers.findAndHookMethod(task,
+                        "getSecondaryDismissTranslationProperty", new XC_MethodHook() {
+                    @Override protected void afterHookedMethod(MethodHookParam p) {
+                        if (active((View) p.thisObject)) p.setResult(dismissX);
+                    }
+                });
+            } else {
+                // Keep the Recents module active. The synchronized orientation
+                // state above still supplies the native horizontal property.
+                Log.w(TAG, "Native dismiss X property not found; using shared orientation");
+            }
 
             // In the portrait vertical grid, a reverse horizontal swipe must
             // not reopen an app. Keep tap-to-launch; disable only the stock
@@ -163,6 +172,43 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
                         ORIENTATION_STATES.put(state, next);
                     }
                     p.args[0] = next;
+                }
+            });
+
+            // Input route instrumentation; no touch interception changes here.
+            // When a vertical gesture doesn't scroll, these messages distinguish
+            // a missing input event from a zero native scroll range.
+            XposedHelpers.findAndHookMethod(paged, "onInterceptTouchEvent",
+                    MotionEvent.class, new XC_MethodHook() {
+                @Override protected void afterHookedMethod(MethodHookParam p) {
+                    if (!recents.isInstance(p.thisObject)) return;
+                    View root = (View) p.thisObject;
+                    if (!active(root)) return;
+                    MotionEvent event = (MotionEvent) p.args[0];
+                    int action = event.getActionMasked();
+                    if (action == MotionEvent.ACTION_DOWN) {
+                        NATIVE_TOUCH_PROBES.put(root, new float[]{
+                                event.getX(), event.getY(), 0f
+                        });
+                    } else if (action == MotionEvent.ACTION_MOVE) {
+                        float[] start = NATIVE_TOUCH_PROBES.get(root);
+                        if (start == null || start[2] == 1f) return;
+                        float deltaY = event.getY() - start[1];
+                        float deltaX = event.getX() - start[0];
+                        if (Math.abs(deltaY) > dp(root, 28)
+                                || Math.abs(deltaX) > dp(root, 28)) {
+                            start[2] = 1f;
+                            Log.w(TAG, "Native pager touch: deltaX=" + Math.round(deltaX)
+                                    + " deltaY=" + Math.round(deltaY)
+                                    + " intercepted=" + p.getResult()
+                                    + " maxScroll=" + XposedHelpers.getIntField(
+                                            root, "mMaxScroll")
+                                    + " scrollY=" + root.getScrollY());
+                        }
+                    } else if (action == MotionEvent.ACTION_UP
+                            || action == MotionEvent.ACTION_CANCEL) {
+                        NATIVE_TOUCH_PROBES.remove(root);
+                    }
                 }
             });
 
