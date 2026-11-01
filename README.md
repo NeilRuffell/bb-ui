@@ -45,7 +45,7 @@ Research prototype. Compatibility and functionality must be verified on the actu
 
 Every push to `main` triggers [Build BB UI debug APK](https://github.com/NeilRuffell/bb-ui/actions). Open the latest successful workflow run and download the `bb-ui-debug-apk` artifact. GitHub Actions artifacts are ZIP files containing the installable `app-debug.apk`. This is a debug build, not a signed production release.
 
-## Feature 2 (v0.2.0-dev): Experimental two-column Recents grid
+## Feature 2 (v0.2.1-dev): Experimental two-column Recents grid
 
 **This is unverified development code. Do not enable on devices you cannot recover using ADB.**
 
@@ -78,3 +78,7 @@ Then restart the Quickstep process or reboot. If necessary, disable the BB UI sc
 - The hook has **not been compiled or tested** on LineageOS 24.0 here.
 - The prototype does not add notifications to Recents.
 - The tested Settings type-to-search feature is unchanged.
+
+### Grid v2 correction (experimental)
+
+The first grid prototype shifted task cards via translations while Quickstep continued paging horizontally; this caused off-screen and missing cards. v0.2.1-dev positions the actual task view bounds, resets horizontal scroll, and intercepts background vertical gestures. It is **not yet device-tested**. Quickstep's internal task animations, dismissal, and transforms still require validation; this is not a complete replacement of horizontal paging. Keep the global toggle off until ready to test, and disable immediately if the overview behaves incorrectly.
