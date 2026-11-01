@@ -39,6 +39,9 @@ public final class PullDownHook implements IXposedHookLoadPackage {
     private static final String STATUS_BAR =
             "com.android.systemui.statusbar.phone.PhoneStatusBarView";
     private static final String ENABLE_PROP = "debug.bb7pulldown.enabled";
+    // Android internal WindowManager.LayoutParams.TYPE_STATUS_BAR_SUB_PANEL
+    // is hidden from public SDK stubs; framework value is FIRST_SYSTEM_WINDOW+17.
+    private static final int STATUS_BAR_SUB_PANEL_WINDOW_TYPE = 2017;
     private static final Map<View, SwipeState> SWIPES =
             Collections.synchronizedMap(new WeakHashMap<>());
     private static boolean shown;
@@ -143,7 +146,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
         WindowManager.LayoutParams params = new WindowManager.LayoutParams(
                 WindowManager.LayoutParams.MATCH_PARENT,
                 WindowManager.LayoutParams.MATCH_PARENT,
-                WindowManager.LayoutParams.TYPE_STATUS_BAR_SUB_PANEL,
+                STATUS_BAR_SUB_PANEL_WINDOW_TYPE,
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
                 PixelFormat.OPAQUE);
         params.setTitle("BB7 Pull-down");
