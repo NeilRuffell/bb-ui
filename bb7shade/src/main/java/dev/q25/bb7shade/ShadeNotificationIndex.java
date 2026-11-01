@@ -77,6 +77,7 @@ final class ShadeNotificationIndex {
     // Diagnostics are deliberately bounded, without notification data.
     private static final Set<String> loggedNativeFailures = new HashSet<>();
     private static final int MAX_DISTINCT_NATIVE_FAILURES = 5;
+    private static final Set<String> loggedAccessPaths = new HashSet<>();
 
     private ShadeNotificationIndex() {}
 
@@ -140,17 +141,22 @@ final class ShadeNotificationIndex {
                 }
                 return;
             }
-            stage = "getEntryAdapter";
-            Object adapter = XposedHelpers.callMethod(row, "getEntryAdapter");
-            // This is normal for rows still being constructed.
-            if (adapter == null) return;
-            stage = "getKey";
-            String key = (String) XposedHelpers.callMethod(adapter, "getKey");
+            stage = "nativeEntry";
+            Object entry = readNativeEntry(row);
+            if (entry == null) return;
             stage = "getSbn";
             StatusBarNotification sbn = (StatusBarNotification)
-                    XposedHelpers.callMethod(adapter, "getSbn");
-            // Bundle/placeholder rows can have no StatusBarNotification.
-            if (key == null || sbn == null) return;
+                    XposedHelpers.callMethod(entry, "getSbn");
+            if (sbn == null) return;
+            stage = "getKey";
+            String key;
+            try {
+                key = (String) XposedHelpers.callMethod(entry, "getKey");
+            } catch (NoSuchMethodError noKeyAccessor) {
+                key = sbn.getKey();
+                logAccessPath("StatusBarNotification.getKey");
+            }
+            if (key == null) return;
             String packageName = sbn.getPackageName();
             if (packageName == null || packageName.isEmpty() || !keys.add(key)) return;
             List<NotificationRef> refs = byApp.get(packageName);
@@ -163,16 +169,56 @@ final class ShadeNotificationIndex {
             // Never log package names, message data, keys, or exception
             // messages. Exception types and failing API stage are enough
             // to distinguish a missing method from other incompatibilities.
-            Throwable root = error;
-            while (root.getCause() != null && root.getCause() != root) {
-                root = root.getCause();
+            logNativeFailure(stage, error);
+        }
+    }
+
+    /**
+     * Source-level getEntryAdapter() is missing on the running Q25.
+     * Try LineageOS backing fields before using the accessor. No mutation.
+     */
+    private static Object readNativeEntry(android.view.View row) {
+        Class<?> rowType = row.getClass();
+        if (XposedHelpers.findFieldIfExists(rowType, "mEntryAdapter") != null) {
+            Object entry = XposedHelpers.getObjectField(row, "mEntryAdapter");
+            if (entry != null) {
+                logAccessPath("mEntryAdapter");
+                return entry;
             }
-            String signature = stage + ":" + root.getClass().getSimpleName();
-            if (loggedNativeFailures.size() < MAX_DISTINCT_NATIVE_FAILURES
-                    && loggedNativeFailures.add(signature)) {
-                Log.w(TAG, "Native row reader failed at " + stage
-                        + " (" + root.getClass().getSimpleName() + ")");
+        }
+        if (XposedHelpers.findFieldIfExists(rowType, "mEntry") != null) {
+            Object entry = XposedHelpers.getObjectField(row, "mEntry");
+            if (entry != null) {
+                logAccessPath("mEntry");
+                return entry;
             }
+        }
+        try {
+            Object entry = XposedHelpers.callMethod(row, "getEntryAdapter");
+            if (entry != null) logAccessPath("getEntryAdapter");
+            return entry;
+        } catch (NoSuchMethodError noAccessor) {
+            logNativeFailure("nativeEntry", noAccessor);
+            return null;
+        }
+    }
+
+    private static void logAccessPath(String path) {
+        if (loggedAccessPaths.add(path)) {
+            Log.i(TAG, "Native row access path: " + path);
+        }
+    }
+
+    private static void logNativeFailure(String stage, Throwable error) {
+        Throwable root = error;
+        while (root.getCause() != null && root.getCause() != root) {
+            root = root.getCause();
+        }
+        String signature = stage + ":" + root.getClass().getSimpleName();
+        if (loggedNativeFailures.size() < MAX_DISTINCT_NATIVE_FAILURES
+                && loggedNativeFailures.add(signature)) {
+            Log.w(TAG, "Native row reader failed at " + stage
+                    + " (" + root.getClass().getSimpleName() + ")");
         }
     }
 
