@@ -1,6 +1,6 @@
 # BB UI
 
-## BB7 Pull-down — selectable app-icon prototype (v0.3.0)
+## BB7 Pull-down — app-specific notification summaries (v0.4.0)
 
 **Branch:** `feat/bb7-pulldown` (fresh from `master`). No code from the abandoned
 `feat/bb7-shade` notification/QS hooks is included.
@@ -11,7 +11,8 @@ an **independent, full-screen-width window with two columns**:
 
 - Left column: exactly 15% of available window width; one vertically
   scrollable **application icon per app with a current shade notification**.
-- Right column: exactly 85% of available window width, still empty.
+- Right column: exactly 85% of available window width, showing the selected
+  app's notification titles, preview text and posting times.
 
 Swipe down from the top status bar to open; swipe up inside the panel or use
 Back to dismiss. The left icon list comes from SystemUI's own registered
@@ -24,8 +25,12 @@ The icon column is now selectable by touch, trackpad and keyboard:
 Up/Down moves the selection, trackpad click/Enter selects, and the currently
 selected row has a blue BB7-inspired gradient. The first icon is focused on
 opening. Selection persists across live notification updates when its app
-remains active. The right 85% panel stays empty; no notification actions
-or filtering are implemented.
+remains active. The right 85% panel now displays a vertically scrollable,
+read-only summary of that app's active notifications; live updates and removals
+refresh it. This filters our presentation, not Android's notification list.
+Notification actions, dismissal, inline reply, custom layouts and attachments
+are not implemented. The panel closes on screen-off to avoid exposing previews
+on the lock screen.
 
 **Initial gesture limitation:** This prototype consumes finger touches that
 begin on the visible status bar while enabled. Fullscreen immersive apps
