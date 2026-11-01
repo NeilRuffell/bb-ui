@@ -51,6 +51,8 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
     private static boolean firstTaskOrientationLogged;
     private static String lastScrollGeometry;
     private static final WeakHashMap<View, float[]> NATIVE_TOUCH_PROBES = new WeakHashMap<>();
+    private static final WeakHashMap<View, Integer> NATIVE_SCROLL_LIMITS = new WeakHashMap<>();
+    private static final WeakHashMap<View, String> NATIVE_SCROLL_BOUND_LOG = new WeakHashMap<>();
     private static final WeakHashMap<Object, Object> ORIENTATION_STATES = new WeakHashMap<>();
     private static final WeakHashMap<View, Boolean> SCREENSHOT_PENDING = new WeakHashMap<>();
 
@@ -217,6 +219,47 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
                 @Override protected void afterHookedMethod(MethodHookParam p) {
                     if (recents.isInstance(p.thisObject)
                             && active((View) p.thisObject)) p.setResult(2);
+                }
+            });
+
+            // LineageOS RecentsView.computeMaxScroll() uses its stock carousel
+            // first/last task-index logic. That logic is NOT valid for the
+            // vertical two-column layout: on Q25 it returned zero even while
+            // getPageScrolls() generated a 433px scroll range. PagedView then
+            // clamps every vertical gesture to zero.
+            //
+            // Supply the same bounds that our native page layout uses. Do not
+            // override scrollTo, touch interception, fling or PagedView itself.
+            XposedHelpers.findAndHookMethod(recents, "computeMinScroll",
+                    new XC_MethodHook() {
+                @Override protected void afterHookedMethod(MethodHookParam p) {
+                    View root = (View) p.thisObject;
+                    if (active(root) && NATIVE_SCROLL_LIMITS.containsKey(root))
+                        p.setResult(0);
+                }
+            });
+            XposedHelpers.findAndHookMethod(recents, "computeMaxScroll",
+                    new XC_MethodHook() {
+                @Override protected void afterHookedMethod(MethodHookParam p) {
+                    View root = (View) p.thisObject;
+                    if (!active(root)) return;
+                    Integer limit = NATIVE_SCROLL_LIMITS.get(root);
+                    if (limit != null) p.setResult(limit);
+                }
+            });
+            XposedHelpers.findAndHookMethod(recents, "updateMinAndMaxScrollX",
+                    new XC_MethodHook() {
+                @Override protected void afterHookedMethod(MethodHookParam p) {
+                    View root = (View) p.thisObject;
+                    if (!active(root)) return;
+                    int min = XposedHelpers.getIntField(root, "mMinScroll");
+                    int max = XposedHelpers.getIntField(root, "mMaxScroll");
+                    String bounds = min + ".." + max;
+                    if (!bounds.equals(NATIVE_SCROLL_BOUND_LOG.get(root))) {
+                        NATIVE_SCROLL_BOUND_LOG.put(root, bounds);
+                        Log.w(TAG, "Native pager bounds: min=" + min
+                                + " max=" + max + " scrollY=" + root.getScrollY());
+                    }
                 }
             });
 
@@ -502,7 +545,10 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
         int rowHeight = 0;
         for (View card : cards)
             rowHeight = Math.max(rowHeight, card.getMeasuredHeight());
-        if (width <= 0 || (rowHeight == 0 && !cards.isEmpty())) return false;
+        if (width <= 0 || (rowHeight == 0 && !cards.isEmpty())) {
+            NATIVE_SCROLL_LIMITS.remove(root);
+            return false;
+        }
 
         int rowStep = rowHeight + gap;
         int rows = (cards.size() + 1) / 2;
@@ -510,6 +556,9 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
         if (clearAll != null)
             contentHeight += clearAll.getMeasuredHeight() + gap;
         int maxScroll = Math.max(0, contentHeight - root.getHeight());
+        // PagedView.onLayout invokes getPageScrolls() before computing its
+        // native min/max bounds, so this exact limit is available to both.
+        NATIVE_SCROLL_LIMITS.put(root, maxScroll);
         if (place) {
             String geometry = "tasks=" + cards.size()
                     + " rows=" + rows + " rowStep=" + rowStep
