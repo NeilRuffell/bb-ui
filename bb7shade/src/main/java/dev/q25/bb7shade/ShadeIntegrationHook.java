@@ -118,6 +118,14 @@ public final class ShadeIntegrationHook implements IXposedHookLoadPackage {
                     if (!(param.thisObject instanceof View)) return;
                     View view = (View) param.thisObject;
                     if (view.getWidth() <= 0 || view.getHeight() <= 0) return;
+                    if (view instanceof android.view.ViewGroup) {
+                        try {
+                            ShadeNotificationIndex.updateFromNativeRows(
+                                    (android.view.ViewGroup) view);
+                        } catch (Throwable error) {
+                            Log.e(TAG, "Cannot bootstrap native notification index", error);
+                        }
+                    }
                     synchronized (MEASURED_STACKS) {
                         if (MEASURED_STACKS.containsKey(view)) return;
                         MEASURED_STACKS.put(view, Boolean.TRUE);
@@ -133,7 +141,23 @@ public final class ShadeIntegrationHook implements IXposedHookLoadPackage {
                                     : parent.getClass().getName()));
                 }
             });
-            Log.i(TAG, "Native stack geometry observer registered");
+            // A notification may arrive or disappear while the shade is
+            // closed; view-child events keep the passive native index fresh.
+            XC_MethodHook childObserver = new XC_MethodHook() {
+                @Override
+                protected void afterHookedMethod(MethodHookParam param) {
+                    if (!(param.thisObject instanceof android.view.ViewGroup)) return;
+                    try {
+                        ShadeNotificationIndex.updateFromNativeRows(
+                                (android.view.ViewGroup) param.thisObject);
+                    } catch (Throwable error) {
+                        Log.e(TAG, "Native notification row observer failed", error);
+                    }
+                }
+            };
+            XposedBridge.hookAllMethods(stack, "onViewAdded", childObserver);
+            XposedBridge.hookAllMethods(stack, "onViewRemoved", childObserver);
+            Log.i(TAG, "Native stack geometry and child observers registered");
         } catch (Throwable error) {
             Log.e(TAG, "Native stack geometry hook unavailable", error);
         }
