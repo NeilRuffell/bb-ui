@@ -4,7 +4,7 @@
 
 The `feat/bb7-shade` branch adds `:bb7shade`, a **third, separate APK**
 (`dev.q25.bb7shade`), alongside `:app` and `:bb7focus`.
-Version `0.2.2-native-index-diagnostics-dev` remains **headless**: it observes
+Version `0.2.3-native-fields-dev` remains **headless**: it observes
 the finalized SystemUI notification render list after filtering/grouping,
 preserves the ordered notification references for each application, detects
 the native shade window and logs notification stack geometry. It does **not** add a new shade, intercept input, hide the stock
@@ -28,7 +28,7 @@ adb logcat -d -s BB7-Shade:I '*:S'
 
 Expect `BB7 Shade stage 2 loaded`,
 `Finalized notification render-list observer registered`, and
-`Rendered notification index updated: apps=... entries=...` when Android rebuilds the finalized list. If no rebuild occurs, expect `Native notification rows indexed: rows=... apps=... entries=...` from the live native stack. Both paths are read-only. Native stack scans are throttled to avoid repeated work during layout; distinct native adapter/reflection failures are logged only once with their failing method stage, without notification content.
+`Rendered notification index updated: apps=... entries=...` when Android rebuilds the finalized list. If no rebuild occurs, expect `Native notification rows indexed: rows=... apps=... entries=...` from the live native stack. Both paths are read-only. Native stack scans are throttled to avoid repeated work during layout. Version 0.2.3 first tries the existing `mEntryAdapter` / `mEntry` backing fields of native notification rows, because Q25 reported `getEntryAdapter (NoSuchMethodError)`. The successful reader logs `Native row access path: ...` once. A failing accessor is reported once by stage and error type without notification contents.
 `Native stack geometry: ...` identifies the actual notification layout
 for later UI placement. Log output contains only counts and geometry, not
 notification content. Run `./gradlew :bb7shade:testDebugUnitTest` for
