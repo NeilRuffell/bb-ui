@@ -4,11 +4,12 @@
 
 The `feat/bb7-shade` branch adds `:bb7shade`, a **third, separate APK**
 (`dev.q25.bb7shade`), alongside `:app` and `:bb7focus`.
-Version `0.3.1-native-stack-attach-dev` is the first **visible partial UI**:
+Version `0.3.2-live-unlock-dev` is the first **visible partial UI**:
 it inserts a narrow native BB7 app-icon/count rail into the existing SystemUI
 notification container, and constrains Android's original notification stack
 to the right of it while the phone is unlocked. It does not add another
 window or duplicate native notification rows.
+Version 0.3.2 also listens to SystemUI's native keyguard state and shade expansion lifecycle, so a rail mounted while the device initially reports locked is re-evaluated when the shade opens or the phone unlocks. The rail remains hidden while the lock screen is active.
 Version 0.3.1 adds a second attachment path from the verified native
 notification stack's layout callback, scheduled after layout. This covers
 cases where the container inflation hook misses the view. The module logs
