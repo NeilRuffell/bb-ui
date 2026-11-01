@@ -574,41 +574,24 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
                 });
             }
 
-            // Home is not a recent application. Keep the native
-            // showCurrentTask() lifecycle intact: it must still clear its
-            // running-task state, reset native selection, and update task
-            // visibility. Only reject Home at the TWO native decisions that
-            // would otherwise turn it into a Recents card.
-            //
-            // (1) An existing matching TaskView must not be selected as Home.
-            // (2) A new placeholder TaskView must not be created for Home.
-            // With both decisions rejected, stock showCurrentTask() follows
-            // its no-running-task branch and performs its normal cleanup.
-            if (utils != null) {
-                XposedBridge.hookAllMethods(utils,
-                        "getRunningTaskViewFromGroupTaskInfo",
-                        new XC_MethodHook() {
-                    @Override protected void beforeHookedMethod(MethodHookParam p) {
-                        Object owner = XposedHelpers.getObjectField(
-                                p.thisObject, "recentsView");
-                        if (!(owner instanceof View) || !active((View) owner)
-                                || p.args.length == 0
-                                || groupedTaskActivityType(p.args[0]) != 2) return;
-                        p.setResult(null);
-                        Log.w(TAG, "Native HOME entry: not selecting existing "
-                                + "running TaskView");
-                    }
-                });
-            }
-            XposedBridge.hookAllMethods(recents,
-                    "shouldAvoidAddingStubTaskView",
+            // The *only* native source of the Home phantom card:
+            // showCurrentTask() either reuses an existing TaskView or inserts
+            // a placeholder for its GroupedTaskInfo, including Home.
+            // Suppressing just the HOME call at this method boundary leaves
+            // onGestureAnimationStart's gesture state and normal animation
+            // pipeline untouched, and handles both existing-card and stub
+            // paths (unlike shouldAvoidAddingStubTaskView()).
+            XposedBridge.hookAllMethods(recents, "showCurrentTask",
                     new XC_MethodHook() {
-                @Override protected void afterHookedMethod(MethodHookParam p) {
+                @Override protected void beforeHookedMethod(MethodHookParam p) {
                     View root = (View) p.thisObject;
-                    if (!active(root) || p.args.length == 0
-                            || groupedTaskActivityType(p.args[0]) != 2) return;
-                    p.setResult(true);
-                    Log.w(TAG, "Native HOME entry: native placeholder vetoed");
+                    if (!active(root) || p.args.length == 0) return;
+                    if (groupedTaskActivityType(p.args[0]) != 2) return;
+                    Log.w(TAG, "Native HOME running task skipped at "
+                            + "showCurrentTask; source=" +
+                            (p.args.length > 1 ? p.args[1] : "unknown")
+                            + " existingChildren=" + ((ViewGroup) root).getChildCount());
+                    p.setResult(null); // void method; no card is created or reused
                 }
             });
 
@@ -714,9 +697,16 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
     }
 
     /**
-     * Inspects native GroupedTaskInfo without modifying the gesture state.
-     * Activity type 2 is ACTIVITY_TYPE_HOME, type 1 is STANDARD.
-     * Returns -1 if no primary task can be classified.
+     * Set the native page selection before overview's entrance animation.
+     * Unlike a post-layout scrollTo(0, 0), this is the state used by
+     * PagedView, task snapping, RecentsView scroll offsets and animation.
+     * Using the built-in page-initialized callback also handles task loads
+     * occurring after the overview command begins.
+     */
+    /**
+     * Inspects the native GroupedTaskInfo without changing the gesture state.
+     * 2 = ACTIVITY_TYPE_HOME, 1 = ACTIVITY_TYPE_STANDARD,
+     * -1 = absent or unclassifiable.
      */
     private static int groupedTaskActivityType(Object grouped) {
         if (grouped == null) return -1;
@@ -730,10 +720,6 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
         }
     }
 
-    /**
-     * Select native page zero once per overview entry. PagedView uses the
-     * same state for snapping, scroll offsets, and overview transitions.
-     */
     private static void selectInitialGridPage(View root) {
         if (!active(root) || OVERVIEW_ENTRY_SELECTED.containsKey(root)) return;
         OVERVIEW_ENTRY_SELECTED.put(root, Boolean.TRUE);
