@@ -7,8 +7,8 @@ android {
         applicationId 'dev.q25.bb7shade'
         minSdk 33
         targetSdk 28
-        versionCode 3
-        versionName '0.2.1-native-index-fallback-dev'
+        versionCode 4
+        versionName '0.2.2-native-index-diagnostics-dev'
     }
 }
 
