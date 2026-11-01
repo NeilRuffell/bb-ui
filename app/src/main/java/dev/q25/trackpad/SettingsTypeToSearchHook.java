@@ -39,13 +39,13 @@ public final class SettingsTypeToSearchHook implements IXposedHookLoadPackage {
 
     private void hookHomepage(ClassLoader loader) {
         try {
-            XposedHelpers.findAndHookMethod(HOMEPAGE, loader, "dispatchKeyEvent",
-                    KeyEvent.class, new XC_MethodHook() {
+            XposedBridge.hookAllMethods(Activity.class, "dispatchKeyEvent", new XC_MethodHook() {
                 @Override
                 protected void beforeHookedMethod(MethodHookParam param) {
                     KeyEvent key = (KeyEvent) param.args[0];
                     if (!eligible(key)) return;
                     Activity activity = (Activity) param.thisObject;
+                    if (!HOMEPAGE.equals(activity.getClass().getName())) return;
                     if (hasFocusedEditor(activity.getWindow().getDecorView())) return;
                     int point = key.getUnicodeChar();
                     if (point == 0 || !Character.isLetterOrDigit(point)) return;
