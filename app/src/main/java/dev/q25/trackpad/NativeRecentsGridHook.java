@@ -574,32 +574,6 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
                 });
             }
 
-            // RecentsView.showCurrentTask() may insert a temporary running
-            // task card before the real task list is loaded. That makes sense
-            // when entering from an app, but Home is NOT a recent application:
-            // its temporary card occupies grid cell (row 0, column 0) and is
-            // subsequently removed, shifting every real app up one cell.
-            //
-            // Quickstep already has a dedicated veto at the exact insertion
-            // point. Restrict it to HOME activities (TaskInfo activityType 2)
-            // and otherwise leave the stock task lifecycle unchanged.
-            XposedBridge.hookAllMethods(recents, "shouldAvoidAddingStubTaskView",
-                    new XC_MethodHook() {
-                @Override protected void afterHookedMethod(MethodHookParam p) {
-                    View root = (View) p.thisObject;
-                    if (!active(root) || p.args.length == 0 || p.args[0] == null)
-                        return;
-                    Object taskInfo = XposedHelpers.callMethod(p.args[0], "getTaskInfo1");
-                    if (taskInfo == null) return;
-                    int activityType = (Integer) XposedHelpers.callMethod(
-                            taskInfo, "getActivityType");
-                    if (activityType != 2) return; // ACTIVITY_TYPE_HOME
-                    p.setResult(true);
-                    Log.w(TAG, "Native HOME entry: prevented non-recents stub "
-                            + "at grid position 0");
-                }
-            });
-
             // Disarm the entry latch as part of the native exit state.
             // The same RecentsView may be reused on the next BlackBerry
             // button press, which must again select page zero.
@@ -643,6 +617,29 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
             }
             XposedBridge.hookAllMethods(recents, "onGestureAnimationStart",
                     new XC_MethodHook() {
+                @Override protected void beforeHookedMethod(MethodHookParam p) {
+                    View root = (View) p.thisObject;
+                    if (!active(root) || p.args.length == 0) return;
+                    Object grouped = p.args[0];
+                    int activityType = groupedTaskActivityType(grouped);
+                    int runningIndex = (Integer) XposedHelpers.callMethod(
+                            root, "getRunningTaskIndex");
+                    Log.w(TAG, "Native overview gesture source: activityType="
+                            + activityType + " runningIndex=" + runningIndex
+                            + " existingChildren=" + ((ViewGroup) root).getChildCount());
+                    if (activityType == 2) { // WindowConfiguration.ACTIVITY_TYPE_HOME
+                        // The stock showCurrentTask() would otherwise treat
+                        // Home as a temporary running application, including
+                        // when a matching placeholder already exists; the
+                        // late shouldAvoidAddingStubTaskView() guard cannot
+                        // handle that path. Passing null lets native
+                        // onGestureAnimationStart perform its normal state
+                        // setup without inserting or selecting a Home card.
+                        p.args[0] = null;
+                        Log.w(TAG, "Native HOME entry: excluded HOME from "
+                                + "running recent-task source");
+                    }
+                }
                 @Override protected void afterHookedMethod(MethodHookParam p) {
                     selectInitialGridPage((View) p.thisObject);
                 }
@@ -698,6 +695,23 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
      * Using the built-in page-initialized callback also handles task loads
      * occurring after the overview command begins.
      */
+    /**
+     * Returns the activity type of the primary running task supplied by
+     * Quickstep's existing gesture pipeline. 2 is ACTIVITY_TYPE_HOME, 1 is
+     * ACTIVITY_TYPE_STANDARD, and -1 means there is no primary task.
+     */
+    private static int groupedTaskActivityType(Object grouped) {
+        if (grouped == null) return -1;
+        try {
+            Object taskInfo = XposedHelpers.callMethod(grouped, "getTaskInfo1");
+            if (taskInfo == null) return -1;
+            return (Integer) XposedHelpers.callMethod(taskInfo, "getActivityType");
+        } catch (Throwable error) {
+            Log.e(TAG, "Unable to classify overview gesture task", error);
+            return -1; // Preserve stock behavior when the source is unknown.
+        }
+    }
+
     private static void selectInitialGridPage(View root) {
         if (!active(root) || OVERVIEW_ENTRY_SELECTED.containsKey(root)) return;
         OVERVIEW_ENTRY_SELECTED.put(root, Boolean.TRUE);
