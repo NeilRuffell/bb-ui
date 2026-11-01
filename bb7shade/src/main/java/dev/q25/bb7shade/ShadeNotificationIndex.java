@@ -63,11 +63,80 @@ final class ShadeNotificationIndex {
 
     private static volatile Snapshot snapshot = new Snapshot(new LinkedHashMap<>());
     private static volatile boolean firstUpdate = true;
+    private static volatile boolean finalizedListObserved = false;
+    private static volatile boolean nativeRowsLogged = false;
 
     private ShadeNotificationIndex() {}
 
     static Snapshot current() {
         return snapshot;
+    }
+
+    /**
+     * Bootstrap the visible notification index from rows already installed in
+     * NotificationStackScrollLayout. This is a fallback only: as soon as the
+     * finalized pipeline callback runs, its authoritative list wins.
+     *
+     * Native rows expose EntryAdapter.getSbn/getKey; we do not read, store
+     * or log notification contents. Android still owns the rows and actions.
+     */
+    static void updateFromNativeRows(android.view.ViewGroup stack) {
+        if (finalizedListObserved) return;
+        LinkedHashMap<String, List<NotificationRef>> byApp = new LinkedHashMap<>();
+        Set<String> keys = new HashSet<>();
+        int directRows = 0;
+        for (int i = 0; i < stack.getChildCount(); i++) {
+            android.view.View child = stack.getChildAt(i);
+            if (!isClassOrSubclass(child.getClass(),
+                    "com.android.systemui.statusbar.notification.row.ExpandableNotificationRow")) {
+                continue;
+            }
+            directRows++;
+            collectNativeRow(child, byApp, keys);
+        }
+        Snapshot next = new Snapshot(byApp);
+        Snapshot previous = snapshot;
+        snapshot = next;
+        if (!nativeRowsLogged || !next.appCounts.equals(previous.appCounts)
+                || next.notificationCount != previous.notificationCount) {
+            nativeRowsLogged = true;
+            Log.i(TAG, "Native notification rows indexed: rows=" + directRows
+                    + " apps=" + next.appCounts.size()
+                    + " entries=" + next.notificationCount);
+        }
+    }
+
+    private static void collectNativeRow(android.view.View row,
+            LinkedHashMap<String, List<NotificationRef>> byApp, Set<String> keys) {
+        try {
+            Object children = XposedHelpers.callMethod(row, "getAttachedChildren");
+            if (children instanceof List && !((List<?>) children).isEmpty()) {
+                for (Object child : (List<?>) children) {
+                    if (child instanceof android.view.View) {
+                        collectNativeRow((android.view.View) child, byApp, keys);
+                    }
+                }
+                return;
+            }
+            Object adapter = XposedHelpers.callMethod(row, "getEntryAdapter");
+            if (adapter == null) return;
+            String key = (String) XposedHelpers.callMethod(adapter, "getKey");
+            StatusBarNotification sbn = (StatusBarNotification)
+                    XposedHelpers.callMethod(adapter, "getSbn");
+            if (key == null || sbn == null) return;
+            String packageName = sbn.getPackageName();
+            if (packageName == null || packageName.isEmpty() || !keys.add(key)) return;
+            List<NotificationRef> refs = byApp.get(packageName);
+            if (refs == null) {
+                refs = new ArrayList<>();
+                byApp.put(packageName, refs);
+            }
+            refs.add(new NotificationRef(key, packageName));
+        } catch (Throwable error) {
+            // Some entry types (such as dynamic bundles) lack notification
+            // SBNs. Skip only that row and leave stock UI behavior intact.
+            Log.w(TAG, "Skipping native row without a compatible notification adapter");
+        }
     }
 
     static void update(List<?> renderedEntries) {
@@ -79,6 +148,7 @@ final class ShadeNotificationIndex {
         Snapshot next = new Snapshot(byApp);
         Snapshot previous = snapshot;
         snapshot = next;
+        finalizedListObserved = true;
         boolean isFirst = firstUpdate;
         firstUpdate = false;
         if (isFirst || !next.appCounts.equals(previous.appCounts)
