@@ -5,6 +5,7 @@ import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.ViewParent;
 
 import java.util.WeakHashMap;
 
@@ -60,6 +61,38 @@ public final class RecentsGridHook implements IXposedHookLoadPackage {
                 @Override protected void afterHookedMethod(MethodHookParam p) {
                     ViewGroup root = (ViewGroup) p.thisObject;
                     if (enabled(root)) placeGrid(root, task);
+                }
+            });
+
+
+            // Block horizontal movement of the Quickstep pager in grid mode.
+            XposedBridge.hookAllMethods(View.class, "scrollTo", new XC_MethodHook() {
+                @Override protected void beforeHookedMethod(MethodHookParam p) {
+                    View view = (View) p.thisObject;
+                    if (recents.isInstance(view) && enabled(view)) {
+                        p.args[0] = 0;
+                        p.args[1] = 0;
+                    }
+                }
+            });
+            XposedBridge.hookAllMethods(View.class, "scrollBy", new XC_MethodHook() {
+                @Override protected void beforeHookedMethod(MethodHookParam p) {
+                    View view = (View) p.thisObject;
+                    if (recents.isInstance(view) && enabled(view)) p.setResult(null);
+                }
+            });
+
+            // Quickstep's carousel animation must not translate grid tasks horizontally.
+            XposedBridge.hookAllMethods(View.class, "setTranslationX", new XC_MethodHook() {
+                @Override protected void beforeHookedMethod(MethodHookParam p) {
+                    View view = (View) p.thisObject;
+                    if (task.isInstance(view) && isGridTask(view, recents)) p.args[0] = 0f;
+                }
+            });
+            XposedBridge.hookAllMethods(View.class, "setTranslationY", new XC_MethodHook() {
+                @Override protected void beforeHookedMethod(MethodHookParam p) {
+                    View view = (View) p.thisObject;
+                    if (task.isInstance(view) && isGridTask(view, recents)) p.args[0] = 0f;
                 }
             });
 
@@ -168,10 +201,15 @@ public final class RecentsGridHook implements IXposedHookLoadPackage {
                     p.setResult(true);
                 }
             });
-            XposedBridge.log("BB UI: RecentsGridHook v2 hooked " + lp.packageName);
+            XposedBridge.log("BB UI: RecentsGridHook v3 hooked " + lp.packageName);
         } catch (Throwable error) {
-            XposedBridge.log("BB UI: RecentsGridHook v2 unavailable: " + error);
+            XposedBridge.log("BB UI: RecentsGridHook v3 unavailable: " + error);
         }
+    }
+
+    private static boolean isGridTask(View tile, Class<?> recents) {
+        ViewParent parent = tile.getParent();
+        return parent instanceof View && recents.isInstance(parent) && enabled((View) parent);
     }
 
     private static boolean enabled(View view) {
@@ -231,8 +269,9 @@ public final class RecentsGridHook implements IXposedHookLoadPackage {
                     Math.max(0, state.contentHeight - root.getHeight())));
 
             // Reset PagedView's horizontal origin rather than compensate only one frame.
-            if (root.getScrollX() != 0) root.scrollTo(0, root.getScrollY());
+            if (root.getScrollX() != 0) root.scrollTo(0, 0);
             root.setClipChildren(true);
+            root.setClipToPadding(true);
 
             for (int i = 0; i < count; ++i) {
                 View tile = getTask(root, task, i);
@@ -245,6 +284,8 @@ public final class RecentsGridHook implements IXposedHookLoadPackage {
                 // Actual child coordinates, not translations, are used by hit-testing.
                 int originalW = tile.getWidth();
                 int originalH = tile.getHeight();
+                if (tile.getTranslationX() != 0f) tile.setTranslationX(0f);
+                if (tile.getTranslationY() != 0f) tile.setTranslationY(0f);
                 tile.setPivotX(0f);
                 tile.setPivotY(0f);
                 if (tile.getLeft() != x || tile.getTop() != y) {
@@ -255,7 +296,7 @@ public final class RecentsGridHook implements IXposedHookLoadPackage {
                 tile.setFocusable(true);
             }
         } catch (Throwable error) {
-            XposedBridge.log("BB UI: RecentsGridHook v2 layout error: " + error);
+            XposedBridge.log("BB UI: RecentsGridHook v3 layout error: " + error);
         } finally {
             state.layingOut = false;
         }
