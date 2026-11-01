@@ -106,6 +106,7 @@ final class ShadeGeometryProbe {
                 + " rebind=" + alphaField(controller, "mMaxAlphaForRebind")
                 + " hub=" + alphaField(controller, "mMaxAlphaForGlanceableHub")
                 + " keyguard=" + alphaField(controller, "mMaxAlphaForKeyguard")
+                + " keyguardSource=" + alphaSource(controller)
                 + " stackShown=" + view.isShown()
                 + " appRailActive=" + ShadeRailHost.isRailActive());
     }
@@ -129,6 +130,16 @@ final class ShadeGeometryProbe {
                     + " appRailActive=" + ShadeRailHost.isRailActive());
         } catch (Throwable ignored) {
             // Optimized builds may not retain the legacy controller fields.
+        }
+    }
+
+    private static String alphaSource(Object controller) {
+        try {
+            Object source = XposedHelpers.getObjectField(
+                    controller, "mMaxAlphaForKeyguardSource");
+            return source == null ? "null" : String.valueOf(source);
+        } catch (Throwable error) {
+            return "n/a";
         }
     }
 
