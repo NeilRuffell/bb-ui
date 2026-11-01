@@ -72,6 +72,63 @@ final class ShadeGeometryProbe {
         }
     }
 
+    private static final Map<Object, Float> LAST_ALPHA =
+            Collections.synchronizedMap(new WeakHashMap<>());
+    private static final Map<Object, Long> LAST_ALPHA_TIME =
+            Collections.synchronizedMap(new WeakHashMap<>());
+    private static final long ALPHA_INTERVAL_MS = 2000L;
+
+    static void onControllerAlpha(Object controller) {
+        Object viewObject;
+        try {
+            viewObject = XposedHelpers.getObjectField(controller, "mView");
+        } catch (Throwable ignored) {
+            return;
+        }
+        if (!(viewObject instanceof View)) return;
+        View view = (View) viewObject;
+        float alpha = view.getAlpha();
+        long now = SystemClock.uptimeMillis();
+        Float previous = LAST_ALPHA.get(controller);
+        Long lastTime = LAST_ALPHA_TIME.get(controller);
+        boolean changed = previous == null
+                || (previous <= 0.01f) != (alpha <= 0.01f);
+        if (!changed && lastTime != null && now - lastTime < ALPHA_INTERVAL_MS) return;
+        LAST_ALPHA.put(controller, alpha);
+        LAST_ALPHA_TIME.put(controller, now);
+        Log.i(TAG, "Notification alpha sources: result=" + alpha
+                + " view=" + alphaField(controller, "mMaxAlphaFromView")
+                + " unhide=" + alphaField(controller, "mMaxAlphaForUnhide")
+                + " rebind=" + alphaField(controller, "mMaxAlphaForRebind")
+                + " hub=" + alphaField(controller, "mMaxAlphaForGlanceableHub")
+                + " keyguard=" + alphaField(controller, "mMaxAlphaForKeyguard")
+                + " stackShown=" + view.isShown()
+                + " appRailActive=" + ShadeRailHost.isRailActive());
+    }
+
+    static void onPanelExpansion(Object panel, boolean showingKeyguard) {
+        // Called on existing SystemUI expansion lifecycle, not on a
+        // separately scheduled timer. No personal notification data is read.
+        try {
+            Object qs = XposedHelpers.getObjectField(panel, "mQsController");
+            boolean qsExpanded = qs != null &&
+                    XposedHelpers.getBooleanField(qs, "mFullyExpanded");
+            Log.i(TAG, "Native shade expansion: showingKeyguard=" + showingKeyguard
+                    + " fullyExpandedQS=" + qsExpanded
+                    + " appRailActive=" + ShadeRailHost.isRailActive());
+        } catch (Throwable ignored) {
+            // Optimized builds may not retain the legacy controller fields.
+        }
+    }
+
+    private static String alphaField(Object owner, String field) {
+        try {
+            return String.valueOf(XposedHelpers.getFloatField(owner, field));
+        } catch (Throwable error) {
+            return "n/a";
+        }
+    }
+
     private static boolean isNotificationRow(View child) {
         for (Class<?> type = child.getClass(); type != null; type = type.getSuperclass()) {
             if ("com.android.systemui.statusbar.notification.row.ExpandableNotificationRow"

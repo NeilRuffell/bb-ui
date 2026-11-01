@@ -196,8 +196,13 @@ final class ShadeRailHost {
         // This stage intentionally does not hide or filter native rows:
         // replacing their visibility here would interfere with NSSL's
         // sensitive/heads-up/grouped-notification layout calculations.
-        rail.setOnApplicationSelectedListener(packageName ->
-                Log.i(TAG, "Application rail selection changed; native rows remain unfiltered"));
+        rail.setOnApplicationSelectedListener(packageName -> {
+            Log.i(TAG, "Application rail selection changed; native rows remain unfiltered");
+            // SystemUI's Compose QS scene intentionally positions its native
+            // notification list offscreen. Navigate via the system's own
+            // notification shade operation on deliberate rail interaction.
+            ShadeSceneBridge.requestNotifications(rail);
+        });
         host.railVisible = false;
         host.model.acceptSnapshot(ShadeNotificationIndex.current());
         rail.update(ShadeNotificationIndex.current());

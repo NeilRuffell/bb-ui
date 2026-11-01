@@ -137,7 +137,17 @@ final class BB7AppRailView extends ScrollView {
         item.setOnFocusChangeListener((view, hasFocus) -> {
             if (hasFocus) select(item.packageName);
         });
-        item.setOnClickListener(view -> select(item.packageName));
+        item.setOnClickListener(view -> {
+            String before = navigationState.selectedPackage();
+            select(item.packageName);
+            // Clicking 'All' when already selected still requests the
+            // notification scene; the selection event otherwise won't fire.
+            if (same(before, navigationState.selectedPackage())
+                    && selectionListener != null) {
+                selectionListener.onApplicationSelected(
+                        navigationState.selectedPackage());
+            }
+        });
         return item;
     }
 

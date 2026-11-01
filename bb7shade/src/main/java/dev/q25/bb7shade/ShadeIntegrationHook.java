@@ -43,11 +43,12 @@ public final class ShadeIntegrationHook implements IXposedHookLoadPackage {
     @Override
     public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lp) {
         if (!PACKAGE.equals(lp.packageName) || !PACKAGE.equals(lp.processName)) return;
-        Log.i(TAG, "BB7 Shade stage 3.4 loaded; native QS collapse and stack diagnostics");
+        Log.i(TAG, "BB7 Shade stage 3.5 loaded; scene-aware native shade request and alpha diagnostics");
         observeFinalRenderList(lp);
         observeShadeHost(lp);
         observeNativeStack(lp);
         observeKeyguardLifecycle(lp);
+        observeNotificationStackAlpha(lp);
         ShadeRailHost.installHooks(lp.classLoader);
     }
 
@@ -168,7 +169,8 @@ public final class ShadeIntegrationHook implements IXposedHookLoadPackage {
                                             keyguard, "mShowing");
                                     ShadeRailHost.onSystemUiKeyguardState(
                                             showing, "shade-expansion");
-                                    ShadeQsPageBridge.onShadeExpansion(param.thisObject, showing);
+                                    ShadeGeometryProbe.onPanelExpansion(
+                                            param.thisObject, showing);
                                 } catch (Throwable error) {
                                     // Do not interrupt stock shade expansion.
                                     if (!sPanelKeyguardReadWarningLogged) {
@@ -183,6 +185,40 @@ public final class ShadeIntegrationHook implements IXposedHookLoadPackage {
             } catch (Throwable error) {
                 Log.e(TAG, "Shade expansion observation unavailable", error);
             }
+        }
+    }
+
+    /**
+     * SystemUI computes the native notification stack alpha as the minimum
+     * of multiple controller-owned factors. Read and log those factors
+     * at the exact point they are applied; never override privacy,
+     * keyguard, or scene visibility by manually setting view alpha.
+     */
+    private static void observeNotificationStackAlpha(
+            XC_LoadPackage.LoadPackageParam lp) {
+        Class<?> controller = XposedHelpers.findClassIfExists(
+                "com.android.systemui.statusbar.notification.stack."
+                        + "NotificationStackScrollLayoutController", lp.classLoader);
+        if (controller == null) return;
+        try {
+            XposedBridge.hookAllMethods(controller, "updateAlpha",
+                    new XC_MethodHook() {
+                        @Override
+                        protected void afterHookedMethod(MethodHookParam param) {
+                            try {
+                                ShadeGeometryProbe.onControllerAlpha(
+                                        param.thisObject);
+                            } catch (Throwable error) {
+                                // Preserve normal SystemUI alpha calculation.
+                                Log.w(TAG, "Notification alpha diagnostics unavailable ("
+                                        + error.getClass().getSimpleName() + ")");
+                            }
+                        }
+                    });
+            Log.i(TAG, "Native notification alpha-source observer registered");
+        } catch (Throwable error) {
+            Log.w(TAG, "Native alpha-source observer unavailable ("
+                    + error.getClass().getSimpleName() + ")");
         }
     }
 

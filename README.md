@@ -4,11 +4,20 @@
 
 The `feat/bb7-shade` branch adds `:bb7shade`, a **third, separate APK**
 (`dev.q25.bb7shade`), alongside `:app` and `:bb7focus`.
-Version `0.3.4-native-qs-collapse-dev` is the first **visible partial UI**:
+Version `0.3.5-compose-shade-route-dev` is the first **visible partial UI**:
 it inserts a narrow native BB7 app-icon/count rail into the existing SystemUI
 notification container, and constrains Android's original notification stack
 to the right of it while the phone is unlocked. It does not add another
 window or duplicate native notification rows.
+Version 0.3.5 routes explicit app-rail selection through Android's
+StatusBarManager.expandNotificationsPanel(), which requests the native
+Notifications shade scene. On LineageOS 24, the separate Compose
+QuickSettingsScene deliberately offsets the native ScrollingNotificationPanel
+below the viewport. The previous legacy closeQs() path does not change that
+scene. A controller-level alpha source probe logs the native factors that can
+make notification views transparent, without forcing their alpha or changing
+their privacy state. Tap an app icon (or All) to test the native scene switch.
+
 Version 0.3.4 addresses the Q25 report that only the left icon rail and
 stock QS appear, with no visible notification rows. When the experimental
 rail is visible and native QS is fully expanded, it asks SystemUI's own

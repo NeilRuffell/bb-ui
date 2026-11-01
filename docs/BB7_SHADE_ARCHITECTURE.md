@@ -75,6 +75,11 @@ interactive behind the replacement after takeover is enabled.
    experimental layout is enabled by default and can be disabled before
    process restart with `adb shell setprop debug.bb7shade.layout false`.
    The rail is hidden and the original stack layout restored on keyguard.
+   Version 0.3.5 requests native notification-scene expansion on an explicit
+   app-rail selection, via StatusBarManager.expandNotificationsPanel(). The
+   LineageOS 24 Compose QuickSettingsScene places notification cards below the
+   screen, independently of legacy mQsFullScreen. A bounded updateAlpha hook
+   captures the five native stack alpha factors without changing them.
    Version 0.3.4 attempts to collapse native fully expanded Quick
    Settings when the experimental notification rail is active. This uses
    SystemUI's own closeQs() and does not create or move native rows.
