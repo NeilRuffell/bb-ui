@@ -1,6 +1,7 @@
 package dev.q25.trackpad;
 
 import android.provider.Settings;
+import android.util.Log;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewConfiguration;
@@ -34,6 +35,7 @@ public final class RecentsVerticalListHook implements IXposedHookLoadPackage {
     private static final String RECENTS = "com.android.quickstep.views.RecentsView";
     private static final String TASK = "com.android.quickstep.views.TaskView";
     private static final String PAGED = "com.android.launcher3.PagedView";
+    private static final String LOG_TAG = "BB-UI-Recents";
     private static final WeakHashMap<View, GridState> STATES = new WeakHashMap<>();
 
     private static final class GridState {
@@ -41,6 +43,7 @@ public final class RecentsVerticalListHook implements IXposedHookLoadPackage {
         int maxOffset;
         int rowHeight;
         boolean placing;
+        boolean loggedActive;
         boolean dragging;
         boolean startedOutsideTask;
         boolean horizontalDrag;
@@ -65,6 +68,12 @@ public final class RecentsVerticalListHook implements IXposedHookLoadPackage {
                 @Override protected void afterHookedMethod(MethodHookParam p) {
                     ViewGroup root = (ViewGroup) p.thisObject;
                     if (!enabled(root)) return;
+                    GridState st = state(root);
+                    if (!st.loggedActive) {
+                        st.loggedActive = true;
+                        Log.i(LOG_TAG, "Vertical Recents layout active: children="
+                                + root.getChildCount());
+                    }
                     positionNativeTaskViews(root, task);
                     refreshVisibleTaskData(root);
                 }
@@ -216,18 +225,22 @@ public final class RecentsVerticalListHook implements IXposedHookLoadPackage {
                 });
             }
             XposedBridge.log("BB UI: vertical native TaskView list hooked in " + lp.packageName);
+            Log.i(LOG_TAG, "Vertical hook installed in " + lp.packageName);
         } catch (Throwable ex) {
             XposedBridge.log("BB UI: vertical native list unavailable: " + ex);
+            Log.e(LOG_TAG, "Vertical hook installation failed", ex);
         }
     }
 
     private static boolean enabled(View view) {
         try {
+            // The first layout can occur before mOverviewStateEnabled turns true;
+            // setOverviewStateEnabled() does not request a relayout. Gating on that
+            // field silently prevented the entire vertical layout from activating.
             return Settings.Global.getInt(view.getContext().getContentResolver(),
                     TOGGLE, 0) == 1
                     && Settings.Global.getInt(view.getContext().getContentResolver(),
-                    "bb_ui_recents_two_up", 0) == 1
-                    && XposedHelpers.getBooleanField(view, "mOverviewStateEnabled");
+                    "bb_ui_recents_two_up", 0) == 1;
         } catch (Throwable ignored) {
             return false;
         }
@@ -307,6 +320,7 @@ public final class RecentsVerticalListHook implements IXposedHookLoadPackage {
             root.scrollTo(0, st.offset);
         } catch (Throwable error) {
             XposedBridge.log("BB UI: vertical list placement error: " + error);
+            Log.e(LOG_TAG, "Vertical placement failed", error);
         } finally {
             st.placing = false;
         }
