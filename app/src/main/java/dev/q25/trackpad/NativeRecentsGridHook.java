@@ -574,24 +574,41 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
                 });
             }
 
-            // The *only* native source of the Home phantom card:
-            // showCurrentTask() either reuses an existing TaskView or inserts
-            // a placeholder for its GroupedTaskInfo, including Home.
-            // Suppressing just the HOME call at this method boundary leaves
-            // onGestureAnimationStart's gesture state and normal animation
-            // pipeline untouched, and handles both existing-card and stub
-            // paths (unlike shouldAvoidAddingStubTaskView()).
-            XposedBridge.hookAllMethods(recents, "showCurrentTask",
+            // Home is not a recent application. Keep the native
+            // showCurrentTask() lifecycle intact: it must still clear its
+            // running-task state, reset native selection, and update task
+            // visibility. Only reject Home at the TWO native decisions that
+            // would otherwise turn it into a Recents card.
+            //
+            // (1) An existing matching TaskView must not be selected as Home.
+            // (2) A new placeholder TaskView must not be created for Home.
+            // With both decisions rejected, stock showCurrentTask() follows
+            // its no-running-task branch and performs its normal cleanup.
+            if (utils != null) {
+                XposedBridge.hookAllMethods(utils,
+                        "getRunningTaskViewFromGroupTaskInfo",
+                        new XC_MethodHook() {
+                    @Override protected void beforeHookedMethod(MethodHookParam p) {
+                        Object owner = XposedHelpers.getObjectField(
+                                p.thisObject, "recentsView");
+                        if (!(owner instanceof View) || !active((View) owner)
+                                || p.args.length == 0
+                                || groupedTaskActivityType(p.args[0]) != 2) return;
+                        p.setResult(null);
+                        Log.w(TAG, "Native HOME entry: not selecting existing "
+                                + "running TaskView");
+                    }
+                });
+            }
+            XposedBridge.hookAllMethods(recents,
+                    "shouldAvoidAddingStubTaskView",
                     new XC_MethodHook() {
-                @Override protected void beforeHookedMethod(MethodHookParam p) {
+                @Override protected void afterHookedMethod(MethodHookParam p) {
                     View root = (View) p.thisObject;
-                    if (!active(root) || p.args.length == 0) return;
-                    if (groupedTaskActivityType(p.args[0]) != 2) return;
-                    Log.w(TAG, "Native HOME running task skipped at "
-                            + "showCurrentTask; source=" +
-                            (p.args.length > 1 ? p.args[1] : "unknown")
-                            + " existingChildren=" + ((ViewGroup) root).getChildCount());
-                    p.setResult(null); // void method; no card is created or reused
+                    if (!active(root) || p.args.length == 0
+                            || groupedTaskActivityType(p.args[0]) != 2) return;
+                    p.setResult(true);
+                    Log.w(TAG, "Native HOME entry: native placeholder vetoed");
                 }
             });
 
