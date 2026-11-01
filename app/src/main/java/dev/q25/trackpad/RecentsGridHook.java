@@ -1,5 +1,6 @@
 package dev.q25.trackpad;
 
+import android.graphics.Canvas;
 import android.provider.Settings;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
@@ -15,215 +16,247 @@ import de.robv.android.xposed.XposedHelpers;
 import de.robv.android.xposed.callbacks.XC_LoadPackage;
 
 /**
- * Experimental visual grid for Quickstep's RecentsView.
+ * Experimental Recents grid. Intentionally restricted to Quickstep's RecentsView.
  *
- * Off by default: adb shell settings put global bb_ui_recents_grid 1
- * Scope to the system package providing Quickstep, NOT the user's home launcher.
- * This keeps Quickstep's real TaskView thumbnails and task click listeners.
+ * The original version applied child translations while allowing horizontal PagedView
+ * scrolling. Those coordinate spaces disagreed, producing off-screen task cards.
  *
- * Native animation/gesture paths may still assume a horizontally paged RecentsView.
+ * This version places actual TaskView bounds in a grid, resets the horizontal scroll
+ * and consumes overview background drag/wheel input for vertical scrolling.
+ * Other Quickstep animations can still change TaskView transforms at runtime.
  */
 public final class RecentsGridHook implements IXposedHookLoadPackage {
-    private static final String RECENTS =
-            "com.android.quickstep.views.RecentsView";
+    private static final String RECENTS = "com.android.quickstep.views.RecentsView";
     private static final String TASK = "com.android.quickstep.views.TaskView";
     private static final String TOGGLE = "bb_ui_recents_grid";
     private static final int COLUMNS = 2;
-    private static final WeakHashMap<View, GridState> STATES = new WeakHashMap<>();
+    private static final WeakHashMap<View, State> STATES = new WeakHashMap<>();
 
-    private static class GridState {
+    private static class State {
         int offset;
         int contentHeight;
-        int rowStep;
+        int rowHeight;
         int selected;
-        boolean applying;
+        boolean layingOut;
+        boolean dragging;
+        float downX;
         float downY;
         float lastY;
-        boolean dragging;
     }
 
     @Override
     public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lp) {
-        // Only hook packages actually bundling the Quickstep RecentsView class.
-        // This can be the system Launcher3/Trebuchet package or a standalone recents provider.
-        if (lp.packageName.equals("android") || lp.packageName.equals("com.android.systemui")
+        if (lp.packageName.equals("android")
+                || lp.packageName.equals("com.android.systemui")
                 || lp.packageName.equals("dev.q25.trackpad")) return;
-        Class<?> recents = XposedHelpers.findClassIfExists(RECENTS, lp.classLoader);
-        Class<?> task = XposedHelpers.findClassIfExists(TASK, lp.classLoader);
+
+        final Class<?> recents = XposedHelpers.findClassIfExists(RECENTS, lp.classLoader);
+        final Class<?> task = XposedHelpers.findClassIfExists(TASK, lp.classLoader);
         if (recents == null || task == null) return;
+
         try {
             XposedBridge.hookAllMethods(recents, "onLayout", new XC_MethodHook() {
                 @Override protected void afterHookedMethod(MethodHookParam p) {
-                    ViewGroup view = (ViewGroup) p.thisObject;
-                    if (enabled(view)) layoutGrid(view, task);
+                    ViewGroup root = (ViewGroup) p.thisObject;
+                    if (enabled(root)) placeGrid(root, task);
                 }
             });
-            XposedBridge.hookAllMethods(View.class, "dispatchGenericMotionEvent", new XC_MethodHook() {
+
+            // The original PagedView can change scrollX without running onLayout again.
+            // Restore the grid's coordinate space before it draws, but only if needed.
+            XposedBridge.hookAllMethods(recents, "dispatchDraw", new XC_MethodHook() {
                 @Override protected void beforeHookedMethod(MethodHookParam p) {
-                    ViewGroup view = (ViewGroup) p.thisObject;
-                    if (!recents.isInstance(view) || !enabled(view)) return;
+                    ViewGroup root = (ViewGroup) p.thisObject;
+                    if (enabled(root)) placeGrid(root, task);
+                }
+            });
+
+            XposedBridge.hookAllMethods(recents, "onTouchEvent", new XC_MethodHook() {
+                @Override protected void beforeHookedMethod(MethodHookParam p) {
+                    ViewGroup root = (ViewGroup) p.thisObject;
+                    if (enabled(root)) p.setResult(true); // disable PagedView's horizontal swipe
+                }
+            });
+
+            XposedBridge.hookAllMethods(recents, "onGenericMotionEvent", new XC_MethodHook() {
+                @Override protected void beforeHookedMethod(MethodHookParam p) {
+                    ViewGroup root = (ViewGroup) p.thisObject;
+                    if (!enabled(root)) return;
                     MotionEvent e = (MotionEvent) p.args[0];
                     if (e.getActionMasked() != MotionEvent.ACTION_SCROLL) return;
-                    float axis = e.getAxisValue(MotionEvent.AXIS_VSCROLL);
-                    if (axis == 0) return;
-                    GridState s = state(view);
-                    int step = dp(view, 64);
-                    s.offset += Math.round(-axis * step);
-                    layoutGrid(view, task);
+                    float wheel = e.getAxisValue(MotionEvent.AXIS_VSCROLL);
+                    if (wheel == 0) return;
+                    State state = getState(root);
+                    state.offset -= Math.round(wheel * dp(root, 64));
+                    placeGrid(root, task);
                     p.setResult(true);
                 }
             });
-            XposedBridge.hookAllMethods(ViewGroup.class, "dispatchKeyEvent", new XC_MethodHook() {
-                @Override protected void beforeHookedMethod(MethodHookParam p) {
-                    ViewGroup view = (ViewGroup) p.thisObject;
-                    if (!recents.isInstance(view) || !enabled(view)) return;
-                    KeyEvent e = (KeyEvent) p.args[0];
-                    if (e.getAction() != KeyEvent.ACTION_DOWN) return;
-                    int delta;
-                    switch (e.getKeyCode()) {
-                        case KeyEvent.KEYCODE_DPAD_DOWN: delta = COLUMNS; break;
-                        case KeyEvent.KEYCODE_DPAD_UP: delta = -COLUMNS; break;
-                        case KeyEvent.KEYCODE_DPAD_RIGHT: delta = 1; break;
-                        case KeyEvent.KEYCODE_DPAD_LEFT: delta = -1; break;
-                        default: return;
-                    }
-                    GridState s = state(view);
-                    int count = taskCount(view, task);
-                    if (count == 0) return;
-                    s.selected = Math.max(0, Math.min(count - 1, s.selected + delta));
-                    View target = taskAt(view, task, s.selected);
-                    if (target != null) {
-                        target.setFocusable(true);
-                        target.requestFocus();
-                        scrollToVisible(view, target, s);
-                        layoutGrid(view, task);
-                        p.setResult(true);
-                    }
-                }
-            });
+
+            // ViewGroup's inherited dispatch methods run before hit-testing children.
             XposedBridge.hookAllMethods(ViewGroup.class, "dispatchTouchEvent", new XC_MethodHook() {
                 @Override protected void beforeHookedMethod(MethodHookParam p) {
-                    ViewGroup view = (ViewGroup) p.thisObject;
-                    if (!recents.isInstance(view) || !enabled(view)) return;
+                    ViewGroup root = (ViewGroup) p.thisObject;
+                    if (!recents.isInstance(root) || !enabled(root)) return;
                     MotionEvent e = (MotionEvent) p.args[0];
-                    GridState s = state(view);
+                    State state = getState(root);
                     switch (e.getActionMasked()) {
                         case MotionEvent.ACTION_DOWN:
-                            s.downY = e.getY();
-                            s.lastY = e.getY();
-                            s.dragging = false;
+                            state.downX = e.getX();
+                            state.downY = e.getY();
+                            state.lastY = state.downY;
+                            state.dragging = false;
                             break;
                         case MotionEvent.ACTION_MOVE:
-                            float dy = e.getY() - s.lastY;
-                            if (!s.dragging && Math.abs(e.getY() - s.downY) > dp(view, 12)) {
-                                s.dragging = true;
+                            float dy = e.getY() - state.lastY;
+                            if (!state.dragging &&
+                                    Math.abs(e.getY() - state.downY) > dp(root, 16) &&
+                                    Math.abs(e.getY() - state.downY) >
+                                            Math.abs(e.getX() - state.downX)) {
+                                state.dragging = true;
+                                // Cancel touch handling for the child that received ACTION_DOWN
+                                // by consuming subsequent movements.
                             }
-                            s.lastY = e.getY();
-                            if (s.dragging) {
-                                s.offset -= Math.round(dy);
-                                layoutGrid(view, task);
+                            state.lastY = e.getY();
+                            if (state.dragging) {
+                                state.offset -= Math.round(dy);
+                                placeGrid(root, task);
                                 p.setResult(true);
                             }
                             break;
                         case MotionEvent.ACTION_UP:
                         case MotionEvent.ACTION_CANCEL:
-                            if (s.dragging) {
-                                s.dragging = false;
+                            if (state.dragging) {
+                                state.dragging = false;
                                 p.setResult(true);
                             }
                             break;
-                        default: break;
+                        default:
+                            break;
                     }
                 }
             });
-            XposedBridge.log("BB UI: experimental Recents grid hook installed for " + lp.packageName);
-        } catch (Throwable t) {
-            XposedBridge.log("BB UI: Recents grid hook unavailable: " + t);
+
+            XposedBridge.hookAllMethods(ViewGroup.class, "dispatchKeyEvent", new XC_MethodHook() {
+                @Override protected void beforeHookedMethod(MethodHookParam p) {
+                    ViewGroup root = (ViewGroup) p.thisObject;
+                    if (!recents.isInstance(root) || !enabled(root)) return;
+                    KeyEvent e = (KeyEvent) p.args[0];
+                    if (e.getAction() != KeyEvent.ACTION_DOWN) return;
+                    int delta;
+                    switch (e.getKeyCode()) {
+                        case KeyEvent.KEYCODE_DPAD_UP: delta = -2; break;
+                        case KeyEvent.KEYCODE_DPAD_DOWN: delta = 2; break;
+                        case KeyEvent.KEYCODE_DPAD_LEFT: delta = -1; break;
+                        case KeyEvent.KEYCODE_DPAD_RIGHT: delta = 1; break;
+                        default: return;
+                    }
+                    State state = getState(root);
+                    int n = countTasks(root, task);
+                    if (n == 0) return;
+                    state.selected = Math.max(0, Math.min(n - 1, state.selected + delta));
+                    View selected = getTask(root, task, state.selected);
+                    if (selected == null) return;
+                    int rowTop = dp(root, 12) + (state.selected / 2) * state.rowHeight;
+                    if (rowTop < state.offset) state.offset = rowTop;
+                    if (rowTop + state.rowHeight > state.offset + root.getHeight())
+                        state.offset = rowTop + state.rowHeight - root.getHeight();
+                    placeGrid(root, task);
+                    selected.setFocusable(true);
+                    selected.requestFocus();
+                    p.setResult(true);
+                }
+            });
+            XposedBridge.log("BB UI: RecentsGridHook v2 hooked " + lp.packageName);
+        } catch (Throwable error) {
+            XposedBridge.log("BB UI: RecentsGridHook v2 unavailable: " + error);
         }
     }
 
-    private static synchronized GridState state(View v) {
-        GridState s = STATES.get(v);
-        if (s == null) {
-            s = new GridState();
-            STATES.put(v, s);
-        }
-        return s;
-    }
-
-    private static boolean enabled(View v) {
+    private static boolean enabled(View view) {
         try {
-            return Settings.Global.getInt(v.getContext().getContentResolver(), TOGGLE, 0) == 1;
-        } catch (Throwable ignored) { return false; }
-    }
-
-    private static int dp(View v, int n) {
-        return Math.round(n * v.getResources().getDisplayMetrics().density);
-    }
-
-    private static int taskCount(ViewGroup root, Class<?> cls) {
-        int n = 0;
-        for (int i = 0; i < root.getChildCount(); i++) {
-            if (cls.isInstance(root.getChildAt(i))) n++;
+            return Settings.Global.getInt(view.getContext().getContentResolver(),
+                    TOGGLE, 0) == 1;
+        } catch (Throwable ignored) {
+            return false;
         }
-        return n;
     }
 
-    private static View taskAt(ViewGroup root, Class<?> cls, int index) {
-        for (int i = 0; i < root.getChildCount(); i++) {
-            View child = root.getChildAt(i);
-            if (!cls.isInstance(child)) continue;
-            if (index-- == 0) return child;
+    private static synchronized State getState(View view) {
+        State state = STATES.get(view);
+        if (state == null) {
+            state = new State();
+            STATES.put(view, state);
+        }
+        return state;
+    }
+
+    private static int dp(View view, int pixels) {
+        return Math.round(view.getResources().getDisplayMetrics().density * pixels);
+    }
+
+    private static int countTasks(ViewGroup root, Class<?> task) {
+        int count = 0;
+        for (int i = 0; i < root.getChildCount(); ++i)
+            if (task.isInstance(root.getChildAt(i))) count++;
+        return count;
+    }
+
+    private static View getTask(ViewGroup root, Class<?> task, int index) {
+        for (int i = 0; i < root.getChildCount(); ++i) {
+            View v = root.getChildAt(i);
+            if (task.isInstance(v) && index-- == 0) return v;
         }
         return null;
     }
 
-    private static void scrollToVisible(ViewGroup parent, View target, GridState s) {
-        int row = s.selected / COLUMNS;
-        int slotH = s.rowStep > 0 ? s.rowStep : dp(parent, 200);
-        int top = dp(parent, 12) + row * slotH;
-        if (top < s.offset) s.offset = top;
-        else if (top + slotH > s.offset + parent.getHeight())
-            s.offset = top + slotH - parent.getHeight();
-    }
-
-    private static void layoutGrid(ViewGroup root, Class<?> taskType) {
-        GridState s = state(root);
-        if (s.applying || root.getWidth() <= 0 || root.getHeight() <= 0) return;
-        s.applying = true;
+    private static void placeGrid(ViewGroup root, Class<?> task) {
+        State state = getState(root);
+        if (state.layingOut || root.getWidth() <= 0 || root.getHeight() <= 0) return;
+        state.layingOut = true;
         try {
-            final int gap = dp(root, 10);
-            final int inset = dp(root, 12);
-            final int cellWidth = Math.max(1, (root.getWidth() - inset * 2 - gap) / COLUMNS);
-            View first = taskAt(root, taskType, 0);
-            if (first == null) return;
-            final int rawWidth = Math.max(1, first.getWidth());
-            final int rawHeight = Math.max(1, first.getHeight());
-            final float scale = Math.min(1f, (float) cellWidth / rawWidth);
-            final int cellHeight = Math.round(rawHeight * scale);
-            final int rowStep = cellHeight + gap;
-            final int count = taskCount(root, taskType);
-            s.rowStep = rowStep;
-            s.contentHeight = inset * 2 + (count + 1) / 2 * rowStep;
-            s.offset = Math.max(0, Math.min(s.offset, Math.max(0, s.contentHeight - root.getHeight())));
-            root.setClipChildren(false);
-            for (int i = 0; i < count; i++) {
-                View tile = taskAt(root, taskType, i);
-                if (tile == null) continue;
-                float actualScale = Math.min(1f, (float) cellWidth / Math.max(1, tile.getWidth()));
-                float x = inset + (i % COLUMNS) * (cellWidth + gap);
-                float y = inset + (i / COLUMNS) * rowStep - s.offset;
-                // View scaling defaults to center pivot; translation aligns the visual top-left.
-                tile.setScaleX(actualScale);
-                tile.setScaleY(actualScale);
-                tile.setTranslationX(x - tile.getLeft() - (1f - actualScale) * tile.getWidth() / 2f);
-                tile.setTranslationY(y - tile.getTop() - (1f - actualScale) * tile.getHeight() / 2f);
+            int margin = dp(root, 12);
+            int gap = dp(root, 10);
+            int width = Math.max(1, (root.getWidth() - 2 * margin - gap) / COLUMNS);
+            int count = countTasks(root, task);
+            if (count == 0) return;
+            View first = getTask(root, task, 0);
+            if (first == null || first.getWidth() <= 0 || first.getHeight() <= 0) return;
+            float nominalScale = Math.min(1f, (float) width / first.getWidth());
+            int cellHeight = Math.max(1, Math.round(first.getHeight() * nominalScale));
+            state.rowHeight = cellHeight + gap;
+            state.contentHeight = 2 * margin + (count + 1) / 2 * state.rowHeight - gap;
+            state.offset = Math.max(0, Math.min(state.offset,
+                    Math.max(0, state.contentHeight - root.getHeight())));
+
+            // Reset PagedView's horizontal origin rather than compensate only one frame.
+            if (root.getScrollX() != 0) root.scrollTo(0, root.getScrollY());
+            root.setClipChildren(true);
+
+            for (int i = 0; i < count; ++i) {
+                View tile = getTask(root, task, i);
+                if (tile == null || tile.getWidth() <= 0 || tile.getHeight() <= 0) continue;
+
+                float scale = Math.min(1f, (float) width / tile.getWidth());
+                int x = margin + (i % COLUMNS) * (width + gap);
+                int y = margin + (i / COLUMNS) * state.rowHeight - state.offset;
+
+                // Actual child coordinates, not translations, are used by hit-testing.
+                int originalW = tile.getWidth();
+                int originalH = tile.getHeight();
+                tile.setPivotX(0f);
+                tile.setPivotY(0f);
+                if (tile.getLeft() != x || tile.getTop() != y) {
+                    tile.layout(x, y, x + originalW, y + originalH);
+                }
+                if (tile.getScaleX() != scale) tile.setScaleX(scale);
+                if (tile.getScaleY() != scale) tile.setScaleY(scale);
                 tile.setFocusable(true);
             }
-        } catch (Throwable t) {
-            XposedBridge.log("BB UI: Recents grid layout failure: " + t);
+        } catch (Throwable error) {
+            XposedBridge.log("BB UI: RecentsGridHook v2 layout error: " + error);
         } finally {
-            s.applying = false;
+            state.layingOut = false;
         }
     }
 }
