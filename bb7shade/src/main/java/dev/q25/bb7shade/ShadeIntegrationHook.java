@@ -121,7 +121,7 @@ public final class ShadeIntegrationHook implements IXposedHookLoadPackage {
                     if (view instanceof android.view.ViewGroup) {
                         try {
                             ShadeNotificationIndex.updateFromNativeRows(
-                                    (android.view.ViewGroup) view);
+                                    (android.view.ViewGroup) view, false);
                         } catch (Throwable error) {
                             Log.e(TAG, "Cannot bootstrap native notification index", error);
                         }
@@ -149,7 +149,7 @@ public final class ShadeIntegrationHook implements IXposedHookLoadPackage {
                     if (!(param.thisObject instanceof android.view.ViewGroup)) return;
                     try {
                         ShadeNotificationIndex.updateFromNativeRows(
-                                (android.view.ViewGroup) param.thisObject);
+                                (android.view.ViewGroup) param.thisObject, true);
                     } catch (Throwable error) {
                         Log.e(TAG, "Native notification row observer failed", error);
                     }
