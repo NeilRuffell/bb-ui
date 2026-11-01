@@ -47,13 +47,21 @@ jobs:
           gradle-version: '8.11.1'
 
       - name: Compile debug APK
-        run: gradle :app:assembleDebug :bb7focus:assembleDebug --no-daemon --stacktrace
+        run: gradle :app:assembleDebug :bb7focus:assembleDebug :bb7shade:assembleDebug --no-daemon --stacktrace
 
       - name: Upload BB7 Appearance debug APK
         uses: actions/upload-artifact@v4
         with:
           name: bb7-appearance-debug-apk
           path: bb7focus/build/outputs/apk/debug/bb7focus-debug.apk
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload BB7 Shade debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: bb7-shade-debug-apk
+          path: bb7shade/build/outputs/apk/debug/bb7shade-debug.apk
           if-no-files-found: error
           retention-days: 14
 

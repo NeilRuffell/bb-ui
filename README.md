@@ -1,5 +1,40 @@
 # BB UI
 
+## BB7 Shade — independent Vector module (development branch)
+
+The `feat/bb7-shade` branch adds `:bb7shade`, a **third, separate APK**
+(`dev.q25.bb7shade`), alongside `:app` and `:bb7focus`.
+Stage 1 is **headless**: it observes SystemUI's live notification pipeline,
+indexes which apps have rendered notifications and detects the native shade
+window. It does **not** add a new shade, intercept input, hide the stock
+shade or change its notifications. The future replacement is deliberately
+gated on both pages being functional, avoiding two competing interfaces.
+
+Build and install only the new module:
+
+```sh
+./gradlew :bb7shade:assembleDebug
+adb install -r bb7shade/build/outputs/apk/debug/bb7shade-debug.apk
+```
+
+Enable **BB7 Shade** for **System UI** (`com.android.systemui`) in Vector.
+Restart SystemUI without rebooting:
+
+```sh
+adb shell am crash com.android.systemui
+adb logcat -d -s BB7-Shade:I '*:S'
+```
+
+Expect `BB7 Shade stage 1 loaded; stock shade retained` and
+`Read-only rendered-notification index attached`, followed by count
+updates when Android's rendered notification list changes. This confirms
+**data integration**, not the redesigned UI. The original shade stays
+fully functional. To roll back, disable just this module's SystemUI scope
+and restart SystemUI.
+
+See [BB7 Shade architecture](docs/BB7_SHADE_ARCHITECTURE.md).
+
+---
 ## BB7 Appearance — Settings and SystemUI native notification focus (experimental)
 
 The `feat/bb7-focus-settings` branch builds a **separate, compatible Vector/LSPosed APK**
