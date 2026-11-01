@@ -2,6 +2,7 @@ package dev.q25.trackpad;
 
 import android.graphics.Rect;
 import android.provider.Settings;
+import android.util.Log;
 import android.view.View;
 
 import de.robv.android.xposed.IXposedHookLoadPackage;
@@ -37,6 +38,8 @@ public final class RecentsTwoColumnHook implements IXposedHookLoadPackage {
         Class<?> recents = XposedHelpers.findClassIfExists(RECENTS, lp.classLoader);
         Class<?> paged = XposedHelpers.findClassIfExists(PAGED, lp.classLoader);
         if (recents == null || paged == null) return;
+        Log.w("BB-UI-Recents", "Quickstep detected in " + lp.packageName
+                + "; initializing two-panel and vertical hooks");
 
         try {
             // PagedView natively supports multi-panel paging, sizing, and focus.
