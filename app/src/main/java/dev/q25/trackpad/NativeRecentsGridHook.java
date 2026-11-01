@@ -574,6 +574,27 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
                 });
             }
 
+            // The *only* native source of the Home phantom card:
+            // showCurrentTask() either reuses an existing TaskView or inserts
+            // a placeholder for its GroupedTaskInfo, including Home.
+            // Suppressing just the HOME call at this method boundary leaves
+            // onGestureAnimationStart's gesture state and normal animation
+            // pipeline untouched, and handles both existing-card and stub
+            // paths (unlike shouldAvoidAddingStubTaskView()).
+            XposedBridge.hookAllMethods(recents, "showCurrentTask",
+                    new XC_MethodHook() {
+                @Override protected void beforeHookedMethod(MethodHookParam p) {
+                    View root = (View) p.thisObject;
+                    if (!active(root) || p.args.length == 0) return;
+                    if (groupedTaskActivityType(p.args[0]) != 2) return;
+                    Log.w(TAG, "Native HOME running task skipped at "
+                            + "showCurrentTask; source=" +
+                            (p.args.length > 1 ? p.args[1] : "unknown")
+                            + " existingChildren=" + ((ViewGroup) root).getChildCount());
+                    p.setResult(null); // void method; no card is created or reused
+                }
+            });
+
             // Disarm the entry latch as part of the native exit state.
             // The same RecentsView may be reused on the next BlackBerry
             // button press, which must again select page zero.
@@ -620,25 +641,12 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
                 @Override protected void beforeHookedMethod(MethodHookParam p) {
                     View root = (View) p.thisObject;
                     if (!active(root) || p.args.length == 0) return;
-                    Object grouped = p.args[0];
-                    int activityType = groupedTaskActivityType(grouped);
+                    int activityType = groupedTaskActivityType(p.args[0]);
                     int runningIndex = (Integer) XposedHelpers.callMethod(
                             root, "getRunningTaskIndex");
                     Log.w(TAG, "Native overview gesture source: activityType="
                             + activityType + " runningIndex=" + runningIndex
                             + " existingChildren=" + ((ViewGroup) root).getChildCount());
-                    if (activityType == 2) { // WindowConfiguration.ACTIVITY_TYPE_HOME
-                        // The stock showCurrentTask() would otherwise treat
-                        // Home as a temporary running application, including
-                        // when a matching placeholder already exists; the
-                        // late shouldAvoidAddingStubTaskView() guard cannot
-                        // handle that path. Passing null lets native
-                        // onGestureAnimationStart perform its normal state
-                        // setup without inserting or selecting a Home card.
-                        p.args[0] = null;
-                        Log.w(TAG, "Native HOME entry: excluded HOME from "
-                                + "running recent-task source");
-                    }
                 }
                 @Override protected void afterHookedMethod(MethodHookParam p) {
                     selectInitialGridPage((View) p.thisObject);
@@ -696,9 +704,9 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
      * occurring after the overview command begins.
      */
     /**
-     * Returns the activity type of the primary running task supplied by
-     * Quickstep's existing gesture pipeline. 2 is ACTIVITY_TYPE_HOME, 1 is
-     * ACTIVITY_TYPE_STANDARD, and -1 means there is no primary task.
+     * Inspects the native GroupedTaskInfo without changing the gesture state.
+     * 2 = ACTIVITY_TYPE_HOME, 1 = ACTIVITY_TYPE_STANDARD,
+     * -1 = absent or unclassifiable.
      */
     private static int groupedTaskActivityType(Object grouped) {
         if (grouped == null) return -1;
