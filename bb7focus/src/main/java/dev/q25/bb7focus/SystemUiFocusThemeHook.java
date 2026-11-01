@@ -5,19 +5,16 @@ import android.graphics.Canvas;
 import android.graphics.LinearGradient;
 import android.graphics.Paint;
 import android.graphics.Shader;
-import android.graphics.drawable.Drawable;
 import android.util.Log;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewParent;
-import android.view.ViewTreeObserver;
 import android.widget.CompoundButton;
 import android.widget.EditText;
 import android.widget.TextView;
 
 import java.util.IdentityHashMap;
 import java.util.Map;
-import java.util.WeakHashMap;
 
 import de.robv.android.xposed.IXposedHookLoadPackage;
 import de.robv.android.xposed.XC_MethodHook;
@@ -26,14 +23,14 @@ import de.robv.android.xposed.XposedHelpers;
 import de.robv.android.xposed.callbacks.XC_LoadPackage;
 
 /**
- * BB7 blue highlight for native SystemUI notification rows only.
+ * Appearance-only BB7 highlight for native SystemUI notification rows.
  *
- * Navigation-neutral: never sets focusability, requests focus, changes touch/key
- * events, changes Android notification state, or mutates the row's own drawable.
- * We draw a focused gradient inside NotificationBackgroundView after its
- * stock background, and invalidate it when focus moves.
+ * The focus state is read from the existing ExpandableNotificationRow. Its
+ * NotificationBackgroundView has duplicateParentState=true in the LineageOS
+ * 24 notification row layout, so its drawableStateChanged and onDraw are
+ * called with the row's current state.
  *
- * LineageOS 24 QS is Compose-based and deliberately not included.
+ * This module does not set focusability, request focus or intercept input.
  */
 public final class SystemUiFocusThemeHook implements IXposedHookLoadPackage {
     private static final String TARGET = "com.android.systemui";
@@ -49,151 +46,139 @@ public final class SystemUiFocusThemeHook implements IXposedHookLoadPackage {
     private static final int TITLE_COLOR = 0xffffffff;
     private static final int SUMMARY_COLOR = 0xffe7f2ff;
 
-    private static final Map<ViewTreeObserver, Highlight> ACTIVE = new WeakHashMap<>();
+    // SystemUI View rendering is on its UI thread. Only one native View has
+    // keyboard focus at a time. The active highlight is restored on focus
+    // loss, replacement, and background detachment.
+    private static Highlight active;
 
     @Override
     public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lp) {
         if (!TARGET.equals(lp.packageName) || !TARGET.equals(lp.processName)) return;
-        // Handle the common framework dispatch rather than modifying any
-        // SystemUI focus/navigation methods.
+        Class<?> background = XposedHelpers.findClassIfExists(
+                NOTIFICATION_BACKGROUND, lp.classLoader);
+        if (background == null) {
+            Log.w(TAG, "NotificationBackgroundView unavailable in classloader");
+            return;
+        }
+
         try {
-            XposedBridge.hookAllMethods(ViewTreeObserver.class,
-                    "dispatchOnGlobalFocusChange", new XC_MethodHook() {
+            // The native background's state follows the focused parent row.
+            XposedBridge.hookAllMethods(background, "drawableStateChanged",
+                    new XC_MethodHook() {
                         @Override
                         protected void afterHookedMethod(MethodHookParam param) {
                             try {
-                                View newFocus = (View) param.args[1];
-                                onFocus((ViewTreeObserver) param.thisObject, newFocus);
+                                syncFocus((View) param.thisObject);
                             } catch (Throwable error) {
-                                Log.e(TAG, "Focus observation failed", error);
+                                Log.e(TAG, "Cannot synchronize notification focus state", error);
                             }
                         }
                     });
-            XposedBridge.hookAllMethods(ViewTreeObserver.class,
-                    "dispatchOnWindowFocusChange", new XC_MethodHook() {
-                        @Override
-                        protected void afterHookedMethod(MethodHookParam param) {
-                            if (!((Boolean) param.args[0])) {
-                                clear((ViewTreeObserver) param.thisObject);
-                            }
-                        }
-                    });
-            Log.i(TAG, "SystemUI native notification focus observers registered");
-        } catch (Throwable error) {
-            XposedBridge.log(TAG + ": framework focus hook unavailable: " + error);
-        }
 
-        Class<?> background = XposedHelpers.findClassIfExists(NOTIFICATION_BACKGROUND,
-                lp.classLoader);
-        if (background == null) {
-            Log.w(TAG, "NotificationBackgroundView unavailable: skipping native highlight");
-            return;
-        }
-
-        try {
+            // Draw after the stock notification background and before its
+            // content, without replacing its native drawable or layout.
             XposedBridge.hookAllMethods(background, "onDraw", new XC_MethodHook() {
                 @Override
                 protected void afterHookedMethod(MethodHookParam param) {
-                    View view = (View) param.thisObject;
-                    if (!isHighlighted(view)) return;
+                    View backgroundView = (View) param.thisObject;
                     try {
-                        drawBlueHighlight(view, (Canvas) param.args[0]);
+                        View row = notificationRowFor(backgroundView);
+                        if (row == null) return;
+                        syncFocus(backgroundView);
+                        if (active != null && active.row == row && row.isFocused()) {
+                            drawBlueHighlight(backgroundView, (Canvas) param.args[0]);
+                        }
                     } catch (Throwable error) {
-                        Log.e(TAG, "Cannot draw notification focus highlight", error);
+                        Log.e(TAG, "Cannot draw native notification highlight", error);
                     }
                 }
             });
-            Log.i(TAG, "Native notification background drawing hook registered");
+
+            // A notification may disappear without first losing focus.
+            XposedBridge.hookAllMethods(background, "onDetachedFromWindow",
+                    new XC_MethodHook() {
+                        @Override
+                        protected void beforeHookedMethod(MethodHookParam param) {
+                            View backgroundView = (View) param.thisObject;
+                            if (active != null && active.background == backgroundView) {
+                                clearHighlight();
+                            }
+                        }
+                    });
+            Log.i(TAG, "Native notification state/draw appearance hooks registered");
         } catch (Throwable error) {
-            XposedBridge.log(TAG + ": notification drawing hook unavailable: " + error);
+            XposedBridge.log(TAG + ": native notification hook unavailable: " + error);
         }
     }
 
-    private static void onFocus(ViewTreeObserver observer, View focused) {
-        if (focused != null) {
-            // Diagnostic only: class names and focus state, never notification text.
-            View nearestRow = findNotificationAncestor(focused);
-            Log.i(TAG, "Focused view=" + focused.getClass().getName()
-                    + " notificationAncestor=" + (nearestRow != null)
-                    + " rowItself=" + (nearestRow == focused)
-                    + " attached=" + focused.isAttachedToWindow()
-                    + " shown=" + focused.isShown());
-        } else {
-            Log.i(TAG, "Focused view=null");
-        }
-        Highlight existing = ACTIVE.get(observer);
-        if (existing != null && existing.row == focused && focused != null
-                && focused.isAttachedToWindow() && focused.isShown()) return;
-        clear(observer);
-        // We only style an actually focused row. We do not decorate an entire
-        // notification when its child reply field or action button has focus.
-        if (focused == null || !focused.isShown() || !focused.isEnabled()
-                || !focused.isAttachedToWindow()
-                || !isClassOrSubclass(focused.getClass(), NOTIFICATION_ROW)) return;
-        View background;
+    private static View notificationRowFor(View background) {
+        ViewParent parent = background.getParent();
+        if (!(parent instanceof View)) return null;
+        View row = (View) parent;
+        if (!isClassOrSubclass(row.getClass(), NOTIFICATION_ROW)) return null;
+
+        // Do not style dimmed/background siblings or unrelated custom views.
         try {
-            Object candidate = XposedHelpers.getObjectField(focused, "mBackgroundNormal");
-            if (!(candidate instanceof View)
-                    || !isClassOrSubclass(candidate.getClass(), NOTIFICATION_BACKGROUND)) {
-                Log.w(TAG, "Focused row has no compatible native background");
-                return;
+            if (XposedHelpers.getObjectField(row, "mBackgroundNormal") != background) {
+                return null;
             }
-            background = (View) candidate;
-            if (!background.isShown()) return;
         } catch (Throwable error) {
-            Log.w(TAG, "Notification background lookup unavailable", error);
-            return;
+            return null;
         }
-        Highlight highlight = new Highlight(focused, background);
-        ACTIVE.put(observer, highlight);
-        highlight.apply();
-        Log.i(TAG, "Native notification row blue focus applied");
+        return row;
     }
 
-    private static View findNotificationAncestor(View focused) {
-        for (View v = focused; v != null; ) {
-            if (isClassOrSubclass(v.getClass(), NOTIFICATION_ROW)) return v;
-            ViewParent parent = v.getParent();
-            if (!(parent instanceof View)) break;
-            v = (View) parent;
-        }
-        return null;
-    }
-
-    private static boolean isClassOrSubclass(Class<?> cls, String name) {
-        for (Class<?> c = cls; c != null; c = c.getSuperclass()) {
-            if (name.equals(c.getName())) return true;
+    private static boolean isClassOrSubclass(Class<?> type, String name) {
+        for (Class<?> cls = type; cls != null; cls = cls.getSuperclass()) {
+            if (name.equals(cls.getName())) return true;
         }
         return false;
     }
 
-    private static void clear(ViewTreeObserver observer) {
-        Highlight existing = ACTIVE.remove(observer);
-        if (existing != null) existing.restore();
-    }
+    private static void syncFocus(View background) {
+        View row = notificationRowFor(background);
+        if (row == null) return;
+        boolean focused = row.isFocused() && row.isShown() && row.isEnabled()
+                && row.isAttachedToWindow() && background.isShown();
 
-    private static boolean isHighlighted(View background) {
-        for (Highlight active : ACTIVE.values()) {
-            if (active.background == background && active.row.isFocused()) return true;
+        if (focused) {
+            if (active != null && active.row == row) return;
+            clearHighlight();
+            Highlight highlight = new Highlight(row, background);
+            active = highlight;
+            highlight.apply();
+            Log.i(TAG, "Native notification row blue focus applied: "
+                    + row.getClass().getName());
+        } else if (active != null && active.row == row) {
+            clearHighlight();
+            Log.i(TAG, "Native notification row blue focus cleared");
         }
-        return false;
     }
 
-    private static void drawBlueHighlight(View view, Canvas canvas) {
-        int width = view.getWidth();
-        int height = view.getHeight();
+    private static void clearHighlight() {
+        Highlight prior = active;
+        active = null;
+        if (prior != null) prior.restore();
+    }
+
+    private static void drawBlueHighlight(View background, Canvas canvas) {
+        int width = background.getWidth();
+        int height = background.getHeight();
         try {
-            int actualHeight = XposedHelpers.getIntField(view, "mActualHeight");
+            int actualHeight = XposedHelpers.getIntField(background, "mActualHeight");
             if (actualHeight > 0) height = Math.min(height, actualHeight);
+            int actualWidth = XposedHelpers.getIntField(background, "mActualWidth");
+            if (actualWidth > 0) width = Math.min(width, actualWidth);
         } catch (Throwable ignored) {
-            // Use the actual view bounds if the internal field changes.
+            // Retain the View's measured bounds if internal geometry changes.
         }
         if (width <= 0 || height <= 0) return;
-        float radius = view.getResources().getDisplayMetrics().density * 8f;
+        float radius = background.getResources().getDisplayMetrics().density * 8f;
         Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
         paint.setShader(new LinearGradient(0, 0, 0, height,
-                new int[] { BLUE_TOP, BLUE_MIDDLE, BLUE_BOTTOM },
+                new int[] {BLUE_TOP, BLUE_MIDDLE, BLUE_BOTTOM},
                 null, Shader.TileMode.CLAMP));
+
         canvas.save();
         try {
             canvas.drawRoundRect(0, 0, width, height, radius, radius, paint);
@@ -202,10 +187,10 @@ public final class SystemUiFocusThemeHook implements IXposedHookLoadPackage {
         }
     }
 
-    private static boolean isSecondaryText(TextView textView) {
-        if (textView.getId() == View.NO_ID) return false;
+    private static boolean isSecondaryText(TextView view) {
+        if (view.getId() == View.NO_ID) return false;
         try {
-            String name = textView.getResources().getResourceEntryName(textView.getId());
+            String name = view.getResources().getResourceEntryName(view.getId());
             return "text".equals(name) || "text2".equals(name)
                     || "big_text".equals(name) || "summary".equals(name)
                     || "info".equals(name) || "inbox_text0".equals(name);
@@ -214,18 +199,17 @@ public final class SystemUiFocusThemeHook implements IXposedHookLoadPackage {
         }
     }
 
-    private static void recolor(View view, Map<TextView, ColorStateList> original) {
-        if (view instanceof TextView
-                && !(view instanceof EditText)
+    private static void recolor(View view, Map<TextView, ColorStateList> originals) {
+        if (view instanceof TextView && !(view instanceof EditText)
                 && !(view instanceof CompoundButton)) {
             TextView text = (TextView) view;
-            original.put(text, text.getTextColors());
+            originals.put(text, text.getTextColors());
             text.setTextColor(isSecondaryText(text) ? SUMMARY_COLOR : TITLE_COLOR);
         }
         if (view instanceof ViewGroup) {
             ViewGroup group = (ViewGroup) view;
             for (int i = 0; i < group.getChildCount(); i++) {
-                recolor(group.getChildAt(i), original);
+                recolor(group.getChildAt(i), originals);
             }
         }
     }
@@ -245,21 +229,25 @@ public final class SystemUiFocusThemeHook implements IXposedHookLoadPackage {
                 recolor(row, originalText);
                 background.invalidate();
             } catch (Throwable error) {
-                Log.e(TAG, "Cannot apply notification highlight", error);
+                Log.e(TAG, "Cannot recolor focused notification", error);
                 restore();
             }
         }
 
         void restore() {
-            for (Map.Entry<TextView, ColorStateList> item : originalText.entrySet()) {
-                try {
-                    item.getKey().setTextColor(item.getValue());
-                } catch (Throwable ignored) {
-                    // Notification content may be detached/rebound independently.
+            try {
+                for (Map.Entry<TextView, ColorStateList> entry : originalText.entrySet()) {
+                    try {
+                        entry.getKey().setTextColor(entry.getValue());
+                    } catch (Throwable ignored) {
+                        // Notification children can be rebound independently.
+                    }
                 }
+                originalText.clear();
+                background.invalidate();
+            } catch (Throwable error) {
+                Log.w(TAG, "Cannot fully restore notification text", error);
             }
-            originalText.clear();
-            background.invalidate();
         }
     }
 }
