@@ -89,7 +89,7 @@ final class TwoColumnPanel extends FrameLayout {
             try {
                 drawable = pm.getApplicationIcon(pkg);
                 label = pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0));
-            } catch (PackageManager.NameNotFoundException error) {
+            } catch (PackageManager.NameNotFoundException | RuntimeException error) {
                 // Keep a predictable icon even if its package was uninstalled
                 // or lives in another profile.
                 drawable = pm.getDefaultActivityIcon();
