@@ -43,16 +43,19 @@ baseline, not the older Recents experiments.
   entry callbacks share an idempotent latch so selection executes **once per
   overview entry**, and the latch clears on exit.
 - For an Overview transition **from Home**, classify the native
-  `GroupedTaskInfo` before `RecentsView.onGestureAnimationStart()` processes
-  it. An `ACTIVITY_TYPE_HOME` source is passed to that method as `null`,
-  preserving its native state setup while preventing `showCurrentTask()`
-  from creating **or selecting** a temporary Home tile. The previous late
-  `shouldAvoidAddingStubTaskView()` hook was removed because the existing-
-  task path bypasses it.
-- Log the gesture source's activity type and running-task index at native
-  Overview entry; if Home is not classified as `activityType=2`, the
-  source does **not** match this diagnosis and the visual behavior must be
-  investigated with the emitted logs.
+  `GroupedTaskInfo` in `RecentsView.showCurrentTask()` and veto ONLY that
+  method for `ACTIVITY_TYPE_HOME`. The native gesture-start state, running
+  task metadata, and app entry animations are otherwise unchanged. This
+  covers both the existing-running-card and new-placeholder paths.
+- The previous `shouldAvoidAddingStubTaskView()` gate was ineffective on
+  existing-card paths and has been removed. The subsequent attempt to null
+  the `onGestureAnimationStart()` input was also removed because it was
+  broader than necessary.
+- At native Overview entry, log the source's activity type and running-task
+  index. At the exact insertion/reuse boundary log
+  `Native HOME running task skipped at showCurrentTask`. If no such line
+  occurs when opening from Home, the user-visible motion must be traced
+  elsewhere; this build does not mask the motion with any offset.
 - Preserve stock `TaskViewSimulator` geometry for
   `ACTIVITY_TYPE_HOME` remote animation targets; only app windows are
   redirected toward their corresponding recent-task card.
@@ -117,7 +120,7 @@ until there are more recent tasks. The `Native pager bounds: min=0 max=...` diag
 match the grid's `maxScroll=...` when the native layout is active.
 On entry from Home, look for
 `Native overview gesture source: activityType=2` and
-`Native HOME entry: excluded HOME from running recent-task source`.
+`Native HOME running task skipped at showCurrentTask`.
 If a Home remote surface is present it logs
 `Native HOME target: leaving simulator geometry unchanged`.
 The entry animation path logs `Native entry animation target=[...]`
