@@ -1,5 +1,7 @@
 package dev.q25.bb7pulldown;
 
+import android.app.Notification;
+import android.os.Bundle;
 import android.service.notification.NotificationListenerService;
 import android.service.notification.StatusBarNotification;
 import android.util.Log;
@@ -30,8 +32,9 @@ final class SystemUiNotificationObserver {
             "com.android.systemui.statusbar.NotificationListener";
     private static final Object LOCK = new Object();
     // Keys avoid duplicate posts and preserve the insertion order across apps.
-    private static final Map<String, String> NOTIFICATIONS = new LinkedHashMap<>();
+    private static final Map<String, NotificationItem> NOTIFICATIONS = new LinkedHashMap<>();
     private static volatile List<String> activePackages = Collections.emptyList();
+    private static volatile List<NotificationItem> activeItems = Collections.emptyList();
     private static volatile WeakReference<NotificationListenerService> listener =
             new WeakReference<>(null);
     private static boolean snapshotLogged;
@@ -39,6 +42,10 @@ final class SystemUiNotificationObserver {
 
     static List<String> snapshot() {
         return activePackages;
+    }
+
+    static List<NotificationItem> itemsSnapshot() {
+        return activeItems;
     }
 
     static void install(ClassLoader loader) {
@@ -60,7 +67,7 @@ final class SystemUiNotificationObserver {
                     StatusBarNotification sbn = (StatusBarNotification) param.args[0];
                     listener = new WeakReference<>((NotificationListenerService) param.thisObject);
                     synchronized (LOCK) {
-                        NOTIFICATIONS.put(sbn.getKey(), sbn.getPackageName());
+                        NOTIFICATIONS.put(sbn.getKey(), toItem(sbn));
                         publishLocked();
                     }
                 }
@@ -108,14 +115,13 @@ final class SystemUiNotificationObserver {
                 NOTIFICATIONS.clear();
                 for (StatusBarNotification sbn : current) {
                     if (sbn == null) continue;
-                    NOTIFICATIONS.put(sbn.getKey(), sbn.getPackageName());
+                    NOTIFICATIONS.put(sbn.getKey(), toItem(sbn));
                 }
                 if (!snapshotLogged || "open".equals(source)) {
                     snapshotLogged = true;
                     Log.i(TAG, "Native notification snapshot: source=" + source
                             + " entries=" + current.length + " apps="
-                            + NotificationAppIndex.uniquePackages(
-                                    new ArrayList<>(NOTIFICATIONS.values())).size());
+                            + packageNames().size());
                 }
                 publishLocked();
             }
@@ -127,14 +133,65 @@ final class SystemUiNotificationObserver {
         }
     }
 
-    /** Must hold LOCK. Publish immutable snapshots, no lock held during UI update. */
+    /** Must hold LOCK. Publish on new, changed or removed notification data. */
     private static void publishLocked() {
-        List<String> packages = NotificationAppIndex.uniquePackages(
+        List<NotificationItem> items = Collections.unmodifiableList(
                 new ArrayList<>(NOTIFICATIONS.values()));
-        if (packages.equals(activePackages)) return;
+        if (items.equals(activeItems)) return;
+        List<String> packages = packageNames();
+        boolean appsChanged = !packages.equals(activePackages);
+        activeItems = items;
         activePackages = packages;
-        Log.i(TAG, "Notification app index updated: apps=" + packages.size());
-        PullDownHook.onNotificationPackagesUpdated(packages);
+        if (appsChanged) {
+            Log.i(TAG, "Notification app index updated: apps=" + packages.size());
+        }
+        Log.i(TAG, "Notification summaries updated: entries=" + items.size());
+        PullDownHook.onNotificationItemsUpdated();
+    }
+
+    private static List<String> packageNames() {
+        List<String> names = new ArrayList<>();
+        for (NotificationItem item : NOTIFICATIONS.values()) {
+            names.add(item.packageName);
+        }
+        return NotificationAppIndex.uniquePackages(names);
+    }
+
+    private static NotificationItem toItem(StatusBarNotification sbn) {
+        Notification notification = sbn.getNotification();
+        Bundle extras = notification == null ? null : notification.extras;
+        CharSequence title = extras == null ? null
+                : extras.getCharSequence(Notification.EXTRA_TITLE);
+        CharSequence body = extras == null ? null
+                : extras.getCharSequence(Notification.EXTRA_BIG_TEXT);
+        if (body == null || body.length() == 0) {
+            body = extras == null ? null : extras.getCharSequence(Notification.EXTRA_TEXT);
+        }
+        if ((body == null || body.length() == 0) && extras != null) {
+            CharSequence[] lines = extras.getCharSequenceArray(Notification.EXTRA_TEXT_LINES);
+            if (lines != null) {
+                StringBuilder text = new StringBuilder();
+                for (CharSequence line : lines) {
+                    if (line == null || line.length() == 0) continue;
+                    if (text.length() != 0) text.append("\n");
+                    text.append(line);
+                    if (text.length() >= 700) break;
+                }
+                body = text;
+            }
+        }
+        if ((body == null || body.length() == 0) && notification != null) {
+            body = notification.tickerText;
+        }
+        return new NotificationItem(sbn.getKey(), sbn.getPackageName(),
+                plain(title, 140), plain(body, 700), sbn.getPostTime());
+    }
+
+    /** Drop app-supplied formatting before displaying text in the panel. */
+    private static String plain(CharSequence text, int max) {
+        if (text == null) return "";
+        String value = text.toString().trim();
+        return value.length() <= max ? value : value.substring(0, max);
     }
 
     private SystemUiNotificationObserver() {}
