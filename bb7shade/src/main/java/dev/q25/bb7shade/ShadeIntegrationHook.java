@@ -43,7 +43,7 @@ public final class ShadeIntegrationHook implements IXposedHookLoadPackage {
     @Override
     public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lp) {
         if (!PACKAGE.equals(lp.packageName) || !PACKAGE.equals(lp.processName)) return;
-        Log.i(TAG, "BB7 Shade stage 3.2 loaded; live keyguard/expansion visibility");
+        Log.i(TAG, "BB7 Shade stage 3.3 loaded; keyguard callback argument reader");
         observeFinalRenderList(lp);
         observeShadeHost(lp);
         observeNativeStack(lp);
@@ -108,6 +108,8 @@ public final class ShadeIntegrationHook implements IXposedHookLoadPackage {
      * The Q25 confirms that onFinishInflate mounts our rail, but its first
      * keyguard query runs while SystemUI is starting and returns locked.
      * The notification stack may never lay out again after unlock.
+     * Do not reflectively call isShowing() on the Q25; Android 17's
+     * optimized SystemUI has removed that method.
      *
      * Observe the *same* KeyguardStateControllerImpl that SystemUI uses,
      * plus the actual shade expansion lifecycle to handle an already
@@ -125,8 +127,12 @@ public final class ShadeIntegrationHook implements IXposedHookLoadPackage {
                             @Override
                             protected void afterHookedMethod(MethodHookParam param) {
                                 try {
-                                    boolean showing = (Boolean) XposedHelpers.callMethod(
-                                            param.thisObject, "isShowing");
+                                    // The Q25's optimized SystemUI does not
+                                    // expose isShowing(). The original method
+                                    // already receives 'showing' as arg 0.
+                                    if (param.args.length < 1
+                                            || !(param.args[0] instanceof Boolean)) return;
+                                    boolean showing = (Boolean) param.args[0];
                                     ShadeRailHost.onSystemUiKeyguardState(
                                             showing, "keyguard-state-change");
                                 } catch (Throwable error) {
@@ -153,8 +159,13 @@ public final class ShadeIntegrationHook implements IXposedHookLoadPackage {
                                 try {
                                     Object keyguard = XposedHelpers.getObjectField(
                                             param.thisObject, "mKeyguardStateController");
-                                    boolean showing = (Boolean) XposedHelpers.callMethod(
-                                            keyguard, "isShowing");
+                                    // Source: KeyguardStateControllerImpl
+                                    // stores current state in mShowing.
+                                    // Directly read it; the accessor was
+                                    // removed from this Q25 system image.
+                                    if (keyguard == null) return;
+                                    boolean showing = XposedHelpers.getBooleanField(
+                                            keyguard, "mShowing");
                                     ShadeRailHost.onSystemUiKeyguardState(
                                             showing, "shade-expansion");
                                 } catch (Throwable error) {

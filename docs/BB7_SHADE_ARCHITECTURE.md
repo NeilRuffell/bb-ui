@@ -75,6 +75,10 @@ interactive behind the replacement after takeover is enabled.
    experimental layout is enabled by default and can be disabled before
    process restart with `adb shell setprop debug.bb7shade.layout false`.
    The rail is hidden and the original stack layout restored on keyguard.
+   Version 0.3.3 reads notifyKeyguardState(showing, occluded)'s showing
+   argument directly, since the optimized Q25 runtime no longer has
+   KeyguardStateControllerImpl.isShowing(). The shade-expansion observer
+   uses the existing mShowing field, with bounded error reporting.
    Version 0.3.2 also observes KeyguardStateControllerImpl unlock events and
    the legacy NotificationPanelViewController expansion callback to activate
    an already-mounted rail when SystemUI startup initially reports locked.
