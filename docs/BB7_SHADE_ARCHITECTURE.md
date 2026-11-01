@@ -75,6 +75,11 @@ interactive behind the replacement after takeover is enabled.
    experimental layout is enabled by default and can be disabled before
    process restart with `adb shell setprop debug.bb7shade.layout false`.
    The rail is hidden and the original stack layout restored on keyguard.
+   Version 0.3.2 also observes KeyguardStateControllerImpl unlock events and
+   the legacy NotificationPanelViewController expansion callback to activate
+   an already-mounted rail when SystemUI startup initially reports locked.
+   A tested visibility policy prioritizes SystemUI's authoritative lockscreen
+   state over the initial Android KeyguardManager snapshot.
    Version 0.3.1 also attaches from the native stack onLayout (after
    posting to the shade view), because not all SystemUI instances are
    available at the original container inflation hook point. An ADB switch
