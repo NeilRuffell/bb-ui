@@ -1,0 +1,9 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application android:label="BB7 Appearance" android:hasCode="true"
+        android:allowBackup="false">
+        <meta-data android:name="xposedmodule" android:value="true" />
+        <meta-data android:name="xposeddescription"
+            android:value="BB7 blue focused-row appearance in Android Settings" />
+        <meta-data android:name="xposedminversion" android:value="82" />
+    </application>
+</manifest>
