@@ -1,8 +1,6 @@
 package dev.q25.trackpad;
 
-import android.content.Context;
 import android.provider.Settings;
-import android.view.InputDevice;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
@@ -36,8 +34,12 @@ public final class RecentsGridHook implements IXposedHookLoadPackage {
     private static class GridState {
         int offset;
         int contentHeight;
+        int rowStep;
         int selected;
         boolean applying;
+        float downY;
+        float lastY;
+        boolean dragging;
     }
 
     @Override
@@ -56,10 +58,10 @@ public final class RecentsGridHook implements IXposedHookLoadPackage {
                     if (enabled(view)) layoutGrid(view, task);
                 }
             });
-            XposedBridge.hookAllMethods(recents, "onGenericMotionEvent", new XC_MethodHook() {
+            XposedBridge.hookAllMethods(View.class, "dispatchGenericMotionEvent", new XC_MethodHook() {
                 @Override protected void beforeHookedMethod(MethodHookParam p) {
                     ViewGroup view = (ViewGroup) p.thisObject;
-                    if (!enabled(view)) return;
+                    if (!recents.isInstance(view) || !enabled(view)) return;
                     MotionEvent e = (MotionEvent) p.args[0];
                     if (e.getActionMasked() != MotionEvent.ACTION_SCROLL) return;
                     float axis = e.getAxisValue(MotionEvent.AXIS_VSCROLL);
@@ -71,10 +73,10 @@ public final class RecentsGridHook implements IXposedHookLoadPackage {
                     p.setResult(true);
                 }
             });
-            XposedBridge.hookAllMethods(recents, "dispatchKeyEvent", new XC_MethodHook() {
+            XposedBridge.hookAllMethods(ViewGroup.class, "dispatchKeyEvent", new XC_MethodHook() {
                 @Override protected void beforeHookedMethod(MethodHookParam p) {
                     ViewGroup view = (ViewGroup) p.thisObject;
-                    if (!enabled(view)) return;
+                    if (!recents.isInstance(view) || !enabled(view)) return;
                     KeyEvent e = (KeyEvent) p.args[0];
                     if (e.getAction() != KeyEvent.ACTION_DOWN) return;
                     int delta;
@@ -96,6 +98,41 @@ public final class RecentsGridHook implements IXposedHookLoadPackage {
                         scrollToVisible(view, target, s);
                         layoutGrid(view, task);
                         p.setResult(true);
+                    }
+                }
+            });
+            XposedBridge.hookAllMethods(ViewGroup.class, "dispatchTouchEvent", new XC_MethodHook() {
+                @Override protected void beforeHookedMethod(MethodHookParam p) {
+                    ViewGroup view = (ViewGroup) p.thisObject;
+                    if (!recents.isInstance(view) || !enabled(view)) return;
+                    MotionEvent e = (MotionEvent) p.args[0];
+                    GridState s = state(view);
+                    switch (e.getActionMasked()) {
+                        case MotionEvent.ACTION_DOWN:
+                            s.downY = e.getY();
+                            s.lastY = e.getY();
+                            s.dragging = false;
+                            break;
+                        case MotionEvent.ACTION_MOVE:
+                            float dy = e.getY() - s.lastY;
+                            if (!s.dragging && Math.abs(e.getY() - s.downY) > dp(view, 12)) {
+                                s.dragging = true;
+                            }
+                            s.lastY = e.getY();
+                            if (s.dragging) {
+                                s.offset -= Math.round(dy);
+                                layoutGrid(view, task);
+                                p.setResult(true);
+                            }
+                            break;
+                        case MotionEvent.ACTION_UP:
+                        case MotionEvent.ACTION_CANCEL:
+                            if (s.dragging) {
+                                s.dragging = false;
+                                p.setResult(true);
+                            }
+                            break;
+                        default: break;
                     }
                 }
             });
@@ -143,8 +180,7 @@ public final class RecentsGridHook implements IXposedHookLoadPackage {
 
     private static void scrollToVisible(ViewGroup parent, View target, GridState s) {
         int row = s.selected / COLUMNS;
-        int slotH = parent.getTag(0x7f0c0001) instanceof Integer
-                ? (Integer) parent.getTag(0x7f0c0001) : dp(parent, 200);
+        int slotH = s.rowStep > 0 ? s.rowStep : dp(parent, 200);
         int top = dp(parent, 12) + row * slotH;
         if (top < s.offset) s.offset = top;
         else if (top + slotH > s.offset + parent.getHeight())
@@ -167,7 +203,7 @@ public final class RecentsGridHook implements IXposedHookLoadPackage {
             final int cellHeight = Math.round(rawHeight * scale);
             final int rowStep = cellHeight + gap;
             final int count = taskCount(root, taskType);
-            root.setTag(0x7f0c0001, rowStep);
+            s.rowStep = rowStep;
             s.contentHeight = inset * 2 + (count + 1) / 2 * rowStep;
             s.offset = Math.max(0, Math.min(s.offset, Math.max(0, s.contentHeight - root.getHeight())));
             root.setClipChildren(false);
