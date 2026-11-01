@@ -31,9 +31,7 @@ import de.robv.android.xposed.callbacks.XC_LoadPackage;
  */
 public final class RecentsVerticalListHook {
     private static final String TOGGLE = "bb_ui_recents_vertical_list";
-    private static final String RECENTS = "com.android.quickstep.views.RecentsView";
     private static final String TASK = "com.android.quickstep.views.TaskView";
-    private static final String PAGED = "com.android.launcher3.PagedView";
     private static final String LOG_TAG = "BB-UI-Recents";
     private static final WeakHashMap<View, GridState> STATES = new WeakHashMap<>();
 
@@ -59,7 +57,7 @@ public final class RecentsVerticalListHook {
      */
     static void install(XC_LoadPackage.LoadPackageParam lp,
             Class<?> recents, Class<?> paged) {
-        Log.i(LOG_TAG, "Vertical hook installer reached in " + lp.packageName);
+        Log.w(LOG_TAG, "Vertical hook installer reached in " + lp.packageName);
         final Class<?> task = XposedHelpers.findClassIfExists(TASK, lp.classLoader);
         if (task == null) {
             Log.e(LOG_TAG, "Vertical installer: TaskView class unavailable");
@@ -94,7 +92,7 @@ public final class RecentsVerticalListHook {
                     GridState st = state(root);
                     if (!st.loggedActive) {
                         st.loggedActive = true;
-                        Log.i(LOG_TAG, "Vertical Recents layout active: children="
+                        Log.w(LOG_TAG, "Vertical Recents layout active: children="
                                 + root.getChildCount());
                     }
                     positionNativeTaskViews(root, task);
@@ -248,7 +246,7 @@ public final class RecentsVerticalListHook {
                 });
             }
             XposedBridge.log("BB UI: vertical native TaskView list hooked in " + lp.packageName);
-            Log.i(LOG_TAG, "Vertical hook registration complete in " + lp.packageName);
+            Log.w(LOG_TAG, "Vertical hook registration complete in " + lp.packageName);
         } catch (Throwable ex) {
             XposedBridge.log("BB UI: vertical native list unavailable: " + ex);
             Log.e(LOG_TAG, "Vertical hook installation failed", ex);
