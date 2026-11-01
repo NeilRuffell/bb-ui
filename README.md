@@ -39,8 +39,9 @@ baseline, not the older Recents experiments.
   handles scrolling, fling, and snap.
 - Use native two-panel grouping and TaskView measurement.
 - Enter Overview at its **native page zero**, resetting its previous page
-  selection at the start of the state transition or gesture. Never snap back
-  after the overview is displayed.
+  selection at the start of the state transition or gesture. The two native
+  entry callbacks share an idempotent latch so selection executes **once per
+  overview entry**, and the latch clears on exit.
 - Fix `TaskViewSimulator.calculateTaskSize()` to use the same first-column,
   first-row card geometry as the grid; the app-window surface now has a
   grid destination **before** its opening animation is created.
@@ -101,7 +102,7 @@ A zero `maxScroll` means all rows fit on screen; scrolling is not possible
 until there are more recent tasks. The `Native pager bounds: min=0 max=...` diagnostic must now
 match the grid's `maxScroll=...` when the native layout is active.
 The entry animation path logs `Native entry animation target=[...]`
-when its simulator destination is configured. On overview entry the native
+when an individual simulator destination changes, not only once per process. On overview entry the native
 page-selection path logs `Native overview initial page=0 scrollY=0`.
 If these messages are missing, the relevant paths did not execute.
 Check for `Native bidirectional task dismissal registered` and the per-swipe `Native dismiss drag direction=left/right` messages. A bounds mismatch is a bug in the hook; no pager touch event suggests
