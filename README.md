@@ -1,5 +1,67 @@
 # BB UI
 
+## BB7 Pull-down — clean-start prototype
+
+**Branch:** `feat/bb7-pulldown` (fresh from `master`). No code from the abandoned
+`feat/bb7-shade` notification/QS hooks is included.
+
+A separate Vector/LSPosed module, `:bb7pulldown` (`dev.q25.bb7pulldown`),
+intercepts a finger swipe starting in the native status-bar region and presents
+an **independent, full-screen-width window with two empty columns**:
+
+- Left column: exactly 15% of available window width.
+- Right column: exactly 85% of available window width.
+
+Swipe down from the top status bar to open; swipe up inside the panel or use
+Back to dismiss. Both columns are intentionally empty except for the
+percent labels. Android's notification and Quick Settings data, keyboard
+navigation, and filtering are **not integrated yet**.
+
+**Initial gesture limitation:** This prototype consumes finger touches that
+begin on the visible status bar while enabled. Fullscreen immersive apps
+that hide the status bar may not expose that gesture source. It does not
+intercept other SystemUI routes that open the stock shade. This stage
+only tests the global pull-down and the 15/85 layout.
+
+### Build and enable
+
+```sh
+cd ~/Projects/bb-ui
+git fetch origin
+git switch feat/bb7-pulldown
+git pull --ff-only
+./gradlew :bb7pulldown:assembleDebug
+adb install -r bb7pulldown/build/outputs/apk/debug/bb7pulldown-debug.apk
+adb shell setprop debug.bb7pulldown.enabled true
+adb shell setprop debug.bb7shade.layout false
+adb shell am crash com.android.systemui
+```
+
+In Vector, enable **BB7 Pull-down** with **SystemUI** scope, and disable
+the abandoned **BB7 Shade** module to avoid competing modifications.
+
+Logs:
+
+```sh
+adb logcat -d -s BB7-PullDown:I '*:S'
+```
+
+Rollback without a full phone reboot:
+
+```sh
+adb shell setprop debug.bb7pulldown.enabled false
+adb shell am crash com.android.systemui
+```
+
+**Security:** The prototype does not open over the locked keyguard; the
+system remains authoritative for notification privacy. SystemUI can
+reject the independent window type; failure is logged and not retried
+indefinitely. Physical Q25 validation is required.
+
+---
+
+# BB UI
+
 ## BB7 Appearance — Settings and SystemUI native notification focus (experimental)
 
 The `feat/bb7-focus-settings` branch builds a **separate, compatible Vector/LSPosed APK**

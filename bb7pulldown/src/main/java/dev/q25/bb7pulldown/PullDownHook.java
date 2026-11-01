@@ -1,0 +1,210 @@
+package dev.q25.bb7pulldown;
+
+import android.app.KeyguardManager;
+import android.content.Context;
+import android.graphics.PixelFormat;
+import android.os.SystemClock;
+import android.util.Log;
+import android.view.Gravity;
+import android.view.MotionEvent;
+import android.view.View;
+import android.view.WindowManager;
+
+import java.util.Collections;
+import java.util.Map;
+import java.util.WeakHashMap;
+
+import de.robv.android.xposed.IXposedHookLoadPackage;
+import de.robv.android.xposed.XC_MethodHook;
+import de.robv.android.xposed.XposedBridge;
+import de.robv.android.xposed.XposedHelpers;
+import de.robv.android.xposed.callbacks.XC_LoadPackage;
+
+/**
+ * Fresh BBOS7-inspired top-edge gesture prototype; independent of the
+ * previous experimental notification shade module.
+ *
+ * This early stage intentionally contains no notifications and no QS.
+ * Touches starting on the phone's native status bar are exclusively owned
+ * by this gesture when debug.bb7pulldown.enabled is true. Otherwise stock
+ * Android remains untouched.
+ *
+ * Emergency rollback:
+ *   adb shell setprop debug.bb7pulldown.enabled false
+ *   adb shell am crash com.android.systemui
+ */
+public final class PullDownHook implements IXposedHookLoadPackage {
+    private static final String TAG = "BB7-PullDown";
+    private static final String PACKAGE = "com.android.systemui";
+    private static final String STATUS_BAR =
+            "com.android.systemui.statusbar.phone.PhoneStatusBarView";
+    private static final String ENABLE_PROP = "debug.bb7pulldown.enabled";
+    private static final Map<View, SwipeState> SWIPES =
+            Collections.synchronizedMap(new WeakHashMap<>());
+    private static boolean shown;
+    private static WindowManager windowManager;
+    private static TwoColumnPanel panel;
+    private static boolean openingOrClosing;
+
+    @Override
+    public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lp) {
+        if (!PACKAGE.equals(lp.packageName) || !PACKAGE.equals(lp.processName)) return;
+
+        if (!enabled()) {
+            Log.i(TAG, "Disabled by " + ENABLE_PROP + "; stock status bar retained");
+            return;
+        }
+        Class<?> viewClass = XposedHelpers.findClassIfExists(STATUS_BAR, lp.classLoader);
+        if (viewClass == null) {
+            Log.w(TAG, "Native status-bar gesture source not present");
+            return;
+        }
+        try {
+            XposedBridge.hookAllMethods(viewClass, "dispatchTouchEvent", new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) {
+                    if (!(param.thisObject instanceof View) || param.args.length != 1
+                            || !(param.args[0] instanceof MotionEvent)) return;
+                    View view = (View) param.thisObject;
+                    MotionEvent event = (MotionEvent) param.args[0];
+                    try {
+                        if (handleTopEdgeTouch(view, event)) param.setResult(true);
+                    } catch (Throwable e) {
+                        Log.e(TAG, "Top-edge gesture failed; native dispatch retained", e);
+                    }
+                }
+            });
+            Log.i(TAG, "Full-width pull-down edge gesture registered; ratio=15/85");
+        } catch (Throwable error) {
+            Log.e(TAG, "Unable to register global status-bar gesture", error);
+        }
+    }
+
+    private static boolean enabled() {
+        try {
+            Class<?> props = Class.forName("android.os.SystemProperties");
+            return (Boolean) XposedHelpers.callStaticMethod(
+                    props, "getBoolean", ENABLE_PROP, false);
+        } catch (Throwable error) {
+            Log.e(TAG, "Cannot read rollback property; leaving stock shade", error);
+            return false;
+        }
+    }
+
+    private static boolean locked(Context context) {
+        KeyguardManager manager = (KeyguardManager)
+                context.getSystemService(Context.KEYGUARD_SERVICE);
+        return manager == null || manager.isKeyguardLocked();
+    }
+
+    private static boolean handleTopEdgeTouch(View view, MotionEvent event) {
+        int action = event.getActionMasked();
+        if (action == MotionEvent.ACTION_DOWN) {
+            if (!enabled() || shown || openingOrClosing || locked(view.getContext())
+                    || event.getPointerCount() != 1
+                    || event.getToolType(0) != MotionEvent.TOOL_TYPE_FINGER) return false;
+            SwipeState state = new SwipeState(event.getRawY(), event.getRawX());
+            SWIPES.put(view, state);
+            return true;
+        }
+        SwipeState state = SWIPES.get(view);
+        if (state == null) return false;
+        switch (action) {
+            case MotionEvent.ACTION_MOVE:
+                float deltaY = event.getRawY() - state.startY;
+                float deltaX = Math.abs(event.getRawX() - state.startX);
+                int thresholdPx = dp(view.getContext(), 48);
+                if (!state.opened && deltaY >= thresholdPx && deltaY > deltaX) {
+                    state.opened = true;
+                    showPanel(view.getContext());
+                }
+                return true;
+            case MotionEvent.ACTION_UP:
+            case MotionEvent.ACTION_CANCEL:
+            case MotionEvent.ACTION_POINTER_DOWN:
+                SWIPES.remove(view);
+                return true;
+            default:
+                return true;
+        }
+    }
+
+    private static void showPanel(Context context) {
+        if (shown || openingOrClosing || !enabled() || locked(context)) return;
+        openingOrClosing = true;
+        WindowManager manager = (WindowManager)
+                context.getSystemService(Context.WINDOW_SERVICE);
+        if (manager == null) {
+            openingOrClosing = false;
+            Log.w(TAG, "WindowManager unavailable");
+            return;
+        }
+        TwoColumnPanel root = new TwoColumnPanel(context, PullDownHook::dismissPanel);
+        WindowManager.LayoutParams params = new WindowManager.LayoutParams(
+                WindowManager.LayoutParams.MATCH_PARENT,
+                WindowManager.LayoutParams.MATCH_PARENT,
+                WindowManager.LayoutParams.TYPE_STATUS_BAR_SUB_PANEL,
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                PixelFormat.OPAQUE);
+        params.setTitle("BB7 Pull-down");
+        params.gravity = Gravity.TOP | Gravity.START;
+        params.setFitInsetsTypes(0);
+        params.layoutInDisplayCutoutMode =
+                WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS;
+        int height = context.getResources().getDisplayMetrics().heightPixels;
+        root.setTranslationY(-height);
+        try {
+            manager.addView(root, params);
+            panel = root;
+            windowManager = manager;
+            shown = true;
+            Log.i(TAG, "Two-column window attached; fullWidth=true left=15 right=85"
+                    + " heightPx=" + height);
+            root.post(() -> {
+                root.animate().translationY(0f).setDuration(220).withEndAction(() -> {
+                    openingOrClosing = false;
+                    root.requestFocus();
+                }).start();
+            });
+        } catch (Throwable error) {
+            openingOrClosing = false;
+            shown = false;
+            panel = null;
+            windowManager = null;
+            Log.e(TAG, "Unable to display full-width pull-down; stock system unaffected", error);
+        }
+    }
+
+    private static void dismissPanel() {
+        if (!shown || openingOrClosing || panel == null) return;
+        openingOrClosing = true;
+        TwoColumnPanel root = panel;
+        int height = root.getHeight();
+        if (height <= 0) height = root.getResources().getDisplayMetrics().heightPixels;
+        root.animate().translationY(-height).setDuration(180)
+                .withEndAction(() -> {
+                    try {
+                        if (windowManager != null) windowManager.removeViewImmediate(root);
+                    } catch (Throwable e) {
+                        Log.w(TAG, "Unable to remove pull-down cleanly", e);
+                    } finally {
+                        panel = null;
+                        windowManager = null;
+                        shown = false;
+                        openingOrClosing = false;
+                        Log.i(TAG, "Two-column pull-down dismissed");
+                    }
+                }).start();
+    }
+
+    private static int dp(Context context, int value) {
+        return (int) (value * context.getResources().getDisplayMetrics().density + 0.5f);
+    }
+
+    private static final class SwipeState {
+        final float startY;
+        final float startX;
+        boolean opened;
+        SwipeState(float y, float x) { startY = y; startX = x; }
+    }
+}
