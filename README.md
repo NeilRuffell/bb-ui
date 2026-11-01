@@ -42,6 +42,13 @@ baseline, not the older Recents experiments.
   selection at the start of the state transition or gesture. The two native
   entry callbacks share an idempotent latch so selection executes **once per
   overview entry**, and the latch clears on exit.
+- For an Overview transition **from Home**, use Quickstep's own
+  `shouldAvoidAddingStubTaskView()` gate to reject a temporary Home task at
+  grid index zero. Native task loading then populates the grid without
+  adding/removing a phantom first card.
+- Preserve stock `TaskViewSimulator` geometry for
+  `ACTIVITY_TYPE_HOME` remote animation targets; only app windows are
+  redirected toward their corresponding recent-task card.
 - Fix `TaskViewSimulator.calculateTaskSize()` to use the same first-column,
   first-row card geometry as the grid; the app-window surface now has a
   grid destination **before** its opening animation is created.
@@ -101,6 +108,10 @@ A gesture over the grid should log
 A zero `maxScroll` means all rows fit on screen; scrolling is not possible
 until there are more recent tasks. The `Native pager bounds: min=0 max=...` diagnostic must now
 match the grid's `maxScroll=...` when the native layout is active.
+On entry from Home, look for
+`Native HOME entry: prevented non-recents stub at grid position 0`.
+If a Home remote surface is present it logs
+`Native HOME target: leaving simulator geometry unchanged`.
 The entry animation path logs `Native entry animation target=[...]`
 when an individual simulator destination changes, not only once per process. On overview entry the native
 page-selection path logs `Native overview initial page=0 scrollY=0`.
