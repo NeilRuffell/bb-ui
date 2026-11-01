@@ -4,11 +4,22 @@
 
 The `feat/bb7-shade` branch adds `:bb7shade`, a **third, separate APK**
 (`dev.q25.bb7shade`), alongside `:app` and `:bb7focus`.
-Version `0.3.6-native-scene-controller-dev` is the first **visible partial UI**:
+Version `0.3.7-live-shade-routing-dev` is the first **visible partial UI**:
 it inserts a narrow native BB7 app-icon/count rail into the existing SystemUI
 notification container, and constrains Android's original notification stack
 to the right of it while the phone is unlocked. It does not add another
 window or duplicate native notification rows.
+Version 0.3.7 hooks the active CentralSurfacesCommandQueueCallbacks dispatch
+path to capture the actual ShadeController implementation even when the
+controller constructor ran before Vector. It routes native QS expansion
+and Compose SceneInteractor QuickSettings transitions to the Notifications
+shade while the BB7 experimental layout is enabled and the system keyguard
+is known to be dismissed. This deliberately suppresses the stock QS
+page until the independent BB7 Quick Settings page exists. It never
+intercepts lock-screen transitions or forces native notification alpha.
+A single ADB rollback remains available: `adb shell setprop
+debug.bb7shade.layout false` followed by a SystemUI restart.
+
 Version 0.3.6 observes LineageOS's actual ShadeControllerSceneImpl and
 requests its native expandToNotifications() operation directly when the user
 selects an app, falling back to StatusBarManager when that scene controller is

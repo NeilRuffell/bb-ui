@@ -75,6 +75,14 @@ interactive behind the replacement after takeover is enabled.
    experimental layout is enabled by default and can be disabled before
    process restart with `adb shell setprop debug.bb7shade.layout false`.
    The rail is hidden and the original stack layout restored on keyguard.
+   Version 0.3.7 captures the live mShadeController used by
+   CentralSurfacesCommandQueueCallbacks and routes its native QS expansion
+   callback to animateExpandShade() when the experimental layout is enabled
+   and the device is confirmed unlocked. It also redirects
+   SceneInteractor.changeScene(Scenes.QuickSettings) to Scenes.Shade in
+   single-scene mode. Both changes preserve stock keyguard behavior; the
+   normal QS page is intentionally suppressed until the planned second
+   BB7 page is available. All hooks fail open to normal SystemUI behavior.
    Version 0.3.6 captures ShadeControllerSceneImpl, uses its own
    expandToNotifications() and logs the before/after SceneInteractor
    currentScene. It retains platform status-bar fallback and never overrides

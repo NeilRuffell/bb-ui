@@ -43,8 +43,9 @@ public final class ShadeIntegrationHook implements IXposedHookLoadPackage {
     @Override
     public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lp) {
         if (!PACKAGE.equals(lp.packageName) || !PACKAGE.equals(lp.processName)) return;
-        Log.i(TAG, "BB7 Shade stage 3.6 loaded; direct native scene controller integration");
+        Log.i(TAG, "BB7 Shade stage 3.7 loaded; active native shade and Compose routing");
         ShadeSceneBridge.installHooks(lp.classLoader);
+        ShadeSceneBridge.installActiveControllerHooks(lp.classLoader);
         observeFinalRenderList(lp);
         observeShadeHost(lp);
         observeNativeStack(lp);

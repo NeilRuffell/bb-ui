@@ -29,6 +29,9 @@ final class ShadeSceneBridge {
     private static long lastRequestMs;
     private static boolean warned;
     private static WeakReference<Object> sceneController = new WeakReference<>(null);
+    private static WeakReference<Object> activeShadeController = new WeakReference<>(null);
+    private static volatile boolean callbackCaptured;
+    private static volatile boolean sceneRedirectLogged;
 
     static void installHooks(ClassLoader loader) {
         Class<?> scene = XposedHelpers.findClassIfExists(
@@ -60,6 +63,99 @@ final class ShadeSceneBridge {
         }
     }
 
+    /**
+     * Capture the controller actually dispatched by SystemUI's CommandQueue.
+     * This works even if ShadeControllerSceneImpl was constructed before our
+     * Vector hooks (or the device uses ShadeControllerImpl instead).
+     */
+    static void installActiveControllerHooks(ClassLoader loader) {
+        Class<?> callbacks = XposedHelpers.findClassIfExists(
+                "com.android.systemui.statusbar.phone.CentralSurfacesCommandQueueCallbacks",
+                loader);
+        if (callbacks != null) {
+            try {
+                XposedBridge.hookAllMethods(callbacks, "animateExpandNotificationsPanel",
+                        new XC_MethodHook() {
+                            @Override protected void beforeHookedMethod(MethodHookParam param) {
+                                captureShadeController(param.thisObject);
+                            }
+                        });
+                XposedBridge.hookAllMethods(callbacks, "animateExpandSettingsPanel",
+                        new XC_MethodHook() {
+                            @Override protected void beforeHookedMethod(MethodHookParam param) {
+                                Object controller = captureShadeController(param.thisObject);
+                                if (!ShadeRailHost.canRouteToNotifications() || controller == null) {
+                                    return;
+                                }
+                                try {
+                                    // Experimental mode: show notifications by default.
+                                    // QS is deliberately unavailable until the second
+                                    // BB7 page is implemented.
+                                    XposedHelpers.callMethod(controller, "animateExpandShade");
+                                    param.setResult(null);
+                                    Log.i(TAG, "Routed native QS expansion to Notifications");
+                                } catch (Throwable error) {
+                                    logFailure("Native QS dispatch redirection failed", error);
+                                    // Preserve the stock dispatch on failure.
+                                }
+                            }
+                        });
+                Log.i(TAG, "Native CommandQueue shade-controller hooks registered");
+            } catch (Throwable error) {
+                Log.w(TAG, "Native CommandQueue hooks unavailable ("
+                        + error.getClass().getSimpleName() + ")");
+            }
+        }
+
+        // Covers direct Compose scene transitions that bypass CommandQueue.
+        Class<?> interactor = XposedHelpers.findClassIfExists(
+                "com.android.systemui.scene.domain.interactor.SceneInteractor", loader);
+        Class<?> scenes = XposedHelpers.findClassIfExists(
+                "com.android.systemui.scene.shared.model.Scenes", loader);
+        if (interactor == null || scenes == null) return;
+        try {
+            final Object quickSettings = XposedHelpers.getStaticObjectField(
+                    scenes, "QuickSettings");
+            final Object notifications = XposedHelpers.getStaticObjectField(
+                    scenes, "Shade");
+            XposedBridge.hookAllMethods(interactor, "changeScene", new XC_MethodHook() {
+                @Override protected void beforeHookedMethod(MethodHookParam param) {
+                    if (!ShadeRailHost.canRouteToNotifications()
+                            || param.args.length == 0
+                            || param.args[0] != quickSettings) return;
+                    param.args[0] = notifications;
+                    if (!sceneRedirectLogged) {
+                        sceneRedirectLogged = true;
+                        Log.i(TAG, "Routed Compose QuickSettings scene to Notifications");
+                    }
+                }
+            });
+            Log.i(TAG, "Compose scene routing hook registered");
+        } catch (Throwable error) {
+            Log.w(TAG, "Compose scene routing hook unavailable ("
+                    + error.getClass().getSimpleName() + ")");
+        }
+    }
+
+    private static Object captureShadeController(Object callbacks) {
+        try {
+            Object controller = XposedHelpers.getObjectField(
+                    callbacks, "mShadeController");
+            if (controller != null) {
+                activeShadeController = new WeakReference<>(controller);
+                if (!callbackCaptured) {
+                    callbackCaptured = true;
+                    Log.i(TAG, "Native active shade controller captured: "
+                            + controller.getClass().getName());
+                }
+            }
+            return controller;
+        } catch (Throwable error) {
+            logFailure("Unable to read active shade controller", error);
+            return null;
+        }
+    }
+
     static void requestNotifications(View rail) {
         if (!ShadeRailHost.isRailActive()) return;
         long now = SystemClock.uptimeMillis();
@@ -69,7 +165,18 @@ final class ShadeSceneBridge {
         // Post outside focus dispatch. SystemUI owns all scene transitions.
         rail.post(() -> {
             if (!ShadeRailHost.isRailActive()) return;
-            Object controller = sceneController.get();
+            Object controller = activeShadeController.get();
+            if (controller != null) {
+                try {
+                    XposedHelpers.callMethod(controller, "animateExpandShade");
+                    Log.i(TAG, "Requested Notifications through active native shade controller: "
+                            + controller.getClass().getName());
+                    return;
+                } catch (Throwable error) {
+                    logFailure("Active native shade controller request failed", error);
+                }
+            }
+            controller = sceneController.get();
             if (controller != null) {
                 String previous = readScene(controller);
                 try {

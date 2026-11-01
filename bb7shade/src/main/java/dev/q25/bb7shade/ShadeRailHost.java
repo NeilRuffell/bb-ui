@@ -290,6 +290,12 @@ final class ShadeRailHost {
         }
     }
 
+    static boolean canRouteToNotifications() {
+        // No QS interception while the lock screen is showing, before a
+        // trustworthy SystemUI unlock signal, or after ADB rollback.
+        return layoutEnabled && Boolean.FALSE.equals(systemUiKeyguardShowing);
+    }
+
     static boolean isRailActive() {
         synchronized (HOSTS) {
             for (WeakReference<ShadeRailHost> ref : HOSTS.values()) {
