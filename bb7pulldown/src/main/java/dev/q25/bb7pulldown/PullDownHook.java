@@ -154,6 +154,9 @@ public final class PullDownHook implements IXposedHookLoadPackage {
             Log.w(TAG, "WindowManager unavailable");
             return;
         }
+        // Query the live, system-owned notification listener before drawing.
+        // The gesture and 15/85 geometry are unchanged.
+        SystemUiNotificationObserver.refreshBeforeOpen();
         TwoColumnPanel root = new TwoColumnPanel(context, PullDownHook::dismissPanel);
         root.setNotificationPackages(SystemUiNotificationObserver.snapshot());
         WindowManager.LayoutParams params = new WindowManager.LayoutParams(

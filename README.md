@@ -1,6 +1,6 @@
 # BB UI
 
-## BB7 Pull-down — app-icon enumeration prototype (v0.2.0)
+## BB7 Pull-down — app-icon enumeration prototype (v0.2.1)
 
 **Branch:** `feat/bb7-pulldown` (fresh from `master`). No code from the abandoned
 `feat/bb7-shade` notification/QS hooks is included.
@@ -14,11 +14,14 @@ an **independent, full-screen-width window with two columns**:
 - Right column: exactly 85% of available window width, still empty.
 
 Swipe down from the top status bar to open; swipe up inside the panel or use
-Back to dismiss. The left icon list comes from SystemUI's **final filtered
-shade notification list**, updating when notifications arrive, change or
-disappear, and preserving native notification ranking order. Duplicate
-notifications from the same package show one icon. The right side has no
-notification cards or QS yet; selecting an icon is not implemented.
+Back to dismiss. The left icon list comes from SystemUI's own registered
+**notification listener**, using an initial active-notifications snapshot and
+live posted/removed callbacks. An additional refresh occurs when opening
+the panel. Duplicate notifications from the same package show one icon,
+in first-seen order. This enumerates active notifications rather than the
+shade's filtered/rendered list, so some system/silent entries may appear.
+The right side has no notification cards or QS yet; selecting an icon is
+not implemented.
 
 **Initial gesture limitation:** This prototype consumes finger touches that
 begin on the visible status bar while enabled. Fullscreen immersive apps
