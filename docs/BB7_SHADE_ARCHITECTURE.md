@@ -75,6 +75,13 @@ interactive behind the replacement after takeover is enabled.
    experimental layout is enabled by default and can be disabled before
    process restart with `adb shell setprop debug.bb7shade.layout false`.
    The rail is hidden and the original stack layout restored on keyguard.
+   Version 0.3.6 captures ShadeControllerSceneImpl, uses its own
+   expandToNotifications() and logs the before/after SceneInteractor
+   currentScene. It retains platform status-bar fallback and never overrides
+   mMaxAlphaForKeyguard. Source inspection establishes that the zero
+   keyguard-alpha factor comes from SharedNotificationContainerBinder's
+   keyguardAlpha flow and might occur during ordinary transitions: the
+   Q25 log shows it returning to 1 before the two-column layout reactivated.
    Version 0.3.5 requests native notification-scene expansion on an explicit
    app-rail selection, via StatusBarManager.expandNotificationsPanel(). The
    LineageOS 24 Compose QuickSettingsScene places notification cards below the
