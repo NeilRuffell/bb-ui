@@ -1,21 +1,24 @@
 # BB UI
 
-## BB7 Pull-down — clean-start prototype
+## BB7 Pull-down — app-icon enumeration prototype (v0.2.0)
 
 **Branch:** `feat/bb7-pulldown` (fresh from `master`). No code from the abandoned
 `feat/bb7-shade` notification/QS hooks is included.
 
 A separate Vector/LSPosed module, `:bb7pulldown` (`dev.q25.bb7pulldown`),
 intercepts a finger swipe starting in the native status-bar region and presents
-an **independent, full-screen-width window with two empty columns**:
+an **independent, full-screen-width window with two columns**:
 
-- Left column: exactly 15% of available window width.
-- Right column: exactly 85% of available window width.
+- Left column: exactly 15% of available window width; one vertically
+  scrollable **application icon per app with a current shade notification**.
+- Right column: exactly 85% of available window width, still empty.
 
 Swipe down from the top status bar to open; swipe up inside the panel or use
-Back to dismiss. Both columns are intentionally empty except for the
-percent labels. Android's notification and Quick Settings data, keyboard
-navigation, and filtering are **not integrated yet**.
+Back to dismiss. The left icon list comes from SystemUI's **final filtered
+shade notification list**, updating when notifications arrive, change or
+disappear, and preserving native notification ranking order. Duplicate
+notifications from the same package show one icon. The right side has no
+notification cards or QS yet; selecting an icon is not implemented.
 
 **Initial gesture limitation:** This prototype consumes finger touches that
 begin on the visible status bar while enabled. Fullscreen immersive apps

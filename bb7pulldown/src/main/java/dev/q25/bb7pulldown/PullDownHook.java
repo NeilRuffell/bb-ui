@@ -57,6 +57,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
             Log.i(TAG, "Disabled by " + ENABLE_PROP + "; stock status bar retained");
             return;
         }
+        SystemUiNotificationObserver.install(lp.classLoader);
         Class<?> viewClass = XposedHelpers.findClassIfExists(STATUS_BAR, lp.classLoader);
         if (viewClass == null) {
             Log.w(TAG, "Native status-bar gesture source not present");
@@ -132,6 +133,17 @@ public final class PullDownHook implements IXposedHookLoadPackage {
         }
     }
 
+    static void onNotificationPackagesUpdated(java.util.List<String> packages) {
+        TwoColumnPanel current = panel;
+        if (current == null || !shown) return;
+        current.post(() -> {
+            if (current == panel && shown) {
+                current.setNotificationPackages(
+                        SystemUiNotificationObserver.snapshot());
+            }
+        });
+    }
+
     private static void showPanel(Context context) {
         if (shown || openingOrClosing || !enabled() || locked(context)) return;
         openingOrClosing = true;
@@ -143,6 +155,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
             return;
         }
         TwoColumnPanel root = new TwoColumnPanel(context, PullDownHook::dismissPanel);
+        root.setNotificationPackages(SystemUiNotificationObserver.snapshot());
         WindowManager.LayoutParams params = new WindowManager.LayoutParams(
                 WindowManager.LayoutParams.MATCH_PARENT,
                 WindowManager.LayoutParams.MATCH_PARENT,

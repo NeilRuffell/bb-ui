@@ -2,14 +2,19 @@ package dev.q25.bb7pulldown;
 
 import android.content.Context;
 import android.graphics.Color;
-import android.graphics.Typeface;
+import android.content.pm.PackageManager;
+import android.graphics.drawable.Drawable;
 import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
-import android.widget.TextView;
+import android.widget.ImageView;
+import android.widget.ScrollView;
+
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * The new independent pull-down surface. No native QS / notification
@@ -21,6 +26,8 @@ final class TwoColumnPanel extends FrameLayout {
     private final CloseListener onClose;
     private float touchStartY;
     private boolean trackingClose;
+    private final LinearLayout iconList;
+    private List<String> renderedPackages = new ArrayList<>();
 
     TwoColumnPanel(Context context, CloseListener close) {
         super(context);
@@ -40,8 +47,19 @@ final class TwoColumnPanel extends FrameLayout {
         left.setBackgroundColor(Color.rgb(34, 42, 52));
         columns.addView(left, new LinearLayout.LayoutParams(
                 0, LinearLayout.LayoutParams.MATCH_PARENT, PanelRatio.LEFT_WEIGHT));
-        left.addView(label(context, "15%"), new FrameLayout.LayoutParams(
-                LayoutParams.MATCH_PARENT, dp(64), Gravity.TOP));
+        ScrollView iconScroller = new ScrollView(context);
+        iconScroller.setFillViewport(false);
+        iconScroller.setVerticalScrollBarEnabled(false);
+        iconScroller.setClipToPadding(false);
+        iconScroller.setPadding(0, dp(10), 0, dp(10));
+        left.addView(iconScroller, new FrameLayout.LayoutParams(
+                LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
+
+        iconList = new LinearLayout(context);
+        iconList.setOrientation(LinearLayout.VERTICAL);
+        iconList.setGravity(Gravity.TOP | Gravity.CENTER_HORIZONTAL);
+        iconScroller.addView(iconList, new ScrollView.LayoutParams(
+                LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
 
         View divider = new View(context);
         divider.setBackgroundColor(Color.rgb(71, 111, 143));
@@ -53,19 +71,39 @@ final class TwoColumnPanel extends FrameLayout {
         right.setBackgroundColor(Color.rgb(22, 28, 36));
         columns.addView(right, new LinearLayout.LayoutParams(
                 0, LinearLayout.LayoutParams.MATCH_PARENT, PanelRatio.RIGHT_WEIGHT));
-        right.addView(label(context, "85%"), new FrameLayout.LayoutParams(
-                LayoutParams.MATCH_PARENT, dp(64), Gravity.TOP));
+        // The 85% content pane deliberately remains empty at this stage.
     }
 
-    private TextView label(Context context, String text) {
-        TextView view = new TextView(context);
-        view.setText(text);
-        view.setTextColor(Color.rgb(177, 195, 207));
-        view.setTextSize(12);
-        view.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        view.setGravity(Gravity.CENTER);
-        view.setPadding(0, dp(20), 0, 0);
-        return view;
+    /** A stable vertical list of package icons; only changes on index updates. */
+    void setNotificationPackages(List<String> packages) {
+        List<String> distinct = NotificationAppIndex.uniquePackages(packages);
+        if (renderedPackages.equals(distinct)) return;
+        renderedPackages = distinct;
+        iconList.removeAllViews();
+
+        PackageManager pm = getContext().getPackageManager();
+        for (String pkg : distinct) {
+            ImageView icon = new ImageView(getContext());
+            Drawable drawable;
+            CharSequence label;
+            try {
+                drawable = pm.getApplicationIcon(pkg);
+                label = pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0));
+            } catch (PackageManager.NameNotFoundException error) {
+                // Keep a predictable icon even if its package was uninstalled
+                // or lives in another profile.
+                drawable = pm.getDefaultActivityIcon();
+                label = pkg;
+            }
+            icon.setImageDrawable(drawable);
+            icon.setContentDescription(label);
+            icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
+            icon.setFocusable(false);
+            icon.setClickable(false);
+            icon.setPadding(dp(5), dp(8), dp(5), dp(8));
+            iconList.addView(icon, new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, dp(54)));
+        }
     }
 
     @Override
