@@ -548,6 +548,32 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
                 });
             }
 
+            // RecentsView.showCurrentTask() may insert a temporary running
+            // task card before the real task list is loaded. That makes sense
+            // when entering from an app, but Home is NOT a recent application:
+            // its temporary card occupies grid cell (row 0, column 0) and is
+            // subsequently removed, shifting every real app up one cell.
+            //
+            // Quickstep already has a dedicated veto at the exact insertion
+            // point. Restrict it to HOME activities (TaskInfo activityType 2)
+            // and otherwise leave the stock task lifecycle unchanged.
+            XposedBridge.hookAllMethods(recents, "shouldAvoidAddingStubTaskView",
+                    new XC_MethodHook() {
+                @Override protected void afterHookedMethod(MethodHookParam p) {
+                    View root = (View) p.thisObject;
+                    if (!active(root) || p.args.length == 0 || p.args[0] == null)
+                        return;
+                    Object taskInfo = XposedHelpers.callMethod(p.args[0], "getTaskInfo1");
+                    if (taskInfo == null) return;
+                    int activityType = (Integer) XposedHelpers.callMethod(
+                            taskInfo, "getActivityType");
+                    if (activityType != 2) return; // ACTIVITY_TYPE_HOME
+                    p.setResult(true);
+                    Log.w(TAG, "Native HOME entry: prevented non-recents stub "
+                            + "at grid position 0");
+                }
+            });
+
             // Disarm the entry latch as part of the native exit state.
             // The same RecentsView may be reused on the next BlackBerry
             // button press, which must again select page zero.
