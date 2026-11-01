@@ -75,6 +75,10 @@ interactive behind the replacement after takeover is enabled.
    experimental layout is enabled by default and can be disabled before
    process restart with `adb shell setprop debug.bb7shade.layout false`.
    The rail is hidden and the original stack layout restored on keyguard.
+   Version 0.3.1 also attaches from the native stack onLayout (after
+   posting to the shade view), because not all SystemUI instances are
+   available at the original container inflation hook point. An ADB switch
+   still restores stock behavior at the next SystemUI start.
    **Known incomplete:** native notifications are not yet filtered on
    application selection, the original QQS is still present, and page
    navigation is not wired. This intentionally exposes a partial UI for
