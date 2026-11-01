@@ -26,9 +26,13 @@ baseline, not the older Recents experiments.
 - Use Quickstep's native horizontal task-dismiss controller for swipe-right
   removal in LTR layouts. Disable its opposite-direction swipe-to-launch
   controller in this experimental portrait grid; **tap still launches**.
-- Do not implement separate custom touch handling. Log the native
-  scroll range and whether `PagedView` intercepts a vertical drag to
-  identify any remaining device-specific scrolling failure.
+- Use native PagedView's vertical scrolling without custom touch handlers.
+  LineageOS RecentsView's original `computeMinScroll()` and
+  `computeMaxScroll()` rely on carousel task indices and produced a
+  zero native maximum on the Q25 despite the vertical grid needing
+  433 pixels of scrolling. Override only those two bounds using the
+  existing `getPageScrolls()` grid geometry. The original pager still
+  handles scrolling, fling, and snap.
 - Use native two-panel grouping and TaskView measurement.
 - At `RecentsView.getPageScrolls()`, while Quickstep is already laying out
   children, arrange existing TaskViews in two columns and return matching
@@ -81,9 +85,11 @@ Expected sequence: `BB UI entry reached`, `Vertical Recents setting=1`,
 A gesture over the grid should log
 `Native pager touch: deltaX=... deltaY=... intercepted=... maxScroll=...`.
 A zero `maxScroll` means all rows fit on screen; scrolling is not possible
-until there are more recent tasks. A nonzero range with no pager touch log
-suggests an ancestor consumed the gesture. This is runtime evidence,
-not something Gradle can validate.
+until there are more recent tasks. The `Native pager bounds: min=0 max=...` diagnostic must now
+match the grid's `maxScroll=...` when the native layout is active.
+A mismatch is a bug in the hook; no pager touch event suggests
+the parent did not receive the gesture. Android runtime validation
+is still required even if Gradle succeeds.
 
 If the first log is absent, check that Vector actually injects the module
 into the active `com.android.launcher3` Quickstep process. If registration
