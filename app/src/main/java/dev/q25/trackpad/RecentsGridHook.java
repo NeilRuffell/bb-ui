@@ -1,6 +1,5 @@
 package dev.q25.trackpad;
 
-import android.graphics.Canvas;
 import android.provider.Settings;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
@@ -64,10 +63,10 @@ public final class RecentsGridHook implements IXposedHookLoadPackage {
 
             // The original PagedView can change scrollX without running onLayout again.
             // Restore the grid's coordinate space before it draws, but only if needed.
-            XposedBridge.hookAllMethods(recents, "dispatchDraw", new XC_MethodHook() {
+            XposedBridge.hookAllMethods(ViewGroup.class, "dispatchDraw", new XC_MethodHook() {
                 @Override protected void beforeHookedMethod(MethodHookParam p) {
                     ViewGroup root = (ViewGroup) p.thisObject;
-                    if (enabled(root)) placeGrid(root, task);
+                    if (recents.isInstance(root) && enabled(root)) placeGrid(root, task);
                 }
             });
 
@@ -78,10 +77,10 @@ public final class RecentsGridHook implements IXposedHookLoadPackage {
                 }
             });
 
-            XposedBridge.hookAllMethods(recents, "onGenericMotionEvent", new XC_MethodHook() {
+            XposedBridge.hookAllMethods(View.class, "onGenericMotionEvent", new XC_MethodHook() {
                 @Override protected void beforeHookedMethod(MethodHookParam p) {
                     ViewGroup root = (ViewGroup) p.thisObject;
-                    if (!enabled(root)) return;
+                    if (!recents.isInstance(root) || !enabled(root)) return;
                     MotionEvent e = (MotionEvent) p.args[0];
                     if (e.getActionMasked() != MotionEvent.ACTION_SCROLL) return;
                     float wheel = e.getAxisValue(MotionEvent.AXIS_VSCROLL);
