@@ -4,11 +4,20 @@
 
 The `feat/bb7-shade` branch adds `:bb7shade`, a **third, separate APK**
 (`dev.q25.bb7shade`), alongside `:app` and `:bb7focus`.
-Version `0.3.5-compose-shade-route-dev` is the first **visible partial UI**:
+Version `0.3.6-native-scene-controller-dev` is the first **visible partial UI**:
 it inserts a narrow native BB7 app-icon/count rail into the existing SystemUI
 notification container, and constrains Android's original notification stack
 to the right of it while the phone is unlocked. It does not add another
 window or duplicate native notification rows.
+Version 0.3.6 observes LineageOS's actual ShadeControllerSceneImpl and
+requests its native expandToNotifications() operation directly when the user
+selects an app, falling back to StatusBarManager when that scene controller is
+unavailable. It reports the native scene before and shortly after routing.
+The native alpha-source log now includes the source label of the keyguard
+factor. This resolves which SystemUI scene owns the foreground; it never
+forces notification transparency or bypasses the lock screen. This build
+requires Q25 visual verification.
+
 Version 0.3.5 routes explicit app-rail selection through Android's
 StatusBarManager.expandNotificationsPanel(), which requests the native
 Notifications shade scene. On LineageOS 24, the separate Compose
