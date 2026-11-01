@@ -40,3 +40,7 @@ This repository currently contains no Gradle Wrapper. Use a compatible local Gra
 ## Project status
 
 Research prototype. Compatibility and functionality must be verified on the actual device before calling this a working release.
+
+## Continuous integration
+
+Every push to `main` triggers [Build BB UI debug APK](https://github.com/NeilRuffell/bb-ui/actions). Open the latest successful workflow run and download the `bb-ui-debug-apk` artifact. GitHub Actions artifacts are ZIP files containing the installable `app-debug.apk`. This is a debug build, not a signed production release.
