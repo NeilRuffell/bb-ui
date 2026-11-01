@@ -57,7 +57,10 @@ interactive behind the replacement after takeover is enabled.
    Version 0.2.1 also builds a fallback snapshot from *existing native*
    `ExpandableNotificationRow` children on stack layout/add/remove when the
    callback has not fired since process startup. Once finalized data arrives,
-   the authoritative pipeline snapshot supersedes native-row fallback. Probe the
+   the authoritative pipeline snapshot supersedes native-row fallback.
+   Version 0.2.2 rate-limits native-stack rescans and logs each distinct
+   adapter-access failure only once, because device testing showed hundreds
+   of repeated silent failures without any populated snapshot. Probe the
    actual native stack geometry and maintain a tested two-page navigation
    state model. This version is intentionally headless: neither stock UI
    suppression nor a second notification pane is activated.
