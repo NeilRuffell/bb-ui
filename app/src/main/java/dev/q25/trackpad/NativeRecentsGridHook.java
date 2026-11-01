@@ -14,6 +14,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.WeakHashMap;
 
 import de.robv.android.xposed.IXposedHookLoadPackage;
 import de.robv.android.xposed.XC_MethodHook;
@@ -44,6 +45,7 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
 
     private static int enabled = -1;
     private static boolean firstLayoutLogged;
+    private static final WeakHashMap<View, Boolean> SCREENSHOT_PENDING = new WeakHashMap<>();
 
     @Override public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lp) {
         if (!TARGET.equals(lp.packageName)) return;
@@ -161,20 +163,36 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
                 });
             }
 
+            // Quickstep deliberately hides the running task's screenshot and
+            // composites its live remote app surface instead. That surface
+            // follows the stock fullscreen simulator, not our two-column
+            // TaskView geometry. Use Quickstep's own screenshot transition and
+            // finish the remote animation once the screenshot is drawn.
+            //
+            // onGestureAnimationEnd is the normal entry point. onLayout acts
+            // as a fallback for three-button Recents activation paths.
+            XposedBridge.hookAllMethods(recents, "onGestureAnimationEnd",
+                    new XC_MethodHook() {
+                @Override protected void afterHookedMethod(MethodHookParam p) {
+                    requestNativeRunningTaskScreenshot((View) p.thisObject);
+                }
+            });
+
             XposedBridge.hookAllMethods(recents, "onLayout",
                     new XC_MethodHook() {
                 @Override protected void afterHookedMethod(MethodHookParam p) {
                     View root = (View) p.thisObject;
-                    if (!active(root) || firstLayoutLogged) return;
-                    firstLayoutLogged = true;
-                    Object orientation = XposedHelpers.getObjectField(
-                            root, "mOrientationHandler");
-                    Log.w(TAG, "Vertical grid layout reached; children="
-                            + ((ViewGroup) root).getChildCount()
-                            + " handler=" + orientation.getClass().getName()
-                            + " scrollY=" + root.getScrollY());
-                    // Native RecentsView.onLayout updates its own simulator and
-                    // accessibility state after PagedView finishes layout.
+                    if (!active(root)) return;
+                    if (!firstLayoutLogged) {
+                        firstLayoutLogged = true;
+                        Object orientation = XposedHelpers.getObjectField(
+                                root, "mOrientationHandler");
+                        Log.w(TAG, "Vertical grid layout reached; children="
+                                + ((ViewGroup) root).getChildCount()
+                                + " handler=" + orientation.getClass().getName()
+                                + " scrollY=" + root.getScrollY());
+                    }
+                    requestNativeRunningTaskScreenshot(root);
                 }
             });
 
@@ -182,6 +200,69 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
         } catch (Throwable error) {
             Log.e(TAG, "Quickstep hook installation failed", error);
             XposedBridge.log("BB UI: Quickstep hook installation failed: " + error);
+        }
+    }
+
+    /**
+     * A running task uses a live SurfaceControl layer instead of its TaskView
+     * thumbnail. The layer is rendered using TaskViewSimulator's stock geometry
+     * and therefore stays fullscreen behind our resized grid card. Capture the
+     * native task screenshot, wait for its thumbnail frame, and then finish the
+     * live Recents animation through the same path used by stock Quickstep for
+     * rotation/split selection. No screenshot copying or custom renderer.
+     */
+    private static void requestNativeRunningTaskScreenshot(View root) {
+        if (!active(root)
+                || !XposedHelpers.getBooleanField(root, "mOverviewStateEnabled")
+                || !XposedHelpers.getBooleanField(root, "mEnableDrawingLiveTile")
+                || XposedHelpers.getBooleanField(root, "mRunningTaskShowScreenshot")
+                || XposedHelpers.getObjectField(root, "mRecentsAnimationController") == null
+                || XposedHelpers.callMethod(root, "getRunningTaskView") == null) {
+            return;
+        }
+        synchronized (SCREENSHOT_PENDING) {
+            if (SCREENSHOT_PENDING.containsKey(root)) return;
+            SCREENSHOT_PENDING.put(root, Boolean.TRUE);
+        }
+        // Run after Quickstep's entry/layout callbacks complete.
+        root.post(() -> {
+            try {
+                if (!active(root)
+                        || !XposedHelpers.getBooleanField(root, "mOverviewStateEnabled")
+                        || XposedHelpers.getObjectField(root, "mRecentsAnimationController") == null) {
+                    clearScreenshotPending(root);
+                    return;
+                }
+                Log.w(TAG, "Capturing running task via native Quickstep screenshot");
+                XposedHelpers.callMethod(root, "switchToScreenshot", (Runnable) () -> {
+                    try {
+                        if (XposedHelpers.getObjectField(root, "mRecentsAnimationController") != null) {
+                            XposedHelpers.callMethod(root, "finishRecentsAnimation",
+                                    true, false, (Runnable) () -> {
+                                        XposedHelpers.callMethod(root,
+                                                "setEnableDrawingLiveTile", false);
+                                        Log.w(TAG, "Running task converted to native grid thumbnail");
+                                    });
+                        } else {
+                            XposedHelpers.callMethod(root, "setEnableDrawingLiveTile", false);
+                            Log.w(TAG, "Running task screenshot ready; no remote animation");
+                        }
+                    } catch (Throwable error) {
+                        Log.e(TAG, "Failed to finish running task live tile", error);
+                    } finally {
+                        clearScreenshotPending(root);
+                    }
+                });
+            } catch (Throwable error) {
+                Log.e(TAG, "Failed to capture running task screenshot", error);
+                clearScreenshotPending(root);
+            }
+        });
+    }
+
+    private static void clearScreenshotPending(View root) {
+        synchronized (SCREENSHOT_PENDING) {
+            SCREENSHOT_PENDING.remove(root);
         }
     }
 
