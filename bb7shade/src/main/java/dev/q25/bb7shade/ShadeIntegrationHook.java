@@ -35,16 +35,19 @@ public final class ShadeIntegrationHook implements IXposedHookLoadPackage {
     private static final String NATIVE_STACK =
             "com.android.systemui.statusbar.notification.stack.NotificationStackScrollLayout";
 
+    private static volatile boolean sPanelKeyguardReadWarningLogged;
+
     private static final Map<View, Boolean> MEASURED_STACKS =
             Collections.synchronizedMap(new WeakHashMap<>());
 
     @Override
     public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lp) {
         if (!PACKAGE.equals(lp.packageName) || !PACKAGE.equals(lp.processName)) return;
-        Log.i(TAG, "BB7 Shade stage 3 loaded; native partial layout gated by debug.bb7shade.layout");
+        Log.i(TAG, "BB7 Shade stage 3.2 loaded; live keyguard/expansion visibility");
         observeFinalRenderList(lp);
         observeShadeHost(lp);
         observeNativeStack(lp);
+        observeKeyguardLifecycle(lp);
         ShadeRailHost.installHooks(lp.classLoader);
     }
 
@@ -98,6 +101,76 @@ public final class ShadeIntegrationHook implements IXposedHookLoadPackage {
             Log.i(TAG, "Shade host observer registered");
         } catch (Throwable error) {
             Log.e(TAG, "Shade window observer registration failed", error);
+        }
+    }
+
+    /**
+     * The Q25 confirms that onFinishInflate mounts our rail, but its first
+     * keyguard query runs while SystemUI is starting and returns locked.
+     * The notification stack may never lay out again after unlock.
+     *
+     * Observe the *same* KeyguardStateControllerImpl that SystemUI uses,
+     * plus the actual shade expansion lifecycle to handle an already
+     * unlocked device. Neither hook changes platform state or input.
+     */
+    private static void observeKeyguardLifecycle(
+            XC_LoadPackage.LoadPackageParam lp) {
+        Class<?> controller = XposedHelpers.findClassIfExists(
+                "com.android.systemui.statusbar.policy.KeyguardStateControllerImpl",
+                lp.classLoader);
+        if (controller != null) {
+            try {
+                XposedBridge.hookAllMethods(controller, "notifyKeyguardState",
+                        new XC_MethodHook() {
+                            @Override
+                            protected void afterHookedMethod(MethodHookParam param) {
+                                try {
+                                    boolean showing = (Boolean) XposedHelpers.callMethod(
+                                            param.thisObject, "isShowing");
+                                    ShadeRailHost.onSystemUiKeyguardState(
+                                            showing, "keyguard-state-change");
+                                } catch (Throwable error) {
+                                    Log.e(TAG, "Unable to read native keyguard transition",
+                                            error);
+                                }
+                            }
+                        });
+                Log.i(TAG, "Keyguard state-change observer registered");
+            } catch (Throwable error) {
+                Log.e(TAG, "Keyguard state-change hook unavailable", error);
+            }
+        }
+
+        Class<?> shadePanel = XposedHelpers.findClassIfExists(
+                "com.android.systemui.shade.NotificationPanelViewController",
+                lp.classLoader);
+        if (shadePanel != null) {
+            try {
+                XposedBridge.hookAllMethods(
+                        shadePanel, "updateExpansionAndVisibility", new XC_MethodHook() {
+                            @Override
+                            protected void afterHookedMethod(MethodHookParam param) {
+                                try {
+                                    Object keyguard = XposedHelpers.getObjectField(
+                                            param.thisObject, "mKeyguardStateController");
+                                    boolean showing = (Boolean) XposedHelpers.callMethod(
+                                            keyguard, "isShowing");
+                                    ShadeRailHost.onSystemUiKeyguardState(
+                                            showing, "shade-expansion");
+                                } catch (Throwable error) {
+                                    // Do not interrupt stock shade expansion.
+                                    if (!sPanelKeyguardReadWarningLogged) {
+                                        sPanelKeyguardReadWarningLogged = true;
+                                        Log.e(TAG, "Unable to read shade keyguard state",
+                                                error);
+                                    }
+                                }
+                            }
+                        });
+                Log.i(TAG, "Shade expansion keyguard observer registered");
+            } catch (Throwable error) {
+                Log.e(TAG, "Shade expansion observation unavailable", error);
+            }
         }
     }
 
