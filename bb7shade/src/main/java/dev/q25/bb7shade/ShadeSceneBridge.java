@@ -176,16 +176,16 @@ final class ShadeSceneBridge {
                     logFailure("Active native shade controller request failed", error);
                 }
             }
-            controller = sceneController.get();
-            if (controller != null) {
-                String previous = readScene(controller);
+            final Object scene = sceneController.get();
+            if (scene != null) {
+                String previous = readScene(scene);
                 try {
-                    XposedHelpers.callMethod(controller, "expandToNotifications");
+                    XposedHelpers.callMethod(scene, "expandToNotifications");
                     Log.i(TAG, "Requested Notifications from native scene controller"
                             + " previous=" + previous);
                     rail.postDelayed(() -> Log.i(TAG,
                             "Native scene after Notifications request: "
-                                    + readScene(controller)), 250);
+                                    + readScene(scene)), 250);
                     return;
                 } catch (Throwable error) {
                     logFailure("Direct native Notifications request failed", error);
