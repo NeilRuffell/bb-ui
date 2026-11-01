@@ -1,3 +1,11 @@
+
+## Safety notice (v0.2.4-dev)
+
+The experimental RecentsGridHook is **disabled** in xposed_init. Testing revealed incorrect task snapshots, clipping, and unwanted changes to native Quickstep navigation. These regressions are unacceptable. The historical implementation is retained for reference but is no longer loaded by LSPosed. The native Recents UI and task rendering are preserved. **The requested two-column vertical grid is not implemented in this safety build.** Settings type-to-search remains active.
+
+To restore native behavior, rebuild/install this version and reboot. Also reset the obsolete toggle: `adb shell settings put global bb_ui_recents_grid 0`.
+
+---
 # BB UI
 
 Experimental LSPosed module for BlackBerry-inspired Android UI improvements.
