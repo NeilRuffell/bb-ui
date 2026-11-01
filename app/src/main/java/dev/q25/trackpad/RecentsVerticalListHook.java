@@ -268,7 +268,7 @@ public final class RecentsVerticalListHook implements IXposedHookLoadPackage {
             int firstVisualX = Math.round(cards.get(0).getX());
             int secondVisualX = cards.size() >= 2
                     ? Math.round(cards.get(1).getX()) : firstVisualX + columnWidth + gap;
-            int initialVisualY = Math.max(margin, root.getPaddingTop());
+            int initialVisualY = margin;
 
             // The first two columns retain their native Quickstep horizontal positions.
             // Other tasks are moved into rows by adjusting bounds only. Their existing
