@@ -8,6 +8,31 @@ On the Settings homepage, typing a character on a physical alphabetic keyboard o
 
 LSPosed scopes: `com.android.settings` and `com.android.settings.intelligence`.
 
+## Vertical Recents v0.4.2-dev: source-based paging correction
+
+The previous v0.4.1 vertical hook merely moved TaskView bounds after Quickstep's
+horizontal `PagedView.getPageScrolls()` layout. The native pager still calculated
+horizontal offsets. v0.4.2 now overrides those offsets only while vertical
+mode is enabled, anchors the first two task columns inside the viewport, and
+registers the vertical hook from the confirmed-working two-panel entry class
+instead of relying on a second independent LSPosed entry point. This also
+adds Android logcat registration/activation diagnostics under
+`BB-UI-Recents`.
+
+The existing thumbnail views and their rendering pipeline are not replaced.
+This remains an **unverified device experiment**; native Quickstep task animations,
+task dismissal, and vertical input still require device verification.
+
+Debug after opening Recent Apps:
+```sh
+adb shell dumpsys package dev.q25.trackpad | grep versionName
+adb shell settings get global bb_ui_recents_vertical_list
+adb logcat -d -s BB-UI-Recents:W '*:S'
+```
+
+The working native horizontal two-column implementation is recoverable by setting
+`bb_ui_recents_vertical_list` to `0` and rebooting.
+
 ## Recent Apps: two native columns and experimental vertical list
 
 **Working baseline:** The original native two-panel Recents implementation is preserved on
