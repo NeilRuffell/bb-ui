@@ -43,6 +43,8 @@ final class ShadeRailHost {
             Collections.synchronizedMap(new WeakHashMap<>());
     private static final Map<ViewGroup, Boolean> PENDING_ATTACH =
             Collections.synchronizedMap(new WeakHashMap<>());
+    private static final Map<ViewGroup, Boolean> ATTEMPTED_NATIVE_ATTACH =
+            Collections.synchronizedMap(new WeakHashMap<>());
     private static volatile boolean layoutEnabled;
 
     private final ViewGroup parent;
@@ -196,6 +198,9 @@ final class ShadeRailHost {
         host.model.acceptSnapshot(ShadeNotificationIndex.current());
         rail.update(ShadeNotificationIndex.current());
         host.refreshKeyguardState();
+        if (!host.railVisible) {
+            Log.i(TAG, "BB7 rail initially hidden: keyguard locked or unavailable");
+        }
         Log.i(TAG, "BB7 app rail mounted in native shade container"
                 + " via=" + source + " widthPx=" + railWidth
                 + " stackId=" + nativeStack.getId()
@@ -222,7 +227,8 @@ final class ShadeRailHost {
             return;
         }
         synchronized (PENDING_ATTACH) {
-            if (PENDING_ATTACH.containsKey(container)) return;
+            if (PENDING_ATTACH.containsKey(container)
+                    || ATTEMPTED_NATIVE_ATTACH.containsKey(container)) return;
             PENDING_ATTACH.put(container, Boolean.TRUE);
         }
         Log.i(TAG, "Native stack observed; scheduling BB7 rail attachment");
@@ -231,6 +237,7 @@ final class ShadeRailHost {
                 PENDING_ATTACH.remove(container);
             }
             if (!layoutEnabled || stack.getParent() != container) return;
+            ATTEMPTED_NATIVE_ATTACH.put(container, Boolean.TRUE);
             try {
                 install(container, stack, "native-stack-layout");
             } catch (Throwable error) {
@@ -253,12 +260,7 @@ final class ShadeRailHost {
         // notification privacy or keyguard rendering.
         boolean locked = keyguard == null || keyguard.isKeyguardLocked();
         boolean wantVisible = !locked;
-        if (wantVisible == railVisible) {
-            if (!wantVisible) {
-                Log.i(TAG, "BB7 rail not activated: keyguard locked or unavailable");
-            }
-            return;
-        }
+        if (wantVisible == railVisible) return;
 
         ViewGroup.LayoutParams params = nativeStack.getLayoutParams();
         try {
