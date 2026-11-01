@@ -47,6 +47,18 @@ baseline, not the older Recents experiments.
   existing `getPageScrolls()` grid geometry. The original pager still
   handles scrolling, fling, and snap.
 - Use native two-panel grouping and TaskView measurement.
+- Reuse Quickstep's original keyboard focus and task selection:
+  `RecentsView.dispatchKeyEvent()`, `snapToPageRelative()`, native
+  `TaskView` focus borders, Enter/DPAD-center task launching, Delete dismissal,
+  and in-task Tab navigation remain unchanged. Only override the native
+  `getNextPageInternal()` destination: LEFT/RIGHT follow row-major card order,
+  UP/DOWN move between grid rows in the same column, TAB/Shift+TAB traverse
+  cards, and the existing Clear All button remains reachable at the end.
+- Initialize focus on the first TaskView after the native Overview state
+  transition, for BlackBerry-button/ordinary toggle entry (which, unlike
+  keyboard quick-switch entry, does not request focus by default). Use
+  Quickstep's own touch-mode-to-keyboard-focus mechanism, and do not override
+  existing focus.
 - Enter Overview at its **native page zero**, resetting its previous page
   selection at the start of the state transition or gesture. The two native
   entry callbacks share an idempotent latch so selection executes **once per
@@ -163,6 +175,12 @@ fails, the error log identifies the missing class or hook.
 - Entering from an app shrinks and moves directly into that app's grid card without a carousel detour or pop
 - Recents opens and closes reliably; no horizontal snap
 - App task order and thumbnail loading update after dismiss
+- Arrow keys move selection: LEFT/RIGHT adjacent card; UP/DOWN same column
+  in adjacent row; native border follows selection and offscreen selection scrolls
+- Tab and Shift+Tab move through tasks using the original native in-task focus
+  behavior; Enter/DPAD-center launches the focused task; Delete dismisses it
+- BB button from Home focuses the first visible task after the Overview
+  transition; reopening after leaving the grid does not lose keyboard control
 - Rotation, accessibility, keyboard focus and Android back/home still work
 
 ### Build
