@@ -1,10 +1,9 @@
 package dev.q25.bb7shade;
 
 import android.util.Log;
+import android.view.View;
+import android.view.ViewParent;
 
-import java.lang.reflect.InvocationHandler;
-import java.lang.reflect.Method;
-import java.lang.reflect.Proxy;
 import java.util.Collections;
 import java.util.Map;
 import java.util.WeakHashMap;
@@ -16,117 +15,127 @@ import de.robv.android.xposed.XposedHelpers;
 import de.robv.android.xposed.callbacks.XC_LoadPackage;
 
 /**
- * Read-only stage-1 integration with the LineageOS 24 SystemUI shade.
+ * Passive LineageOS 24 SystemUI integration for the BB7 shade.
  *
- * Registers a notification-list observer after the platform pipeline has
- * filtered and grouped entries. This stage does not create any visible UI,
- * suppress the stock shade, mutate notifications or intercept user input.
+ * Read the already filtered/ordered notifications directly at the render
+ * boundary. Do not depend on NotifPipeline's constructor: on the Q25, that
+ * constructor finished before our constructor observer was registered.
  *
- * The future two-page UI must take over atomically so the user never sees
- * competing shade surfaces.
+ * Stage 2 remains headless until a complete two-page replacement can be
+ * activated atomically. The existing shade and notification behavior are
+ * not modified.
  */
 public final class ShadeIntegrationHook implements IXposedHookLoadPackage {
     private static final String PACKAGE = "com.android.systemui";
     private static final String TAG = "BB7-Shade";
-    private static final String PIPELINE =
-            "com.android.systemui.statusbar.notification.collection.NotifPipeline";
-    private static final String RENDER_LISTENER =
-            "com.android.systemui.statusbar.notification.collection.listbuilder.OnBeforeRenderListListener";
+    private static final String LIST_BUILDER =
+            "com.android.systemui.statusbar.notification.collection.ShadeListBuilder";
     private static final String WINDOW =
             "com.android.systemui.shade.NotificationShadeWindowView";
+    private static final String NATIVE_STACK =
+            "com.android.systemui.statusbar.notification.stack.NotificationStackScrollLayout";
 
-    // Listener proxies remain reachable for as long as their pipelines are.
-    private static final Map<Object, Object> PIPELINE_LISTENERS =
+    private static final Map<View, Boolean> MEASURED_STACKS =
             Collections.synchronizedMap(new WeakHashMap<>());
 
     @Override
     public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lp) {
         if (!PACKAGE.equals(lp.packageName) || !PACKAGE.equals(lp.processName)) return;
-
-        Log.i(TAG, "BB7 Shade stage 1 loaded; stock shade retained");
-        attachNotificationPipeline(lp);
-        observeShadeWindow(lp);
+        Log.i(TAG, "BB7 Shade stage 2 loaded; stock shade remains the only visible UI");
+        observeFinalRenderList(lp);
+        observeShadeHost(lp);
+        observeNativeStack(lp);
     }
 
-    private static void attachNotificationPipeline(XC_LoadPackage.LoadPackageParam lp) {
-        final Class<?> pipeline = XposedHelpers.findClassIfExists(PIPELINE, lp.classLoader);
-        final Class<?> listenerType = XposedHelpers.findClassIfExists(
-                RENDER_LISTENER, lp.classLoader);
-        if (pipeline == null || listenerType == null) {
-            // Vector may invoke us with more than one classloader. A later
-            // invocation can attach; do not alter the system to compensate.
-            Log.w(TAG, "SystemUI notification pipeline not available in this classloader");
+    /**
+     * ShadeListBuilder.dispatchOnBeforeRenderList is invoked during every
+     * completed shade-list build, after Android's grouping and filtering.
+     * Hooking the method directly avoids missing an already-built pipeline.
+     */
+    private static void observeFinalRenderList(XC_LoadPackage.LoadPackageParam lp) {
+        Class<?> builder = XposedHelpers.findClassIfExists(LIST_BUILDER, lp.classLoader);
+        if (builder == null) {
+            Log.w(TAG, "ShadeListBuilder not available in this classloader");
             return;
         }
-
         try {
-            XposedBridge.hookAllConstructors(pipeline, new XC_MethodHook() {
-                @Override
-                protected void afterHookedMethod(MethodHookParam param) {
-                    try {
-                        attachListener(param.thisObject, listenerType);
-                    } catch (Throwable error) {
-                        Log.e(TAG, "Unable to attach notification index", error);
-                    }
-                }
-            });
-            Log.i(TAG, "Notification pipeline constructor hook registered");
-        } catch (Throwable error) {
-            Log.e(TAG, "Notification pipeline hook registration failed", error);
-        }
-    }
-
-    private static void attachListener(Object pipeline, Class<?> listenerType) {
-        synchronized (PIPELINE_LISTENERS) {
-            if (PIPELINE_LISTENERS.containsKey(pipeline)) return;
-            InvocationHandler handler = new InvocationHandler() {
-                @Override
-                public Object invoke(Object proxy, Method method, Object[] args) {
-                    String methodName = method.getName();
-                    if ("onBeforeRenderList".equals(methodName)) {
-                        if (args != null && args.length == 1 && args[0] instanceof java.util.List) {
+            XposedBridge.hookAllMethods(builder, "dispatchOnBeforeRenderList",
+                    new XC_MethodHook() {
+                        @Override
+                        protected void beforeHookedMethod(MethodHookParam param) {
+                            if (param.args.length != 1
+                                    || !(param.args[0] instanceof java.util.List)) return;
                             try {
-                                ShadeNotificationIndex.update((java.util.List<?>) args[0]);
+                                ShadeNotificationIndex.update(
+                                        (java.util.List<?>) param.args[0]);
                             } catch (Throwable error) {
-                                Log.e(TAG, "Cannot update notification index", error);
+                                // Indexing must never prevent native rendering.
+                                Log.e(TAG, "Notification index update failed", error);
                             }
                         }
-                        return null;
-                    }
-                    if ("toString".equals(methodName)) return "BB7ShadeNotificationObserver";
-                    if ("hashCode".equals(methodName)) return System.identityHashCode(proxy);
-                    if ("equals".equals(methodName)) {
-                        return args != null && args.length == 1 && proxy == args[0];
-                    }
-                    return null;
-                }
-            };
-            Object listener = Proxy.newProxyInstance(
-                    listenerType.getClassLoader(), new Class<?>[]{listenerType}, handler);
-            // This is an observer API: it never filters, removes, or reorders
-            // any of the notifications seen by the platform renderer.
-            XposedHelpers.callMethod(pipeline, "addOnBeforeRenderListListener", listener);
-            PIPELINE_LISTENERS.put(pipeline, listener);
-            Log.i(TAG, "Read-only rendered-notification index attached");
+                    });
+            Log.i(TAG, "Finalized notification render-list observer registered");
+        } catch (Throwable error) {
+            Log.e(TAG, "Finalized render-list observer unavailable", error);
         }
     }
 
-    private static void observeShadeWindow(XC_LoadPackage.LoadPackageParam lp) {
+    private static void observeShadeHost(XC_LoadPackage.LoadPackageParam lp) {
         Class<?> shadeWindow = XposedHelpers.findClassIfExists(WINDOW, lp.classLoader);
         if (shadeWindow == null) {
-            Log.w(TAG, "Notification shade window unavailable in this classloader");
+            Log.w(TAG, "Shade window unavailable in this classloader");
             return;
         }
         try {
-            XposedBridge.hookAllMethods(shadeWindow, "onAttachedToWindow", new XC_MethodHook() {
+            XposedBridge.hookAllMethods(shadeWindow, "onAttachedToWindow",
+                    new XC_MethodHook() {
+                        @Override
+                        protected void afterHookedMethod(MethodHookParam param) {
+                            Log.i(TAG, "Native notification shade window attached");
+                        }
+                    });
+            Log.i(TAG, "Shade host observer registered");
+        } catch (Throwable error) {
+            Log.e(TAG, "Shade window observer registration failed", error);
+        }
+    }
+
+    /**
+     * Probe the original notification container, which is managed by Android.
+     * Future layout work requires its actual on-device position and parent,
+     * particularly while Compose scene-container variants are in use.
+     */
+    private static void observeNativeStack(XC_LoadPackage.LoadPackageParam lp) {
+        Class<?> stack = XposedHelpers.findClassIfExists(NATIVE_STACK, lp.classLoader);
+        if (stack == null) {
+            Log.w(TAG, "Native notification stack unavailable in this classloader");
+            return;
+        }
+        try {
+            XposedBridge.hookAllMethods(stack, "onLayout", new XC_MethodHook() {
                 @Override
                 protected void afterHookedMethod(MethodHookParam param) {
-                    Log.i(TAG, "Original notification shade window attached");
+                    if (!(param.thisObject instanceof View)) return;
+                    View view = (View) param.thisObject;
+                    if (view.getWidth() <= 0 || view.getHeight() <= 0) return;
+                    synchronized (MEASURED_STACKS) {
+                        if (MEASURED_STACKS.containsKey(view)) return;
+                        MEASURED_STACKS.put(view, Boolean.TRUE);
+                    }
+                    ViewParent parent = view.getParent();
+                    int[] coordinates = new int[2];
+                    view.getLocationOnScreen(coordinates);
+                    Log.i(TAG, "Native stack geometry: width=" + view.getWidth()
+                            + " height=" + view.getHeight()
+                            + " screenX=" + coordinates[0]
+                            + " screenY=" + coordinates[1]
+                            + " parent=" + (parent == null ? "null"
+                                    : parent.getClass().getName()));
                 }
             });
-            Log.i(TAG, "Shade host observation registered (no UI replacement)");
+            Log.i(TAG, "Native stack geometry observer registered");
         } catch (Throwable error) {
-            Log.e(TAG, "Shade window observation registration failed", error);
+            Log.e(TAG, "Native stack geometry hook unavailable", error);
         }
     }
 }

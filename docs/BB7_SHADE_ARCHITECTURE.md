@@ -47,16 +47,22 @@ interactive behind the replacement after takeover is enabled.
   rearrange QS tiles reliably.
 
 ## Phase gates
-1. **Instrumentation and data index (v0.1; implemented):** Independent
-   APK; observe SystemUI shade host and index package names/counts from
-   the pre-render pipeline. No UI replacement, no suppression, no key
+1. **Instrumentation foundation (v0.1; implemented):** Independent
+   APK; observe SystemUI shade host and probe notification pipeline lifetime. No UI replacement, no suppression, no key
    interception, no notification mutation. Log counts only (no content).
-2. **Replaceable host and native notification pane:** Develop and test
+2. **Live index and state model (v0.2; implemented):** Hook the
+   already-constructed ShadeListBuilder's `dispatchOnBeforeRenderList`
+   callback (the v0.1 pipeline constructor observer did not receive events
+   on the Q25); preserve per-app ordered notification references. Probe the
+   actual native stack geometry and maintain a tested two-page navigation
+   state model. This version is intentionally headless: neither stock UI
+   suppression nor a second notification pane is activated.
+3. **Replaceable host and native notification pane:** Develop and test
    the single-surface two-column interface and native notification row
    handoff; detect actual Q25 shade mode before activating.
-3. **Quick Settings right page:** Integrate existing Compose QS
+4. **Quick Settings right page:** Integrate existing Compose QS
    controllers/tiles and explicit keyboard/trackpad page navigation.
-4. **Atomic takeover:** Enable custom shade **only** after both pages and
+5. **Atomic takeover:** Enable custom shade **only** after both pages and
    notification actions are functional. Then suppress stock visual
    presentation and test expansion, collapse, lock screen, shade gestures,
    lifecycle restart and rollback. No simultaneous stock/custom surfaces.

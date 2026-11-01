@@ -49,6 +49,9 @@ jobs:
       - name: Compile debug APK
         run: gradle :app:assembleDebug :bb7focus:assembleDebug :bb7shade:assembleDebug --no-daemon --stacktrace
 
+      - name: Test BB7 Shade navigation model
+        run: gradle :bb7shade:testDebugUnitTest --no-daemon --stacktrace
+
       - name: Upload BB7 Appearance debug APK
         uses: actions/upload-artifact@v4
         with:

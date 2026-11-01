@@ -4,9 +4,10 @@
 
 The `feat/bb7-shade` branch adds `:bb7shade`, a **third, separate APK**
 (`dev.q25.bb7shade`), alongside `:app` and `:bb7focus`.
-Stage 1 is **headless**: it observes SystemUI's live notification pipeline,
-indexes which apps have rendered notifications and detects the native shade
-window. It does **not** add a new shade, intercept input, hide the stock
+Version `0.2.0-render-index-state-dev` remains **headless**: it observes
+the finalized SystemUI notification render list after filtering/grouping,
+preserves the ordered notification references for each application, detects
+the native shade window and logs notification stack geometry. It does **not** add a new shade, intercept input, hide the stock
 shade or change its notifications. The future replacement is deliberately
 gated on both pages being functional, avoiding two competing interfaces.
 
@@ -25,9 +26,13 @@ adb shell am crash com.android.systemui
 adb logcat -d -s BB7-Shade:I '*:S'
 ```
 
-Expect `BB7 Shade stage 1 loaded; stock shade retained` and
-`Read-only rendered-notification index attached`, followed by count
-updates when Android's rendered notification list changes. This confirms
+Expect `BB7 Shade stage 2 loaded`,
+`Finalized notification render-list observer registered`, and
+`Rendered notification index updated: apps=... entries=...`.
+`Native stack geometry: ...` identifies the actual notification layout
+for later UI placement. Log output contains only counts and geometry, not
+notification content. Run `./gradlew :bb7shade:testDebugUnitTest` for
+the keyboard navigation state model. This confirms
 **data integration**, not the redesigned UI. The original shade stays
 fully functional. To roll back, disable just this module's SystemUI scope
 and restart SystemUI.
