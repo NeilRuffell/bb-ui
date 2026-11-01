@@ -415,8 +415,32 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
                         View root = currentRecents.get();
                         int rootWidth = root != null && root.getWidth() > 0
                                 ? root.getWidth() : screenWidth;
-                        Rect target = firstGridCell(full, rootWidth,
+
+                        // If Quickstep has already measured the real grid
+                        // card, use its dimensions rather than independently
+                        // inferring a second aspect ratio.
+                        Rect originalSize = full;
+                        if (root != null && root.getWidth() > 0) {
+                            Rect nativeCardSize = (Rect) XposedHelpers.callMethod(
+                                    root, "getLastComputedTaskSize");
+                            if (nativeCardSize != null && !nativeCardSize.isEmpty())
+                                originalSize = nativeCardSize;
+                        }
+                        Rect target = firstGridCell(originalSize, rootWidth,
                                 context.getResources().getDisplayMetrics().density);
+
+                        // When the active TaskView already has its actual
+                        // grid layout, the card itself is authoritative.
+                        // This also handles a running task in column two.
+                        if (root instanceof ViewGroup) {
+                            View activeCard = (View) XposedHelpers.callMethod(
+                                    root, "getRunningTaskView");
+                            if (activeCard != null && activeCard.getWidth() > 0
+                                    && activeCard.getHeight() > 0) {
+                                target.set(activeCard.getLeft(), activeCard.getTop(),
+                                        activeCard.getRight(), activeCard.getBottom());
+                            }
+                        }
                         if (target.isEmpty()) return;
                         full.set(target);
                         ((Rect) XposedHelpers.getObjectField(sim, "mTaskRect"))
