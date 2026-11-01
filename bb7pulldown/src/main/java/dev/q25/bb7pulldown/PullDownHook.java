@@ -2,6 +2,9 @@ package dev.q25.bb7pulldown;
 
 import android.app.KeyguardManager;
 import android.content.Context;
+import android.content.BroadcastReceiver;
+import android.content.Intent;
+import android.content.IntentFilter;
 import android.graphics.PixelFormat;
 import android.os.SystemClock;
 import android.util.Log;
@@ -24,7 +27,7 @@ import de.robv.android.xposed.callbacks.XC_LoadPackage;
  * Fresh BBOS7-inspired top-edge gesture prototype; independent of the
  * previous experimental notification shade module.
  *
- * This early stage intentionally contains no notifications and no QS.
+ * The panel presents live, app-specific notification summaries, not native QS.
  * Touches starting on the phone's native status bar are exclusively owned
  * by this gesture when debug.bb7pulldown.enabled is true. Otherwise stock
  * Android remains untouched.
@@ -48,6 +51,8 @@ public final class PullDownHook implements IXposedHookLoadPackage {
     private static WindowManager windowManager;
     private static TwoColumnPanel panel;
     private static boolean openingOrClosing;
+    private static BroadcastReceiver screenOffReceiver;
+    private static Context receiverContext;
 
     @Override
     public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lp) {
@@ -133,13 +138,16 @@ public final class PullDownHook implements IXposedHookLoadPackage {
         }
     }
 
-    static void onNotificationPackagesUpdated(java.util.List<String> packages) {
+    static void onNotificationItemsUpdated() {
         TwoColumnPanel current = panel;
         if (current == null || !shown) return;
         current.post(() -> {
             if (current == panel && shown) {
-                current.setNotificationPackages(
-                        SystemUiNotificationObserver.snapshot());
+                if (locked(current.getContext())) {
+                    dismissPanelImmediately();
+                } else {
+                    current.setNotifications(SystemUiNotificationObserver.itemsSnapshot());
+                }
             }
         });
     }
@@ -158,7 +166,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
         // The gesture and 15/85 geometry are unchanged.
         SystemUiNotificationObserver.refreshBeforeOpen();
         TwoColumnPanel root = new TwoColumnPanel(context, PullDownHook::dismissPanel);
-        root.setNotificationPackages(SystemUiNotificationObserver.snapshot());
+        root.setNotifications(SystemUiNotificationObserver.itemsSnapshot());
         WindowManager.LayoutParams params = new WindowManager.LayoutParams(
                 WindowManager.LayoutParams.MATCH_PARENT,
                 WindowManager.LayoutParams.MATCH_PARENT,
@@ -174,6 +182,14 @@ public final class PullDownHook implements IXposedHookLoadPackage {
         root.setTranslationY(-height);
         try {
             manager.addView(root, params);
+            // A full-screen SystemUI sub-panel must close when the device
+            // sleeps. Don't expose notification previews over the keyguard.
+            try {
+                registerScreenOffReceiver(context);
+            } catch (Throwable registrationError) {
+                manager.removeViewImmediate(root);
+                throw registrationError;
+            }
             panel = root;
             windowManager = manager;
             shown = true;
@@ -207,6 +223,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
                     } catch (Throwable e) {
                         Log.w(TAG, "Unable to remove pull-down cleanly", e);
                     } finally {
+                        unregisterScreenOffReceiver();
                         panel = null;
                         windowManager = null;
                         shown = false;
@@ -214,6 +231,50 @@ public final class PullDownHook implements IXposedHookLoadPackage {
                         Log.i(TAG, "Two-column pull-down dismissed");
                     }
                 }).start();
+    }
+
+    private static void registerScreenOffReceiver(Context context) {
+        if (screenOffReceiver != null) return;
+        BroadcastReceiver receiver = new BroadcastReceiver() {
+            @Override public void onReceive(Context c, Intent intent) {
+                if (Intent.ACTION_SCREEN_OFF.equals(intent.getAction())) {
+                    dismissPanelImmediately();
+                }
+            }
+        };
+        context.registerReceiver(receiver, new IntentFilter(Intent.ACTION_SCREEN_OFF));
+        screenOffReceiver = receiver;
+        receiverContext = context;
+    }
+
+    private static void unregisterScreenOffReceiver() {
+        BroadcastReceiver receiver = screenOffReceiver;
+        Context context = receiverContext;
+        screenOffReceiver = null;
+        receiverContext = null;
+        if (receiver != null && context != null) {
+            try {
+                context.unregisterReceiver(receiver);
+            } catch (IllegalArgumentException ignored) { }
+        }
+    }
+
+    private static void dismissPanelImmediately() {
+        TwoColumnPanel current = panel;
+        if (current == null) return;
+        try {
+            current.animate().cancel();
+            if (windowManager != null) windowManager.removeViewImmediate(current);
+        } catch (Throwable error) {
+            Log.w(TAG, "Unable to immediately hide notification panel", error);
+        } finally {
+            unregisterScreenOffReceiver();
+            panel = null;
+            windowManager = null;
+            shown = false;
+            openingOrClosing = false;
+            Log.i(TAG, "Two-column pull-down hidden on lock/screen off");
+        }
     }
 
     private static int dp(Context context, int value) {
