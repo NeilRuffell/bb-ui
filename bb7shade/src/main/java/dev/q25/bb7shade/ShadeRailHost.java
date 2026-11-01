@@ -41,6 +41,9 @@ final class ShadeRailHost {
 
     private static final Map<ViewGroup, WeakReference<ShadeRailHost>> HOSTS =
             Collections.synchronizedMap(new WeakHashMap<>());
+    private static final Map<ViewGroup, Boolean> PENDING_ATTACH =
+            Collections.synchronizedMap(new WeakHashMap<>());
+    private static volatile boolean layoutEnabled;
 
     private final ViewGroup parent;
     private final View nativeStack;
@@ -65,9 +68,11 @@ final class ShadeRailHost {
     }
 
     static void installHooks(ClassLoader loader) {
-        if (!isEnabledByProperty()) {
-            Log.i(TAG, "Experimental app rail disabled by " + ENABLE_PROP
-                    + "; stock shade unchanged");
+        layoutEnabled = isEnabledByProperty();
+        Log.i(TAG, "BB7 visible layout property " + ENABLE_PROP
+                + "=" + layoutEnabled);
+        if (!layoutEnabled) {
+            Log.i(TAG, "Experimental app rail disabled; stock shade unchanged");
             return;
         }
         Class<?> container = XposedHelpers.findClassIfExists(CONTAINER, loader);
@@ -81,7 +86,7 @@ final class ShadeRailHost {
                 protected void afterHookedMethod(MethodHookParam param) {
                     if (!(param.thisObject instanceof ViewGroup)) return;
                     try {
-                        install((ViewGroup) param.thisObject);
+                        installFromContainer((ViewGroup) param.thisObject);
                     } catch (Throwable error) {
                         // Failure must not prevent the native shade from inflating.
                         Log.e(TAG, "Unable to attach BB7 app rail; using stock shade", error);
@@ -106,24 +111,29 @@ final class ShadeRailHost {
         }
     }
 
-    private static void install(ViewGroup parent) {
-        synchronized (HOSTS) {
-            WeakReference<ShadeRailHost> existing = HOSTS.get(parent);
-            if (existing != null && existing.get() != null) return;
-        }
-
+    private static void installFromContainer(ViewGroup parent) {
         Context context = parent.getContext();
         int stackId = context.getResources().getIdentifier(
                 "notification_stack_scroller", "id", "com.android.systemui");
         if (stackId == 0) {
-            Log.w(TAG, "Native notification stack id unavailable; stock layout retained");
+            Log.w(TAG, "Native notification stack id unavailable during inflation");
             return;
         }
         View nativeStack = parent.findViewById(stackId);
         if (nativeStack == null || nativeStack.getParent() != parent) {
-            Log.w(TAG, "Native stack is not a direct shade child; stock layout retained");
+            Log.w(TAG, "Native stack not yet a direct shade child during inflation");
             return;
         }
+        install(parent, nativeStack, "onFinishInflate");
+    }
+
+    private static void install(ViewGroup parent, View nativeStack, String source) {
+        synchronized (HOSTS) {
+            WeakReference<ShadeRailHost> existing = HOSTS.get(parent);
+            if (existing != null && existing.get() != null) return;
+        }
+        if (nativeStack.getParent() != parent) return;
+        Context context = parent.getContext();
         ViewGroup.LayoutParams originalParams = nativeStack.getLayoutParams();
         if (XposedHelpers.findFieldIfExists(originalParams.getClass(), "startToStart") == null
                 || XposedHelpers.findFieldIfExists(originalParams.getClass(), "startToEnd") == null
@@ -164,6 +174,19 @@ final class ShadeRailHost {
             HOSTS.put(parent, new WeakReference<>(host));
         }
         rail.setTag(host);
+        rail.addOnLayoutChangeListener(new View.OnLayoutChangeListener() {
+            private boolean reported;
+            @Override
+            public void onLayoutChange(View v, int left, int top, int right, int bottom,
+                    int oldLeft, int oldTop, int oldRight, int oldBottom) {
+                if (!reported && right > left && bottom > top) {
+                    reported = true;
+                    Log.i(TAG, "BB7 rail actual geometry: width=" + (right - left)
+                            + " height=" + (bottom - top)
+                            + " shown=" + v.isShown());
+                }
+            }
+        });
         // This stage intentionally does not hide or filter native rows:
         // replacing their visibility here would interfere with NSSL's
         // sensitive/heads-up/grouped-notification layout calculations.
@@ -174,22 +197,52 @@ final class ShadeRailHost {
         rail.update(ShadeNotificationIndex.current());
         host.refreshKeyguardState();
         Log.i(TAG, "BB7 app rail mounted in native shade container"
-                + " widthPx=" + railWidth
+                + " via=" + source + " widthPx=" + railWidth
                 + " stackId=" + nativeStack.getId()
                 + " originalStackWidth=" + originalParams.width);
     }
 
-    /** Called from the existing native notification stack onLayout hook. */
+    /**
+     * This callback is already verified by live Q25 logs. The container
+     * may have finished inflation before the Xposed hook was registered.
+     * Use the native stack as a second, authoritative attachment point.
+     * Never add children while onLayout is executing: post to its parent.
+     */
     static void onNativeStackLayout(View stack) {
-        if (!(stack.getParent() instanceof ViewGroup)) return;
+        if (!layoutEnabled || !(stack.getParent() instanceof ViewGroup)) return;
         ViewGroup container = (ViewGroup) stack.getParent();
+        if (!CONTAINER.equals(container.getClass().getName())) return;
         WeakReference<ShadeRailHost> ref;
         synchronized (HOSTS) {
             ref = HOSTS.get(container);
         }
         ShadeRailHost host = ref == null ? null : ref.get();
-        if (host == null || host.nativeStack != stack) return;
-        host.refreshKeyguardState();
+        if (host != null && host.nativeStack == stack) {
+            host.refreshKeyguardState();
+            return;
+        }
+        synchronized (PENDING_ATTACH) {
+            if (PENDING_ATTACH.containsKey(container)) return;
+            PENDING_ATTACH.put(container, Boolean.TRUE);
+        }
+        Log.i(TAG, "Native stack observed; scheduling BB7 rail attachment");
+        boolean posted = container.post(() -> {
+            synchronized (PENDING_ATTACH) {
+                PENDING_ATTACH.remove(container);
+            }
+            if (!layoutEnabled || stack.getParent() != container) return;
+            try {
+                install(container, stack, "native-stack-layout");
+            } catch (Throwable error) {
+                Log.e(TAG, "Native-stack BB7 rail attachment failed; stock retained", error);
+            }
+        });
+        if (!posted) {
+            synchronized (PENDING_ATTACH) {
+                PENDING_ATTACH.remove(container);
+            }
+            Log.w(TAG, "Unable to post BB7 rail attachment to shade container");
+        }
     }
 
     private void refreshKeyguardState() {
@@ -198,8 +251,14 @@ final class ShadeRailHost {
         // Keep both the icon rail and the notification stack's stock width
         // unchanged on the lock screen. Never override the platform's
         // notification privacy or keyguard rendering.
-        boolean wantVisible = keyguard != null && !keyguard.isKeyguardLocked();
-        if (wantVisible == railVisible) return;
+        boolean locked = keyguard == null || keyguard.isKeyguardLocked();
+        boolean wantVisible = !locked;
+        if (wantVisible == railVisible) {
+            if (!wantVisible) {
+                Log.i(TAG, "BB7 rail not activated: keyguard locked or unavailable");
+            }
+            return;
+        }
 
         ViewGroup.LayoutParams params = nativeStack.getLayoutParams();
         try {
