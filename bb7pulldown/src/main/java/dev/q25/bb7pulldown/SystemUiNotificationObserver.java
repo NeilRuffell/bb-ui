@@ -60,7 +60,18 @@ final class SystemUiNotificationObserver {
 
     private static void publish(List<?> entries) {
         List<String> packages = new ArrayList<>();
-        for (Object entry : entries) collect(entry, packages, 0);
+        for (Object entry : entries) {
+            try {
+                collect(entry, packages, 0);
+            } catch (Throwable error) {
+                // One unsupported notification entry must not suppress icons
+                // for unrelated applications.
+                if (!readErrorLogged) {
+                    readErrorLogged = true;
+                    Log.w(TAG, "Notification app entry enumeration failed", error);
+                }
+            }
+        }
         List<String> unique = NotificationAppIndex.uniquePackages(packages);
         if (unique.equals(activePackages)) return;
         activePackages = unique;
