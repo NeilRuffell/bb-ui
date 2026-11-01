@@ -1,5 +1,106 @@
 # BB UI
 
+## BB7 Appearance — Settings and SystemUI native notification focus (experimental)
+
+The `feat/bb7-focus-settings` branch builds a **separate, compatible Vector/LSPosed APK**
+named **BB7 Appearance** from the Gradle target `:bb7focus`. The original `:app`
+and its behavior hooks are unchanged.
+
+BB7 Appearance observes Android Settings' **existing** focus changes and
+draws a BlackBerry OS 7-inspired blue gradient on the currently focused
+AndroidX Preference row, making its text readable against the blue.
+Focus order, key handling, touch handling, selection, scrolling, and
+button behavior are **not intentionally changed**. It does not add focus
+to an item that lacks keyboard focus. On focus loss, the row background,
+padding and text colours are restored.
+
+**Current scopes:** `com.android.settings` (Settings) and `com.android.systemui`
+(SystemUI native notification rows). It does not change Settings Intelligence,
+Google Messages or other apps.
+
+### SystemUI: native notification-row focus
+
+The accessibility dump from the Q25 confirms keyboard focus on
+`com.android.systemui:id/expandableNotificationRow`. The LineageOS 24
+`status_bar_notification_row.xml` layout confirms that ID identifies an
+`ExpandableNotificationRow` with its native `NotificationBackgroundView`
+child (`duplicateParentState=true`).
+
+The earlier global `ViewTreeObserver` approach missed the focused row.
+Version `0.2.2-native-row-focus-dev` instead reads `row.isFocused()` in
+the native notification background's normal `onDraw` and
+`drawableStateChanged` calls. The same BB7 gradient draws after the
+stock notification background and before notification content. Text colours
+are restored when a native row loses focus. No focus, key, touch, click, or
+scroll properties are changed, and the existing Settings styling is untouched.
+
+Quick Settings tiles are Compose-based and remain outside this phase.
+The updated SystemUI hook is **build-tested only**, pending Q25 visual
+verification.
+
+For SystemUI testing, enable `com.android.systemui` in **BB7 Appearance** in
+Vector, preserving Settings and all existing BB UI scopes, then run:
+
+```sh
+adb shell su -c 'killall com.android.systemui'
+# After SystemUI restarts, open the notification shade and navigate the
+# existing notification rows using the Q25 keyboard/trackpad.
+adb logcat -d -s BB7-SystemUI:I '*:S'
+```
+
+**Warning:** Restarting SystemUI can temporarily blank the status bar and
+notification shade. If the new hook causes a SystemUI crash loop, disable the
+SystemUI scope for BB7 Appearance in Vector and restart SystemUI, or use
+Vector's module recovery method. No reboot is required for routine tests.
+
+For rollback, uncheck only `com.android.systemui` in BB7 Appearance's scopes
+and restart SystemUI; the working Settings highlight is independent.
+Non-AndroidX preference lists and custom-rendered views are excluded
+until tested. The module needs **device validation on Q25/LineageOS 24.0**.
+
+### Build and test
+
+```sh
+git fetch origin
+git switch feat/bb7-focus-settings
+git pull --ff-only
+./gradlew :bb7focus:assembleDebug
+adb install -r bb7focus/build/outputs/apk/debug/bb7focus-debug.apk
+```
+
+In Vector, enable **BB7 Appearance**, and scope it to **Settings**
+(`com.android.settings`) and optionally **SystemUI** (`com.android.systemui`).
+Leave the existing **BB UI** module
+enabled with its existing scopes.
+
+Then restart the Settings app, **not the whole phone**:
+
+```sh
+adb shell am force-stop com.android.settings
+adb shell am start -a android.settings.SETTINGS
+```
+
+Use the Q25 keyboard/trackpad to move focus across Settings rows. The
+current row should become blue; the previous row should immediately
+return to its normal background. Verify switches, touch, Enter/Back,
+scrolling and the existing type-to-search. If no blue appears, retrieve
+diagnostics:
+
+```sh
+adb logcat -d -s BB7-Focus:I '*:S'
+```
+
+To roll back, disable **BB7 Appearance** in Vector, then force-stop and
+restart Settings. The module does not modify persisted Android settings.
+
+**Note:** A successful build does not verify which controls LineageOS
+marks focusable. This module styles only detected focus; it does not
+alter navigation or force otherwise-unfocusable controls to gain focus.
+
+---
+
+# BB UI
+
 Vector/LSPosed module for physical-keyboard Android improvements.
 
 ## Settings type-to-search
