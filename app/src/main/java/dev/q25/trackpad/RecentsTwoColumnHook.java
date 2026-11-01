@@ -85,6 +85,10 @@ public final class RecentsTwoColumnHook implements IXposedHookLoadPackage {
                         }
                     });
 
+            // Install vertical mode from this confirmed working entry point.
+            // The vertical feature stays disabled unless its separate flag is set.
+            RecentsVerticalListHook.install(lp, recents, paged);
+
             XposedBridge.log("BB UI: native two-panel Recents hook installed in "
                     + lp.packageName);
         } catch (Throwable e) {
