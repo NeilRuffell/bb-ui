@@ -1,8 +1,8 @@
 package dev.q25.bb7shade;
 
 import android.util.Log;
+import android.os.SystemClock;
 import android.view.View;
-import android.view.ViewGroup;
 
 import java.util.Collections;
 import java.util.Map;
@@ -26,6 +26,9 @@ final class ShadeQsPageBridge {
             Collections.synchronizedMap(new WeakHashMap<>());
     private static final Map<Object, Boolean> ERROR_LOGGED =
             Collections.synchronizedMap(new WeakHashMap<>());
+    private static final Map<Object, Long> LAST_ATTEMPT =
+            Collections.synchronizedMap(new WeakHashMap<>());
+    private static final long RETRY_INTERVAL_MS = 3000L;
     private static boolean enabled = true;
 
     static void setEnabled(boolean value) {
@@ -34,6 +37,8 @@ final class ShadeQsPageBridge {
 
     static void onShadeExpansion(Object panel, boolean keyguardShowing) {
         if (!enabled || keyguardShowing) return;
+        // An unavailable controller method must not cause a post/call loop.
+        if (ERROR_LOGGED.containsKey(panel)) return;
 
         Object qs;
         try {
@@ -64,6 +69,10 @@ final class ShadeQsPageBridge {
         if (panelView == null) return;
         synchronized (PENDING) {
             if (PENDING.containsKey(panel)) return;
+            long now = SystemClock.uptimeMillis();
+            Long last = LAST_ATTEMPT.get(panel);
+            if (last != null && now - last < RETRY_INTERVAL_MS) return;
+            LAST_ATTEMPT.put(panel, now);
             PENDING.put(panel, Boolean.TRUE);
         }
         boolean posted = panelView.post(() -> {
