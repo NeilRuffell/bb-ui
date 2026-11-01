@@ -12,7 +12,6 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.WeakHashMap;
 
-import de.robv.android.xposed.IXposedHookLoadPackage;
 import de.robv.android.xposed.XC_MethodHook;
 import de.robv.android.xposed.XposedBridge;
 import de.robv.android.xposed.XposedHelpers;
@@ -30,7 +29,7 @@ import de.robv.android.xposed.callbacks.XC_LoadPackage;
  * Disable with: adb shell settings put global bb_ui_recents_vertical_list 0
  * Reboot to restore native layout.
  */
-public final class RecentsVerticalListHook implements IXposedHookLoadPackage {
+public final class RecentsVerticalListHook {
     private static final String TOGGLE = "bb_ui_recents_vertical_list";
     private static final String RECENTS = "com.android.quickstep.views.RecentsView";
     private static final String TASK = "com.android.quickstep.views.TaskView";
@@ -52,17 +51,41 @@ public final class RecentsVerticalListHook implements IXposedHookLoadPackage {
         float lastY;
     }
 
-    @Override
-    public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lp) {
-        if ("android".equals(lp.packageName) || "com.android.systemui".equals(lp.packageName)
-                || "dev.q25.trackpad".equals(lp.packageName)) return;
+    private RecentsVerticalListHook() {}
 
-        final Class<?> recents = XposedHelpers.findClassIfExists(RECENTS, lp.classLoader);
+    /**
+     * Called by the already-working two-panel Quickstep entry point.
+     * One installed LSPosed entry ensures both hooks load in the same process.
+     */
+    static void install(XC_LoadPackage.LoadPackageParam lp,
+            Class<?> recents, Class<?> paged) {
+        Log.i(LOG_TAG, "Vertical hook installer reached in " + lp.packageName);
         final Class<?> task = XposedHelpers.findClassIfExists(TASK, lp.classLoader);
-        final Class<?> paged = XposedHelpers.findClassIfExists(PAGED, lp.classLoader);
-        if (recents == null || task == null || paged == null) return;
+        if (task == null) {
+            Log.e(LOG_TAG, "Vertical installer: TaskView class unavailable");
+            return;
+        }
 
         try {
+            // Quickstep's PagedView calculates horizontal page positions even in
+            // two-panel mode. Keep the original layout for thumbnail creation,
+            // then eliminate the horizontal scroll offsets. Vertical rows use
+            // real TaskView coordinates below.
+            XposedBridge.hookAllMethods(recents, "getPageScrolls", new XC_MethodHook() {
+                @Override protected void afterHookedMethod(MethodHookParam p) {
+                    View view = (View) p.thisObject;
+                    if (!enabled(view)) return;
+                    int[] pageScrolls = (int[]) p.args[0];
+                    if (pageScrolls == null) return;
+                    boolean changed = false;
+                    for (int i = 0; i < pageScrolls.length; i++) {
+                        if (pageScrolls[i] != 0) changed = true;
+                        pageScrolls[i] = 0;
+                    }
+                    if (changed) p.setResult(true);
+                }
+            });
+
             // All native Quickstep layout/preview work happens BEFORE this hook.
             XposedBridge.hookAllMethods(recents, "onLayout", new XC_MethodHook() {
                 @Override protected void afterHookedMethod(MethodHookParam p) {
@@ -225,7 +248,7 @@ public final class RecentsVerticalListHook implements IXposedHookLoadPackage {
                 });
             }
             XposedBridge.log("BB UI: vertical native TaskView list hooked in " + lp.packageName);
-            Log.i(LOG_TAG, "Vertical hook installed in " + lp.packageName);
+            Log.i(LOG_TAG, "Vertical hook registration complete in " + lp.packageName);
         } catch (Throwable ex) {
             XposedBridge.log("BB UI: vertical native list unavailable: " + ex);
             Log.e(LOG_TAG, "Vertical hook installation failed", ex);
@@ -279,9 +302,10 @@ public final class RecentsVerticalListHook implements IXposedHookLoadPackage {
             st.rowHeight = rowHeight + gap;
             int columns = 2;
             int columnWidth = (root.getWidth() - 2 * margin - gap) / columns;
-            int firstVisualX = Math.round(cards.get(0).getX());
-            int secondVisualX = cards.size() >= 2
-                    ? Math.round(cards.get(1).getX()) : firstVisualX + columnWidth + gap;
+            // The native two-panel page layout positions successive pairs along X.
+            // Use fixed on-screen column coordinates instead of inheriting that X offset.
+            int firstVisualX = margin;
+            int secondVisualX = margin + columnWidth + gap;
             int initialVisualY = margin;
 
             // The first two columns retain their native Quickstep horizontal positions.
