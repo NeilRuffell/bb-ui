@@ -1,74 +1,58 @@
-# Root-level BBOS7 system appearance (experimental)
+# Broad BBOS7 presentation layer — Vector-accurate (experimental)
 
-**Branch:** `feat/bb7-root-ui-presentation`, based on the previously
-unmerged `feat/bb7-system-visual-layer` work. Neither branch is merged.
+**Branch:** `feat/bb7-root-ui-presentation` (unmerged). **Version:** 0.9.28.
 
-This implementation uses Android's **common framework endpoints** instead
-of per-screen or per-submenu styling:
+## Correct system architecture
 
-- `IXposedHookZygoteInit` hooks native `View.setBackgroundDrawable`,
-  covering XML-inflated and programmatic backgrounds, including nested
-  StateList/Layer/Inset/Ripple drawable shapes.
-- `Instrumentation.callApplicationOnCreate` installs one shared skin per
-  OS-owned application/ClassLoader: native theme colors, SettingsLib
-  preference rows, native lists and dialogs, Material Components, and
-  both **Material2 and Material3 Compose Colors/Shapes**.
-- The reusable preference RecyclerView hooks remove side padding after
-  adapter installation and remove row margins on attachment.
-- Native keyboard/trackpad focus, menu actions, and existing BB UI
-  SystemUI/Recents functionality remain Android-owned.
+Vector's Zygisk daemon approves modules *per process and per module scope*,
+then loads the legacy `assets/xposed_init` classes in that process. Its
+legacy `initZygote()` callback also runs from this scoped module loader:
+it does **not** grant our APK universal process reach. The prior attempted
+zygote-global skin was incorrectly designed and has been removed.
 
-The shared Zygote callbacks **check each View/Application Context** before
-making any styling change: only system-installed Android/Lineage OS
-packages qualify (Android framework UI, `com.android.*`,
-`org.lineageos.*`, Android Permission Controller/Package Installer).
-Third-party app-specific UI is excluded even though the root hook is
-registered earlier in the process lifecycle.
+The single shared `SystemBb7VisualHook.handleLoadPackage()` now installs
+the earliest available root appearance hooks for **all eligible components
+within each scoped OS-owned process**. It does not depend on Application
+startup or a late Activity/screen-specific callback. The guarded OS UI
+scope is determined by both the installed system flag and the package's
+platform/Lineage/permission-controller identity. Third-party app-specific
+UIs are excluded even when installed as system apps.
 
-**Scope and verification:** Legacy Vector/LSPosed may still restrict
-module injection according to enabled scopes. The Zygote path is intended
-to broaden coverage but must be verified on the Q25 after one reboot.
-The existing BB UI Vector scopes remain necessary for the original
-Settings, SystemUI and Quickstep features. Do not assume unsupported
-custom-rendered screens are fully skinned: Android has more than one
-rendering engine, and hard-coded custom UI can bypass theme primitives.
+## Reusable appearance points
 
-## Build / inspect in Settings without reboot
+- `View.setBackgroundDrawable(Drawable)`: native backgrounds set via
+  XML, `setBackground` or a programmatic setter; square gradient,
+  state-list, inset and layered backgrounds.
+- `Resources.Theme.resolveAttribute`: framework background and accent
+  color tokens in scoped system apps.
+- `View.setBackgroundResource`: SettingsLib round-preference backgrounds;
+  native RecyclerView preference padding/margins and ListView selection.
+- `MaterialShapeDrawable`: native Material Components shape model.
+- `androidx.compose.material.Colors/Shapes` and
+  `androidx.compose.material3.ColorScheme/Shapes/ShapeTokens`:
+  Material2 and Material3 color and shape appearance.
+- Reusable native list focus, native alert-dialog surfaces, and existing
+  Settings/SystemUI/Quickstep BB UI features.
 
-```sh
-cd ~/Projects/bb-ui
-git fetch origin
-git switch feat/bb7-root-ui-presentation
-git pull --ff-only
-./gradlew :app:testDebugUnitTest :app:assembleDebug &&
-adb install -r app/build/outputs/apk/debug/app-debug.apk &&
-adb shell am force-stop com.android.settings &&
-adb shell am start -a android.settings.SETTINGS
-adb logcat -d -s 'BB7-SystemRoot:V' 'BB7-SystemSkin:V' '*:S' | tail -80
-```
+This is not an RRO that overrides `android` framework resources for all
+third-party applications. There is **no single Android render hook** that
+can guarantee 100% of native View, Compose, SurfaceView, OEM/custom drawn UI
+while also excluding third-party interfaces.
 
-Restarting Settings tests the legacy scoped fallback. For the new **Zygote
-bootstrap**, an Android reboot is needed after installing this APK, and the
-module must be enabled in Vector. Check for
-`Zygote`/`Framework Application-onCreate skin bootstrap active` and
-`Applying root-based BB7 theme to OS application` in the logcat tags above.
+## Verification and safety
 
-## New-layer rollback without uninstalling working BB UI features
+The branch adds a GitHub Actions Gradle build/test workflow and unit tests
+for the OS-only package policy. Device verification is still required;
+compilation is not visual proof.
 
-```sh
-adb shell setprop debug.bb7.systemskin.enabled false
-adb shell am force-stop com.android.settings
-adb shell am start -a android.settings.SETTINGS
-```
+For users choosing to test, the debug property
+`debug.bb7.systemskin.enabled=false` prevents the new presentation layer
+from installing in newly started processes and prevents new root View
+alterations. The flag defaults to true. **Master is untouched.**
 
-The Zygote/native root hook checks the switch at runtime; the remaining
-theme hooks are skipped when each process starts. The setting defaults to
-enabled if not set and is reset on reboot. To test again, use the same
-`setprop` with `true` and restart Settings.
-
-**Warning:** Zygote/framework hooks are experimental and can affect system
-process stability. Keep the previously verified APK available. No merge
-until successful compilation and device testing.
+See Vector's actual source:
+`JingMatrix/Vector/legacy/src/main/java/de/robv/android/xposed/XposedInit.java`
+and `JingMatrix/Vector/zygisk/README.md`.
 
 ---
 
