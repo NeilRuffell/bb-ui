@@ -7,7 +7,6 @@ import android.view.View;
 import android.widget.PopupWindow;
 
 import java.lang.reflect.Method;
-import java.lang.reflect.Modifier;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import de.robv.android.xposed.XC_MethodHook;
@@ -213,17 +212,26 @@ final class SettingsMenuGeometryHook {
                                 param.args[si] = rectangleShape;
                             if (shadowIndex >= 0)
                                 param.args[shadowIndex] = 0f;
+                            boolean fullWidthApplied = false;
                             if (sizeKt != null
                                     && modifierType.isInstance(param.args[mi])) {
-                                Object fullWidth = XposedHelpers.callStaticMethod(
-                                        sizeKt, "fillMaxWidth", param.args[mi], 1f);
-                                if (modifierType.isInstance(fullWidth))
-                                    param.args[mi] = fullWidth;
+                                try {
+                                    Object fullWidth = XposedHelpers.callStaticMethod(
+                                            sizeKt, "fillMaxWidth", param.args[mi], 1f);
+                                    if (modifierType.isInstance(fullWidth)) {
+                                        param.args[mi] = fullWidth;
+                                        fullWidthApplied = true;
+                                    }
+                                } catch (Throwable widthError) {
+                                    Log.w(TAG, "Material3 full-width modifier unavailable",
+                                            widthError);
+                                }
                             }
                             if (COMPOSE_SHOWN.compareAndSet(false, true))
-                                Log.i(TAG, "Material3 menu container squared, "
-                                        + "shadow suppressed=" + (shadowIndex >= 0)
-                                        + ", full-width modifier=" + (sizeKt != null));
+                                Log.i(TAG, "Material3 container: squared="
+                                        + (rectangleShape != null)
+                                        + ", shadow suppressed=" + (shadowIndex >= 0)
+                                        + ", full-width=" + fullWidthApplied);
                         } catch (Throwable error) {
                             Log.w(TAG, "Compose menu geometry retained", error);
                         }
