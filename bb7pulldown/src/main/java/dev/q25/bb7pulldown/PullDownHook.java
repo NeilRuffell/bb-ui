@@ -114,8 +114,22 @@ public final class PullDownHook implements IXposedHookLoadPackage {
             XposedBridge.hookAllConstructors(viewClass, new XC_MethodHook() {
                 @Override protected void afterHookedMethod(MethodHookParam param) {
                     if (param.thisObject instanceof View) {
-                        nativeStatusBar = new WeakReference<>((View) param.thisObject);
-                        // Keep a native status-bar reference for command interception.
+                        View bar = (View) param.thisObject;
+                        nativeStatusBar = new WeakReference<>(bar);
+                        // Apply to the actual persistent SystemUI bar, not a
+                        // temporary overlay tied to a particular screen.
+                        bar.addOnAttachStateChangeListener(new View.OnAttachStateChangeListener() {
+                            @Override public void onViewAttachedToWindow(View attached) {
+                                updateStatusAppearance(-1);
+                            }
+                            @Override public void onViewDetachedFromWindow(View detached) {
+                                if (decoratedStatusBar == detached) {
+                                    decoratedStatusBar = null;
+                                    originalStatusBackground = null;
+                                }
+                            }
+                        });
+                        bar.post(() -> updateStatusAppearance(-1));
                     }
                 }
             });
@@ -389,44 +403,53 @@ public final class PullDownHook implements IXposedHookLoadPackage {
         }
     }
 
+    /** The native status bar keeps its real clock, connectivity and battery views. */
+    private static GradientDrawable statusBarBackground(Context context) {
+        GradientDrawable background = new GradientDrawable(
+                GradientDrawable.Orientation.TOP_BOTTOM,
+                new int[]{0xff40536a, 0xff2a3c52, 0xff172638});
+        background.setStroke(dp(context, 1), 0xff57758f);
+        return background;
+    }
+
     private static void updateStatusFocus(int zone) {
+        updateStatusAppearance(zone);
+    }
+
+    /**
+     * A single native status-bar background for Home, Quickstep and all
+     * status-bar submenus. Focus adds the shared BB7 selection gradient to
+     * one half; losing focus restores the *styled* bar, not stock Android.
+     * No new windows or fake status icons are created.
+     */
+    private static void updateStatusAppearance(int zone) {
         View bar = nativeStatusBar.get();
-        // Restore the previous bar even if SystemUI replaced the native view.
-        if (bar == null) bar = decoratedStatusBar;
         if (bar == null) return;
         final View target = bar;
         target.post(() -> {
+            if (!target.isAttachedToWindow()) return;
             if (decoratedStatusBar != null && decoratedStatusBar != target) {
                 decoratedStatusBar.setBackground(originalStatusBackground);
                 decoratedStatusBar = null;
                 originalStatusBackground = null;
             }
-            if (zone < 0) {
-                if (decoratedStatusBar == target) {
-                    target.setBackground(originalStatusBackground);
-                    decoratedStatusBar = null;
-                    originalStatusBackground = null;
-                }
-                return;
-            }
-            int width = target.getWidth();
-            int height = target.getHeight();
-            if (width <= 0 || height <= 0) return;
             if (decoratedStatusBar != target) {
                 originalStatusBackground = target.getBackground();
                 decoratedStatusBar = target;
             }
-            // Draw the same opaque, three-stop Settings highlight BEHIND
-            // native status icons. A ViewOverlay would cover those icons.
-            Drawable original = originalStatusBackground != null
-                    ? originalStatusBackground : new ColorDrawable(Color.TRANSPARENT);
-            GradientDrawable selected = BB7Theme.selected(
+            Drawable base = statusBarBackground(target.getContext());
+            if (zone < 0 || target.getWidth() <= 0) {
+                target.setBackground(base);
+                return;
+            }
+            // Both focus zones use the same BBOS7 gradient as Settings and
+            // the notification shade, positioned behind native indicators.
+            GradientDrawable selection = BB7Theme.selected(
                     dp(target.getContext(), 3), dp(target.getContext(), 1));
-            LayerDrawable background = new LayerDrawable(
-                    new Drawable[] { original, selected });
-            int midpoint = width / 2;
-            background.setLayerInset(1, zone == 0 ? 0 : midpoint, 0,
-                    zone == 0 ? width - midpoint : 0, 0);
+            LayerDrawable background = new LayerDrawable(new Drawable[]{base, selection});
+            int mid = target.getWidth() / 2;
+            background.setLayerInset(1, zone == 0 ? 0 : mid, 0,
+                    zone == 0 ? target.getWidth() - mid : 0, 0);
             target.setBackground(background);
         });
     }
