@@ -5,7 +5,10 @@ import android.content.res.Configuration;
 import android.content.res.Resources;
 import android.util.Log;
 
+import java.util.Collections;
 import java.util.Locale;
+import java.util.Map;
+import java.util.WeakHashMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -38,8 +41,11 @@ final class SystemBb7ResourceColors {
     private static final int BLUE = 8;
     private static final int ON_BLUE = 9;
 
-    private static final ConcurrentHashMap<Integer, Integer> ROLES =
-            new ConcurrentHashMap<>();
+    // Resource IDs (especially 0x7f...) can mean different things in a
+    // package Context and a remote-view Context in the same process. A plain
+    // global int->role cache would leak OS appearance into third-party UI.
+    private static final Map<Resources, ConcurrentHashMap<Integer, Integer>> ROLES =
+            Collections.synchronizedMap(new WeakHashMap<>());
     private static final AtomicBoolean INSTALLED = new AtomicBoolean();
     private static final AtomicBoolean APPLIED = new AtomicBoolean();
     private static final AtomicBoolean ERROR = new AtomicBoolean();
@@ -83,7 +89,15 @@ final class SystemBb7ResourceColors {
 
     private static int role(Resources res, int id) {
         if (id == 0 || !SystemBb7VisualHook.enabled()) return NONE;
-        Integer cached = ROLES.get(id);
+        ConcurrentHashMap<Integer, Integer> values;
+        synchronized (ROLES) {
+            values = ROLES.get(res);
+            if (values == null) {
+                values = new ConcurrentHashMap<>();
+                ROLES.put(res, values);
+            }
+        }
+        Integer cached = values.get(id);
         if (cached != null) return cached;
         int role = NONE;
         try {
@@ -98,7 +112,7 @@ final class SystemBb7ResourceColors {
             if (ERROR.compareAndSet(false, true))
                 Log.w(TAG, "Resource palette classification unavailable", error);
         }
-        ROLES.putIfAbsent(id, role);
+        values.putIfAbsent(id, role);
         return role;
     }
 
