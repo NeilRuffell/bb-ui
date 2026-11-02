@@ -2,6 +2,10 @@ package dev.q25.trackpad;
 
 import android.graphics.Rect;
 import android.content.Context;
+import android.content.BroadcastReceiver;
+import android.content.Intent;
+import android.content.IntentFilter;
+import android.view.KeyEvent;
 import android.provider.Settings;
 import android.util.Log;
 import android.view.View;
@@ -40,6 +44,12 @@ import de.robv.android.xposed.callbacks.XC_LoadPackage;
  */
 public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
     private static final String TAG = "BB-UI-Recents";
+    private static final String FOCUS_ACTION = "dev.q25.bb7pulldown.FOCUS_STATUS";
+    private static final String REVEAL_ACTION = "dev.q25.bb7pulldown.REVEAL_RECENTS";
+    private static final String EXIT_ACTION = "dev.q25.bb7pulldown.EXIT_RECENTS";
+    private static final String SYSTEM_UI = "com.android.systemui";
+    private static final WeakHashMap<View, Boolean> UNIFIED_CONCEALED = new WeakHashMap<>();
+    private static final WeakHashMap<View, BroadcastReceiver> UNIFIED_RECEIVERS = new WeakHashMap<>();
     private static final String FLAG = "bb_ui_vertical_recents";
     private static final String TARGET = "com.android.launcher3";
     private static final String RECENTS = "com.android.quickstep.views.RecentsView";
@@ -605,6 +615,7 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
                     if (!active(root)) return;
                     if (p.args.length > 0 && Boolean.FALSE.equals(p.args[0])) {
                         OVERVIEW_ENTRY_SELECTED.remove(root);
+                        restoreUnifiedOverview(root);
                     }
                 }
             });
@@ -631,8 +642,11 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
                         p.setObjectExtra("bbuiEnteringOverview", entering);
                     }
                     @Override protected void afterHookedMethod(MethodHookParam p) {
-                        if (Boolean.TRUE.equals(p.getObjectExtra("bbuiEnteringOverview")))
-                            selectInitialGridPage((View) p.thisObject);
+                        if (Boolean.TRUE.equals(p.getObjectExtra("bbuiEnteringOverview"))) {
+                            View root = (View) p.thisObject;
+                            selectInitialGridPage(root);
+                            enterUnifiedOverview(root);
+                        }
                     }
                 });
             }
@@ -649,7 +663,9 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
                             + " existingChildren=" + ((ViewGroup) root).getChildCount());
                 }
                 @Override protected void afterHookedMethod(MethodHookParam p) {
-                    selectInitialGridPage((View) p.thisObject);
+                    View root = (View) p.thisObject;
+                    selectInitialGridPage(root);
+                    enterUnifiedOverview(root);
                 }
             });
 
@@ -694,6 +710,68 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
             Log.e(TAG, "Quickstep hook installation failed", error);
             XposedBridge.log("BB UI: Quickstep hook installation failed: " + error);
         }
+    }
+
+    /**
+     * Unified overview: Quickstep retains task ownership and thumbnail loading.
+     * Its grid is only visually concealed until the trackpad enters Recents.
+     * BlackBerry key continues to use the native Overview launcher path.
+     */
+    private static void enterUnifiedOverview(View root) {
+        if (!active(root) || UNIFIED_CONCEALED.containsKey(root)) return;
+        try {
+            registerUnifiedReceiver(root);
+            UNIFIED_CONCEALED.put(root, Boolean.TRUE);
+            root.setAlpha(0f);
+            root.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
+            root.post(() -> {
+                if (!UNIFIED_CONCEALED.containsKey(root)) return;
+                Intent focus = new Intent(FOCUS_ACTION).setPackage(SYSTEM_UI);
+                root.getContext().sendBroadcast(focus);
+                Log.w(TAG, "Unified overview entered: grid concealed, native status focus requested");
+            });
+        } catch (Throwable error) {
+            restoreUnifiedOverview(root);
+            Log.e(TAG, "Unified overview entry failed; native Recents retained", error);
+        }
+    }
+
+    private static void registerUnifiedReceiver(View root) {
+        if (UNIFIED_RECEIVERS.containsKey(root)) return;
+        BroadcastReceiver receiver = new BroadcastReceiver() {
+            @Override public void onReceive(Context context, Intent intent) {
+                int sender = getSentFromUid();
+                String[] packages = context.getPackageManager().getPackagesForUid(sender);
+                boolean systemUi = false;
+                if (packages != null) for (String pkg : packages) {
+                    if (SYSTEM_UI.equals(pkg)) { systemUi = true; break; }
+                }
+                if (!systemUi || !UNIFIED_CONCEALED.containsKey(root)) return;
+                String action = intent.getAction();
+                if (REVEAL_ACTION.equals(action)) {
+                    restoreUnifiedOverview(root);
+                    root.requestFocus();
+                    Log.w(TAG, "Unified overview: native Recents grid revealed");
+                } else if (EXIT_ACTION.equals(action)) {
+                    restoreUnifiedOverview(root);
+                    View activityRoot = root.getRootView();
+                    activityRoot.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_BACK));
+                    activityRoot.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_BACK));
+                    Log.w(TAG, "Unified overview: native Back dispatched on exit");
+                }
+            }
+        };
+        IntentFilter filter = new IntentFilter();
+        filter.addAction(REVEAL_ACTION);
+        filter.addAction(EXIT_ACTION);
+        root.getContext().registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED);
+        UNIFIED_RECEIVERS.put(root, receiver);
+    }
+
+    private static void restoreUnifiedOverview(View root) {
+        if (UNIFIED_CONCEALED.remove(root) == null) return;
+        root.setAlpha(1f);
+        root.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_AUTO);
     }
 
     /**
