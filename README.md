@@ -1,58 +1,67 @@
-# Broad BBOS7 presentation layer — Vector-accurate (experimental)
+# BBOS7 OS-owned UI appearance layer (experimental)
 
-**Branch:** `feat/bb7-root-ui-presentation` (unmerged). **Version:** 0.9.28.
+**Branch:** `feat/bb7-root-ui-presentation`; no changes merged into master.
+**APK:** `0.9.29-os-ui-renderer-dev`.
 
-## Correct system architecture
+This is a **shared renderer/theme implementation**, not a collection of
+special cases for individual Settings screens. It retains existing
+trackpad/keyboard handling and the current SystemUI/Quickstep/notification
+features.
 
-Vector's Zygisk daemon approves modules *per process and per module scope*,
-then loads the legacy `assets/xposed_init` classes in that process. Its
-legacy `initZygote()` callback also runs from this scoped module loader:
-it does **not** grant our APK universal process reach. The prior attempted
-zygote-global skin was incorrectly designed and has been removed.
+### Actual Vector scope model
 
-The single shared `SystemBb7VisualHook.handleLoadPackage()` now installs
-the earliest available root appearance hooks for **all eligible components
-within each scoped OS-owned process**. It does not depend on Application
-startup or a late Activity/screen-specific callback. The guarded OS UI
-scope is determined by both the installed system flag and the package's
-platform/Lineage/permission-controller identity. Third-party app-specific
-UIs are excluded even when installed as system apps.
+Vector loads legacy Xposed modules only into scope-approved processes.
+Vector's `IXposedHookZygoteInit` callback also runs from its scoped loader,
+**not from an unrestricted global Zygote**. The new visual layer therefore
+installs from the ordinary, earliest `handleLoadPackage` callback. It
+accepts only installed OS-owned Android/Lineage packages and excludes
+third-party app interfaces, even when those applications are preinstalled.
+The Android server process is excluded.
 
-## Reusable appearance points
+The manifest includes a **recommended scope list** for the relevant Android
+system UI packages. Vector treats this as a *suggestion*, not automatic
+permission; existing Vector scope configuration remains authoritative.
 
-- `View.setBackgroundDrawable(Drawable)`: native backgrounds set via
-  XML, `setBackground` or a programmatic setter; square gradient,
-  state-list, inset and layered backgrounds.
-- `Resources.Theme.resolveAttribute`: framework background and accent
-  color tokens in scoped system apps.
-- `View.setBackgroundResource`: SettingsLib round-preference backgrounds;
-  native RecyclerView preference padding/margins and ListView selection.
-- `MaterialShapeDrawable`: native Material Components shape model.
-- `androidx.compose.material.Colors/Shapes` and
-  `androidx.compose.material3.ColorScheme/Shapes/ShapeTokens`:
-  Material2 and Material3 color and shape appearance.
-- Reusable native list focus, native alert-dialog surfaces, and existing
-  Settings/SystemUI/Quickstep BB UI features.
+### Root presentation APIs (per eligible system process)
 
-This is not an RRO that overrides `android` framework resources for all
-third-party applications. There is **no single Android render hook** that
-can guarantee 100% of native View, Compose, SurfaceView, OEM/custom drawn UI
-while also excluding third-party interfaces.
+- Native `View.setBackgroundDrawable` and
+  `PopupWindow.setBackgroundDrawable`: square XML/stateful/layered
+  rounded surfaces, including content set dynamically.
+- Native `Resources.Theme.resolveAttribute` and
+  `Resources.getColor/getColorStateList`: BB7 colour palette in the
+  framework and semantic SettingsLib/Material resource themes. The
+  resource classifier uses a per-Resources cache so a third-party remote
+  UI cannot collide with an OS-owned ID.
+- Native Material Components `MaterialShapeDrawable`, Android
+  `AbsListView` selection and shared `PreferenceGroupAdapter`
+  backgrounds, side margins and list padding.
+- Compose Material2 `Colors/Shapes` and Material3
+  `ColorScheme/Shapes/ShapeTokens`, **plus the underlying
+  `CornerBasedShape.createOutline` renderer**, so explicit
+  RoundedCornerShape/CircleShape and CutCornerShape definitions are
+  rectangular even when a particular screen bypasses theme defaults.
+- Existing BB7 gradient for focused preference/menu rows remains
+  full-width within its drawable row, without replacing native input.
 
-## Verification and safety
+### Verification
 
-The branch adds a GitHub Actions Gradle build/test workflow and unit tests
-for the OS-only package policy. Device verification is still required;
-compilation is not visual proof.
+Android CI compiles the single `:app` APK, runs the existing unit
+tests plus tests for OS-only package inclusion and semantic native
+colour-token handling, checks the Vector `assets/xposed_init` entry,
+and uploads the debug APK. Source-based unit tests and compilation
+cannot establish visual behavior on the actual Zinwa/LineageOS device.
 
-For users choosing to test, the debug property
-`debug.bb7.systemskin.enabled=false` prevents the new presentation layer
-from installing in newly started processes and prevents new root View
-alterations. The flag defaults to true. **Master is untouched.**
+A universal ROM-wide hook that changes every conceivable
+custom-rendered UI but no third-party application UI does not exist in
+Android. Vector scopes and independent renderers remain real limits.
+Do **not** merge experimental work until it is device-validated.
 
-See Vector's actual source:
-`JingMatrix/Vector/legacy/src/main/java/de/robv/android/xposed/XposedInit.java`
-and `JingMatrix/Vector/zygisk/README.md`.
+### Safe rollback of the experimental visual layer
+
+`debug.bb7.systemskin.enabled=false` disables the new layer when a
+system process starts; the root View hook also reads it dynamically.
+The original BB UI module features remain installed. The property
+defaults to enabled and normally resets on reboot.
 
 ---
 
