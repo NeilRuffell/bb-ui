@@ -1,3 +1,52 @@
+## Unified BlackBerry-key overview entry (experimental)
+
+**Branch:** `feat/bb7-unified-overview-entry` (based on the two-zone status-bar branch).
+
+The physical BlackBerry key continues to invoke **native Quickstep Recents** via
+Android's existing key mapping. There is **no system_server key hook** and
+no new Recents renderer. On native overview entry, the existing Quickstep
+RecentsView is temporarily visually concealed and SystemUI is asked to focus
+the native status bar. The user can use Left/Right to select notification or
+system controls. Down reveals the original 2-column Quickstep task grid;
+Back requests the existing overview exit path. Clicking a status zone opens
+the corresponding SystemUI destination and exits concealed overview.
+
+The status-focus request is an explicit package-targeted broadcast,
+validated by SystemUI against the sender's Launcher3 UID. Reveal/exit
+responses are similarly checked against the SystemUI UID.
+The underlying Quickstep TaskViews, ordering, thumbnail pipeline, and
+existing keyboard navigation are not replaced.
+
+Both Vector modules must be active: BB UI scoped to
+`com.android.launcher3`, and BB7 Pull-down scoped to
+`com.android.systemui`. The experimental framework (`system`) scope
+is **not required for this feature**.
+
+Build and install both APKs, then restart both affected processes:
+
+```sh
+cd ~/Projects/bb-ui
+git fetch origin
+git switch feat/bb7-unified-overview-entry
+git pull --ff-only
+./gradlew :app:assembleDebug :bb7pulldown:assembleDebug
+adb root
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+adb install -r bb7pulldown/build/outputs/apk/debug/bb7pulldown-debug.apk
+adb shell settings put global bb_ui_vertical_recents 1
+adb shell setprop debug.bb7pulldown.enabled true
+adb shell am force-stop com.android.launcher3
+adb shell am start -a android.intent.action.MAIN -c android.intent.category.HOME
+adb shell am crash com.android.systemui
+```
+
+If something fails, inspect
+`adb logcat -d -s BB-UI-Recents:W BB7-PullDown:I '*:S'`.
+This is an unverified device experiment; avoid merging until the Q25
+passes entry, focus, reveal, Back, notification and system-control checks.
+
+---
+
 # BB UI
 
 ## BB7 Pull-down — inline native notification actions (v0.6.0)
