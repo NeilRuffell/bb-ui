@@ -1,5 +1,7 @@
 package dev.q25.bb7focus;
 
+import dev.q25.trackpad.theme.BB7Theme;
+
 import android.content.res.ColorStateList;
 import android.graphics.Canvas;
 import android.graphics.LinearGradient;
@@ -40,11 +42,11 @@ public final class SystemUiFocusThemeHook implements IXposedHookLoadPackage {
     private static final String NOTIFICATION_BACKGROUND =
             "com.android.systemui.statusbar.notification.row.NotificationBackgroundView";
 
-    private static final int BLUE_TOP = 0xff459fd9;
-    private static final int BLUE_MIDDLE = 0xff3285c5;
-    private static final int BLUE_BOTTOM = 0xff2368aa;
-    private static final int TITLE_COLOR = 0xffffffff;
-    private static final int SUMMARY_COLOR = 0xffe7f2ff;
+    private static final int BLUE_TOP = BB7Theme.BLUE_TOP;
+    private static final int BLUE_MIDDLE = BB7Theme.BLUE_MIDDLE;
+    private static final int BLUE_BOTTOM = BB7Theme.BLUE_BOTTOM;
+    private static final int TITLE_COLOR = BB7Theme.TITLE;
+    private static final int SUMMARY_COLOR = BB7Theme.SUMMARY;
 
     // SystemUI View rendering is on its UI thread. Only one native View has
     // keyboard focus at a time. The active highlight is restored on focus
