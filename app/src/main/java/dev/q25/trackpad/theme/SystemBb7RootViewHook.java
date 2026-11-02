@@ -7,15 +7,11 @@ import android.graphics.drawable.InsetDrawable;
 import android.graphics.drawable.LayerDrawable;
 import android.util.Log;
 import android.view.View;
-import android.view.ViewGroup;
 import android.widget.CompoundButton;
 import android.widget.EditText;
 import android.widget.ImageView;
 import android.widget.ProgressBar;
 
-import java.util.Collections;
-import java.util.Set;
-import java.util.WeakHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import de.robv.android.xposed.XC_MethodHook;
@@ -37,18 +33,17 @@ import de.robv.android.xposed.XposedHelpers;
  */
 final class SystemBb7RootViewHook {
     private static final String TAG = "BB7-SystemRoot";
-    private static final AtomicBoolean HOOK_LOG = new AtomicBoolean();
+    private static final AtomicBoolean REGISTERED = new AtomicBoolean();
     private static final AtomicBoolean APPLIED_LOG = new AtomicBoolean();
     private static final AtomicBoolean ERROR_LOG = new AtomicBoolean();
 
     // Unlike global Drawable/Canvas hooks, this guard is tied to the View
     // Context. It excludes third-party app content even if other packages
     // happen to share an instrumented process.
-    private static final String SETTINGS_PACKAGE = "com.android.settings";
-
     private SystemBb7RootViewHook() {}
 
     static void install() {
+        if (!REGISTERED.compareAndSet(false, true)) return;
         try {
             XposedBridge.hookAllMethods(View.class, "setBackgroundDrawable",
                     new XC_MethodHook() {
@@ -60,7 +55,8 @@ final class SystemBb7RootViewHook {
                     try {
                         Drawable drawable = (Drawable) param.args[0];
                         Drawable squared = squareBackground(drawable, 0);
-                        if (squared != null) param.args[0] = squared;
+                        if (squared != null && squared != drawable)
+                            param.args[0] = squared;
                         if (APPLIED_LOG.compareAndSet(false, true))
                             Log.i(TAG, "Root View background hook applied in "
                                     + view.getContext().getPackageName()
@@ -71,9 +67,9 @@ final class SystemBb7RootViewHook {
                     }
                 }
             });
-            if (HOOK_LOG.compareAndSet(false, true))
-                Log.i(TAG, "Root native View background endpoint hooked");
+            Log.i(TAG, "Root native View background endpoint hooked");
         } catch (Throwable error) {
+            REGISTERED.set(false);
             Log.e(TAG, "Cannot register View background endpoint", error);
         }
     }
@@ -82,6 +78,7 @@ final class SystemBb7RootViewHook {
         Context context = view.getContext();
         if (context == null
                 || !SystemBb7VisualHook.isOsOwnedContext(context)) return false;
+        if (!SystemBb7VisualHook.enabled()) return false;
         // These controls draw meaningful symbols or geometry (avatar masks,
         // toggle thumbs, progress indicators). Flatten their *container*
         // backgrounds through their ViewGroups instead.
