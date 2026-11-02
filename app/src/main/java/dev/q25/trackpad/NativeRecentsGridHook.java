@@ -5,6 +5,7 @@ import android.content.Context;
 import android.provider.Settings;
 import android.util.Log;
 import android.view.View;
+import android.view.WindowInsets;
 import android.view.ViewGroup;
 import android.view.MotionEvent;
 
@@ -64,6 +65,7 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
     private static final WeakHashMap<Object, Rect> LOGGED_ANIMATION_TARGETS = new WeakHashMap<>();
     private static final WeakHashMap<Object, Boolean> HOME_SIMULATORS = new WeakHashMap<>();
     private static final WeakHashMap<View, Boolean> OVERVIEW_ENTRY_SELECTED = new WeakHashMap<>();
+    private static final WeakHashMap<View, Boolean> FOCUS_DIAGNOSTICS = new WeakHashMap<>();
 
     @Override public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lp) {
         if (!TARGET.equals(lp.packageName)) return;
@@ -295,6 +297,74 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
                 }
             });
 
+            // Quickstep's stock RecentsView.dispatchKeyEvent navigates a
+            // linear carousel (including treating Up and Down as page-next).
+            // In our two-column grid, map only hardware directional keys to
+            // physical card neighbors. Continue using real TaskView focus and
+            // PagedView.snapToPage, with no synthetic events or extra selector.
+            XposedBridge.hookAllMethods(recents, "dispatchKeyEvent",
+                    new XC_MethodHook() {
+                @Override protected void beforeHookedMethod(MethodHookParam p) {
+                    if (p.args.length == 0 || !(p.args[0] instanceof android.view.KeyEvent))
+                        return;
+                    ViewGroup root = (ViewGroup) p.thisObject;
+                    if (!active(root)) return;
+                    android.view.KeyEvent key = (android.view.KeyEvent) p.args[0];
+                    int direction = key.getKeyCode();
+                    if (direction != android.view.KeyEvent.KEYCODE_DPAD_UP
+                            && direction != android.view.KeyEvent.KEYCODE_DPAD_DOWN
+                            && direction != android.view.KeyEvent.KEYCODE_DPAD_LEFT
+                            && direction != android.view.KeyEvent.KEYCODE_DPAD_RIGHT) return;
+                    // Consume the matching release too, but navigate once per press.
+                    if (key.getAction() == android.view.KeyEvent.ACTION_UP) {
+                        p.setResult(true);
+                        return;
+                    }
+                    if (key.getAction() != android.view.KeyEvent.ACTION_DOWN) return;
+                    View focused = root.findFocus();
+                    List<View> cards = new ArrayList<>();
+                    int selected = -1;
+                    for (int i = 0; i < root.getChildCount(); i++) {
+                        View child = root.getChildAt(i);
+                        if (!task.isInstance(child)) continue;
+                        if (child == focused || (focused != null
+                                && isDescendantOf(focused, child))) selected = cards.size();
+                        cards.add(child);
+                    }
+                    if (cards.isEmpty()) return;
+                    // If native focus is initially absent, start at the first card.
+                    if (selected < 0) selected = 0;
+                    int next = selected;
+                    switch (direction) {
+                        case android.view.KeyEvent.KEYCODE_DPAD_UP:
+                            if (selected >= 2) next = selected - 2;
+                            break;
+                        case android.view.KeyEvent.KEYCODE_DPAD_DOWN:
+                            if (selected + 2 < cards.size()) next = selected + 2;
+                            break;
+                        case android.view.KeyEvent.KEYCODE_DPAD_LEFT:
+                            if ((selected & 1) == 1) next = selected - 1;
+                            break;
+                        case android.view.KeyEvent.KEYCODE_DPAD_RIGHT:
+                            if ((selected & 1) == 0 && selected + 1 < cards.size())
+                                next = selected + 1;
+                            break;
+                        default:
+                            return;
+                    }
+                    // A bounded key must not fall through into carousel logic.
+                    if (next != selected) {
+                        View target = cards.get(next);
+                        target.requestFocus();
+                        XposedHelpers.callMethod(root, "snapToPage", root.indexOfChild(target));
+                        Log.w(TAG, "Native grid key: " + direction
+                                + " card=" + selected + " -> " + next
+                                + " scrollY=" + root.getScrollY());
+                    }
+                    p.setResult(true);
+                }
+            });
+
             // Input route instrumentation; no touch interception changes here.
             // When a vertical gesture doesn't scroll, these messages distinguish
             // a missing input event from a zero native scroll range.
@@ -454,7 +524,8 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
                                 originalSize = nativeCardSize;
                         }
                         Rect target = firstGridCell(originalSize, rootWidth,
-                                context.getResources().getDisplayMetrics().density);
+                                context.getResources().getDisplayMetrics().density,
+                                statusBarOverlap(root));
 
                         // When the active TaskView already has its actual
                         // grid layout, the card itself is authoritative.
@@ -514,7 +585,7 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
                             ? root.getWidth() : root.getResources()
                                     .getDisplayMetrics().widthPixels;
                     Rect cell = firstGridCell(size, width,
-                            root.getResources().getDisplayMetrics().density);
+                            root.getResources().getDisplayMetrics().density, 0);
                     if (cell.isEmpty()) return;
                     // The card dimensions must match the simulator target.
                     // Preserve Quickstep's logical vertical alignment; only
@@ -801,6 +872,14 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
         }
     }
 
+    private static boolean isDescendantOf(View view, View ancestor) {
+        for (android.view.ViewParent parent = view.getParent(); parent != null;
+                parent = parent.getParent()) {
+            if (parent == ancestor) return true;
+        }
+        return false;
+    }
+
     private static boolean activeDismissController(Object controller) {
         Object recents = XposedHelpers.getObjectField(
                 controller, "recentsView");
@@ -919,7 +998,31 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
             else if (child.getClass().getName().endsWith(".ClearAllButton")) clearAll = child;
         }
 
+        // Quickstep's native keyboard focus search sees ClearAllButton as a
+        // focus target even though it sits after the last row. With the
+        // vertical two-column layout it jumps directly from page 0 to the
+        // final page (observed 0 -> 10). Clear All is intentionally disabled
+        // in this BB UI grid; exclude it from native focus search without
+        // intercepting keys or changing TaskView focus handling.
+        if (clearAll != null && clearAll.isFocusable()) {
+            clearAll.setFocusable(false);
+            clearAll.setFocusableInTouchMode(false);
+            Log.w(TAG, "Native ClearAllButton excluded from grid focus navigation");
+        }
+
+        if (place && !FOCUS_DIAGNOSTICS.containsKey(root)) {
+            FOCUS_DIAGNOSTICS.put(root, Boolean.TRUE);
+            // Observe native Android focus without intercepting key events,
+            // creating a parallel selector, or changing the focus target.
+            root.getViewTreeObserver().addOnGlobalFocusChangeListener((from, to) ->
+                    Log.w(TAG, "Native Recents focus: from="
+                            + (from == null ? "none" : from.getClass().getSimpleName())
+                            + " to=" + (to == null ? "none" : to.getClass().getSimpleName())
+                            + " currentPage=" + XposedHelpers.callMethod(root, "getCurrentPage")
+                            + " scrollY=" + root.getScrollY()));
+        }
         int gap = dp(root, 8);
+        int topInset = statusBarOverlap(root);
         int width = (root.getWidth() - gap * 3) / 2;
         int rowHeight = 0;
         for (View card : cards)
@@ -931,7 +1034,7 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
 
         int rowStep = rowHeight + gap;
         int rows = (cards.size() + 1) / 2;
-        int contentHeight = gap + rows * rowStep + gap;
+        int contentHeight = topInset + gap + rows * rowStep + gap;
         if (clearAll != null)
             contentHeight += clearAll.getMeasuredHeight() + gap;
         int maxScroll = Math.max(0, contentHeight - root.getHeight());
@@ -941,7 +1044,11 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
         if (place) {
             String geometry = "tasks=" + cards.size()
                     + " rows=" + rows + " rowStep=" + rowStep
-                    + " height=" + root.getHeight() + " maxScroll=" + maxScroll;
+                    + " height=" + root.getHeight() + " statusOverlap=" + topInset
+                     + " maxScroll=" + maxScroll
+                     + " currentPage=" + XposedHelpers.callMethod(root, "getCurrentPage")
+                     + " focus=" + (root.findFocus() == null ? "none"
+                             : root.findFocus().getClass().getSimpleName());
             if (!geometry.equals(lastScrollGeometry)) {
                 lastScrollGeometry = geometry;
                 Log.w(TAG, "Native vertical grid geometry: " + geometry);
@@ -958,13 +1065,13 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
             // translationX/Y; never cancel those transforms inside layout.
             int x = gap + col * (width + gap)
                     + (width - card.getMeasuredWidth()) / 2;
-            int y = gap + row * rowStep;
+            int y = topInset + gap + row * rowStep;
             if (place) card.layout(x, y, x + card.getMeasuredWidth(),
                     y + card.getMeasuredHeight());
         }
         if (clearAll != null && place) {
             int x = (root.getWidth() - clearAll.getMeasuredWidth()) / 2;
-            int y = gap + rows * rowStep;
+            int y = topInset + gap + rows * rowStep;
             clearAll.layout(x, y, x + clearAll.getMeasuredWidth(),
                     y + clearAll.getMeasuredHeight());
         }
@@ -994,14 +1101,27 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
 
     /** Shared source-of-truth for grid card measurement and animation landing. */
     private static Rect firstGridCell(Rect nativeTaskSize, int rootWidth,
-            float density) {
+            float density, int topInset) {
         if (nativeTaskSize == null || nativeTaskSize.isEmpty()) return new Rect();
         int gap = Math.round(8f * density);
         int cardWidth = (rootWidth - gap * 3) / 2;
         if (cardWidth <= 0) return new Rect();
         int cardHeight = Math.max(1, Math.round(nativeTaskSize.height()
                 * cardWidth / (float) nativeTaskSize.width()));
-        return new Rect(gap, gap, gap + cardWidth, gap + cardHeight);
+        return new Rect(gap, topInset + gap, gap + cardWidth,
+                topInset + gap + cardHeight);
+    }
+
+    /** Native status-bar inset overlapping RecentsView in local pixels. */
+    private static int statusBarOverlap(View root) {
+        if (root == null || !root.isAttachedToWindow()) return 0;
+        WindowInsets insets = root.getRootWindowInsets();
+        if (insets == null) return 0;
+        int statusTop = insets.getInsets(WindowInsets.Type.statusBars()).top;
+        if (statusTop <= 0) return 0;
+        int[] location = new int[2];
+        root.getLocationOnScreen(location);
+        return Math.max(0, statusTop - Math.max(0, location[1]));
     }
 
     private static int dp(View view, int size) {
