@@ -31,15 +31,18 @@ final class SystemBb7ComposeVisuals {
     private SystemBb7ComposeVisuals() {}
 
     static void install(String packageName, ClassLoader loader) {
-        installMaterialColors(loader);
+        installMaterialColors(loader,
+                "androidx.compose.material3.ColorScheme", "Material3");
+        installMaterialColors(loader,
+                "androidx.compose.material.Colors", "Material2");
         installMaterialShapes(loader);
     }
 
-    private static void installMaterialColors(ClassLoader loader) {
-        Class<?> scheme = XposedHelpers.findClassIfExists(
-                "androidx.compose.material3.ColorScheme", loader);
+    private static void installMaterialColors(ClassLoader loader,
+            String schemeClass, String family) {
+        Class<?> scheme = XposedHelpers.findClassIfExists(schemeClass, loader);
         if (scheme == null) {
-            Log.i(TAG, "Material3 ColorScheme absent in this OS process");
+            Log.i(TAG, family + " theme absent in this OS process");
             return;
         }
         int count = 0;
@@ -58,7 +61,7 @@ final class SystemBb7ComposeVisuals {
                         int rgb = mappedColor(token, p);
                         param.setResult((((long) rgb) & 0xffffffffL) << 32);
                         if (COLOR_LOG.compareAndSet(false, true))
-                            Log.i(TAG, "Shared Material3 system palette active: "
+                            Log.i(TAG, "Shared " + family + " system palette active: "
                                     + token + " dark="
                                     + (p == BB7Theme.Palette.DARK));
                     }
@@ -66,10 +69,10 @@ final class SystemBb7ComposeVisuals {
                 count++;
             } catch (Throwable error) {
                 if (ERROR_LOG.compareAndSet(false, true))
-                    Log.w(TAG, "Material3 palette getter unchanged", error);
+                    Log.w(TAG, family + " palette getter unchanged", error);
             }
         }
-        Log.i(TAG, "Shared Material3 palette getters=" + count);
+        Log.i(TAG, "Shared " + family + " palette getters=" + count);
     }
 
     /** Kotlin Color inline-class getter names may have a mangled suffix. */
@@ -78,6 +81,7 @@ final class SystemBb7ComposeVisuals {
         // getSurfaceContainer. Only map known Material3 ColorScheme properties.
         final String[] names = {
                 "OnPrimaryContainer", "OnSecondaryContainer", "OnSurfaceVariant",
+                "PrimaryVariant", "SecondaryVariant",
                 "SurfaceContainerHighest", "SurfaceContainerLowest",
                 "SurfaceContainerHigh", "SurfaceContainerLow", "SurfaceContainer",
                 "PrimaryContainer", "SecondaryContainer", "InverseOnSurface",
@@ -122,6 +126,10 @@ final class SystemBb7ComposeVisuals {
             case "Primary":
             case "SurfaceTint":
                 return BB7Theme.BLUE_MIDDLE;
+            case "PrimaryVariant":
+                return BB7Theme.BLUE_BOTTOM;
+            case "SecondaryVariant":
+                return p.divider;
             case "Secondary":
                 return p.actionText;
             case "OnPrimary":
@@ -181,6 +189,10 @@ final class SystemBb7ComposeVisuals {
         // Shape-token getters must be squared. Theme-only overrides miss
         // components whose defaults use Material3's own token shapes.
         String[] types = {
+                "androidx.compose.material.Shapes",
+                "androidx.compose.material.CardDefaults",
+                "androidx.compose.material.ButtonDefaults",
+                "androidx.compose.material.AlertDialogDefaults",
                 "androidx.compose.material3.Shapes",
                 "androidx.compose.material3.ShapeDefaults",
                 "androidx.compose.material3.tokens.ShapeTokens",
@@ -212,7 +224,7 @@ final class SystemBb7ComposeVisuals {
                         @Override protected void beforeHookedMethod(MethodHookParam param) {
                             param.setResult(replacement);
                             if (SHAPE_LOG.compareAndSet(false, true))
-                                Log.i(TAG, "Shared Material3 system shapes squared: "
+                                Log.i(TAG, "Shared Compose system shapes squared: "
                                         + className + "." + name);
                         }
                     });
@@ -223,7 +235,7 @@ final class SystemBb7ComposeVisuals {
                 }
             }
         }
-        Log.i(TAG, "Shared Material3 squared shape getters=" + count);
+        Log.i(TAG, "Shared Compose squared shape getters=" + count);
     }
 
     private static Context currentApplication(ClassLoader loader) {
