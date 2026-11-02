@@ -1,55 +1,74 @@
-# OS-owned BBOS7 visual layer (experimental)
+# Root-level BBOS7 system appearance (experimental)
 
-**Branch:** `feat/bb7-system-visual-layer` (master remains unchanged until device verification).
+**Branch:** `feat/bb7-root-ui-presentation`, based on the previously
+unmerged `feat/bb7-system-visual-layer` work. Neither branch is merged.
 
-One Vector/LSPosed APK now exposes shared BBOS7 visuals in **OS-owned,
-system-installed processes only**. This covers native Android
-`Resources.Theme.resolveAttribute` background/accent colors, native
-`AbsListView` selection, SettingsLib rounded preference backgrounds
-(`View.setBackgroundResource`), preference list side padding, Material
-Components `MaterialShapeDrawable` shapes, Material3 Compose
-`ColorScheme` and shape token getters, and native list-focus gradients.
-Existing Settings focus, SystemUI notification/shade and Quickstep
-navigation/focus hooks are preserved. No app-specific screen layouts are
-rewritten, and no key event behavior is changed.
+This implementation uses Android's **common framework endpoints** instead
+of per-screen or per-submenu styling:
 
-The runtime guard requires an installed Android/Lineage OS package name
-(`com.android.*`, `org.lineageos.*`, or the Android permission controller)
-**and** the system-app flag. Third-party application processes are excluded,
-even if they are manually added to Vector scope. Android framework process
-(`android`) is intentionally excluded; modifying framework resources
-globally would also change third-party apps.
+- `IXposedHookZygoteInit` hooks native `View.setBackgroundDrawable`,
+  covering XML-inflated and programmatic backgrounds, including nested
+  StateList/Layer/Inset/Ripple drawable shapes.
+- `Instrumentation.callApplicationOnCreate` installs one shared skin per
+  OS-owned application/ClassLoader: native theme colors, SettingsLib
+  preference rows, native lists and dialogs, Material Components, and
+  both **Material2 and Material3 Compose Colors/Shapes**.
+- The reusable preference RecyclerView hooks remove side padding after
+  adapter installation and remove row margins on attachment.
+- Native keyboard/trackpad focus, menu actions, and existing BB UI
+  SystemUI/Recents functionality remain Android-owned.
 
-**Vector scope is mandatory per process.** Existing four BB UI scopes work
-unchanged; additional Android/Lineage OS packages with visible UI must be
-enabled under BB UI in Vector to receive this skin. A system/Android scope
-alone does not automatically inject into every other app process. Not every
-custom system widget follows these framework/shared APIs; this is broad
-source-level coverage, not a claim that every pixel in the ROM is skinned.
+The shared Zygote callbacks **check each View/Application Context** before
+making any styling change: only system-installed Android/Lineage OS
+packages qualify (Android framework UI, `com.android.*`,
+`org.lineageos.*`, Android Permission Controller/Package Installer).
+Third-party app-specific UI is excluded even though the root hook is
+registered earlier in the process lifecycle.
+
+**Scope and verification:** Legacy Vector/LSPosed may still restrict
+module injection according to enabled scopes. The Zygote path is intended
+to broaden coverage but must be verified on the Q25 after one reboot.
+The existing BB UI Vector scopes remain necessary for the original
+Settings, SystemUI and Quickstep features. Do not assume unsupported
+custom-rendered screens are fully skinned: Android has more than one
+rendering engine, and hard-coded custom UI can bypass theme primitives.
+
+## Build / inspect in Settings without reboot
 
 ```sh
 cd ~/Projects/bb-ui
 git fetch origin
-git switch feat/bb7-system-visual-layer
+git switch feat/bb7-root-ui-presentation
 git pull --ff-only
 ./gradlew :app:testDebugUnitTest :app:assembleDebug &&
 adb install -r app/build/outputs/apk/debug/app-debug.apk &&
 adb shell am force-stop com.android.settings &&
 adb shell am start -a android.settings.SETTINGS
-adb logcat -d -s 'BB7-SystemSkin:V' 'BB7-Focus:V' '*:S' | tail -90
+adb logcat -d -s 'BB7-SystemRoot:V' 'BB7-SystemSkin:V' '*:S' | tail -80
 ```
 
-Rollback just the new layer, without disabling existing BB UI hooks:
+Restarting Settings tests the legacy scoped fallback. For the new **Zygote
+bootstrap**, an Android reboot is needed after installing this APK, and the
+module must be enabled in Vector. Check for
+`Zygote`/`Framework Application-onCreate skin bootstrap active` and
+`Applying root-based BB7 theme to OS application` in the logcat tags above.
+
+## New-layer rollback without uninstalling working BB UI features
+
 ```sh
 adb shell setprop debug.bb7.systemskin.enabled false
 adb shell am force-stop com.android.settings
 adb shell am start -a android.settings.SETTINGS
-adb shell am crash com.android.systemui
 ```
-Restore with the same property set to `true` and restart affected
-processes. This property is not persistent across reboot; the new layer
-defaults to enabled. The earlier failed edge-to-edge-popup branch is not
-included.
+
+The Zygote/native root hook checks the switch at runtime; the remaining
+theme hooks are skipped when each process starts. The setting defaults to
+enabled if not set and is reset on reboot. To test again, use the same
+`setprop` with `true` and restart Settings.
+
+**Warning:** Zygote/framework hooks are experimental and can affect system
+process stability. Keep the previously verified APK available. No merge
+until successful compilation and device testing.
 
 ---
 
