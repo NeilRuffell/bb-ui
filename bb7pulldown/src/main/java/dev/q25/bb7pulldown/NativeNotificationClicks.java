@@ -179,6 +179,25 @@ final class NativeNotificationClicks {
                 });
         observeConstructor(loader, CLICK_NOTIFIER, "NotificationClickNotifier",
                 object -> nativeClickNotifier = new WeakReference<>(object));
+
+        // If SystemUI constructed its collection before this module's hook
+        // was installed, observe normal collection usage to recover the
+        // genuine instance. No replacement collection is ever created.
+        Class<?> collection = XposedHelpers.findClassIfExists(NOTIF_COLLECTION, loader);
+        if (collection != null) {
+            try {
+                XposedBridge.hookAllMethods(collection, "attach", new XC_MethodHook() {
+                    @Override protected void afterHookedMethod(MethodHookParam param) {
+                        if (!param.hasThrowable()) {
+                            nativeCollection = new WeakReference<>(param.thisObject);
+                            Log.i(TAG, "Native NotifCollection captured via attach");
+                        }
+                    }
+                });
+            } catch (Throwable error) {
+                Log.w(TAG, "Native collection attach observer unavailable", error);
+            }
+        }
     }
 
     private interface Capture { void accept(Object value); }
