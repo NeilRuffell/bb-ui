@@ -1,9 +1,21 @@
 # BB UI
 
-## BB7 Pull-down — native notification opening (v0.5.3)
+## BB7 Pull-down — native notification click lifecycle (v0.5.4)
 
 **Branch:** `feat/bb7-native-notification-click` (from `master`). No code from the abandoned
 `feat/bb7-shade` notification/QS hooks is included.
+
+The notification activation now queries SystemUI's actual NotifCollection entry
+and native row by notification key. Where no row exists, it delegates the original
+notification opening action to the native ActivityStarter, then uses the
+native OnUserInteractionCallback.registerFutureDismissal(..., REASON_CLICK)
+only when Android's FLAG_AUTO_CANCEL applies, and reports the click through
+the existing NotificationClickNotifier. It does not force-clear ongoing
+or non-auto-cancel notifications.
+
+Home uses Android's ACTION_CLOSE_SYSTEM_DIALOGS broadcast, already handled by
+LineageOS CentralSurfacesImpl for the stock shade. This module observes the
+same event and removes its own overlay. Screen-off dismissal is retained.
 
 A separate Vector/LSPosed module, `:bb7pulldown` (`dev.q25.bb7pulldown`),
 intercepts a finger swipe starting in the native status-bar region and presents
