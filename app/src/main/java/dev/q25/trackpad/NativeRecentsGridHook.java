@@ -3,6 +3,7 @@ package dev.q25.trackpad;
 import android.graphics.Rect;
 import android.content.Context;
 import android.content.Intent;
+import android.app.BroadcastOptions;
 import android.provider.Settings;
 import android.util.Log;
 import android.view.View;
@@ -684,7 +685,9 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
                                 "dev.q25.trackpad.action.RECENTS_VISIBILITY");
                         state.setPackage("com.android.systemui");
                         state.putExtra("visible", visible);
-                        root.getContext().sendBroadcast(state);
+                        root.getContext().sendBroadcast(state, null,
+                                BroadcastOptions.makeBasic()
+                                        .setShareIdentityEnabled(true).toBundle());
                         Log.w(TAG, "Native overview visibility notified=" + visible);
                     }
                 }
