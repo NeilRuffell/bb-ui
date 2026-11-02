@@ -1,5 +1,6 @@
 package dev.q25.trackpad.theme;
 
+import android.content.Context;
 import android.content.pm.ApplicationInfo;
 import android.util.Log;
 
@@ -23,6 +24,10 @@ public final class SystemBb7VisualHook implements IXposedHookLoadPackage {
     @Override
     public void handleLoadPackage(XC_LoadPackage.LoadPackageParam load) {
         if (!isOsOwned(load.packageName, load.appInfo)) return;
+        // The legacy framework entry can also be loaded in system_server.
+        // Only actual app/UI processes get appearance hooks.
+        if ("android".equals(load.packageName)
+                && "system".equals(load.processName)) return;
         if (!enabled()) {
             Log.i(TAG, "Shared BB7 skin disabled by debug.bb7.systemskin.enabled");
             return;
@@ -30,6 +35,11 @@ public final class SystemBb7VisualHook implements IXposedHookLoadPackage {
 
         Log.i(TAG, "Installing shared BB7 appearance in " + load.packageName
                 + " process=" + load.processName);
+        try {
+            SystemBb7RootViewHook.install();
+        } catch (Throwable error) {
+            Log.e(TAG, "Root View background endpoint unavailable", error);
+        }
         try {
             SystemBb7NativeTheme.install();
         } catch (Throwable error) {
@@ -65,13 +75,26 @@ public final class SystemBb7VisualHook implements IXposedHookLoadPackage {
         }
     }
 
+    /** Same package boundary for framework Views and the load-package callback. */
+    static boolean isOsOwnedContext(Context context) {
+        if (context == null) return false;
+        try {
+            return isOsOwned(context.getPackageName(),
+                    context.getApplicationInfo());
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
     private static boolean isOsOwned(String packageName, ApplicationInfo info) {
         if (packageName == null || info == null) return false;
         // Include installed Android/Lineage OS packages only. A prefixed,
         // user-installed package does not qualify by name alone.
-        boolean osName = packageName.startsWith("com.android.")
+        boolean osName = "android".equals(packageName)
+                || packageName.startsWith("com.android.")
                 || packageName.startsWith("org.lineageos.")
-                || "com.google.android.permissioncontroller".equals(packageName);
+                || "com.google.android.permissioncontroller".equals(packageName)
+                || "com.google.android.packageinstaller".equals(packageName);
         if (!osName) return false;
         int systemFlags = ApplicationInfo.FLAG_SYSTEM
                 | ApplicationInfo.FLAG_UPDATED_SYSTEM_APP;
