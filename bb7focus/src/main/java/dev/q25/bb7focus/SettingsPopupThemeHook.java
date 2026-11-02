@@ -9,7 +9,6 @@ import android.view.WindowManager;
 
 import java.lang.reflect.Method;
 
-import de.robv.android.xposed.AndroidAppHelper;
 import de.robv.android.xposed.XC_MethodHook;
 import de.robv.android.xposed.XposedBridge;
 import de.robv.android.xposed.XposedHelpers;
@@ -56,7 +55,14 @@ final class SettingsPopupThemeHook {
             try {
                 XposedBridge.hookMethod(method, new XC_MethodHook() {
                     @Override protected void beforeHookedMethod(MethodHookParam param) {
-                        Application app = AndroidAppHelper.currentApplication();
+                        // Xposed API 82 compile stubs do not include AndroidAppHelper.
+                        // Resolve Android's running Application through the
+                        // framework ActivityThread at runtime instead.
+                        Object runningApp = XposedHelpers.callStaticMethod(
+                                XposedHelpers.findClass("android.app.ActivityThread", loader),
+                                "currentApplication");
+                        if (!(runningApp instanceof Application)) return;
+                        Application app = (Application) runningApp;
                         if (app == null || !SETTINGS.equals(app.getPackageName())) return;
                         BB7Theme.Palette palette = BB7Theme.palette(app);
                         // Compose Color for sRGB: ARGB in the high 32 bits,
