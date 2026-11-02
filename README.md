@@ -1,6 +1,6 @@
 # BB UI
 
-## BB7 Pull-down — native notification opening (v0.5.2)
+## BB7 Pull-down — native notification opening (v0.5.3)
 
 **Branch:** `feat/bb7-native-notification-click` (from `master`). No code from the abandoned
 `feat/bb7-shade` notification/QS hooks is included.
@@ -76,11 +76,11 @@ adb logcat -d -s BB7-PullDown:I '*:S'
 
 The module observes `NotificationClicker.register()` and uses the original
 SystemUI notification row when available. If no native row exists, it captures
-the native `ActivityStarter` provided to `NotificationsControllerImpl` and
+the native `ActivityStarter` when LineageOS constructs its SystemUI launcher and
 calls `startPendingIntentDismissingKeyguard()` on the notification's original
 action; it never directly calls `PendingIntent.send()`. If that launcher
 is unavailable or the notification has no opening action, the panel stays
-open and logs why. An ActivityStarter callback reports attempted dispatch,
+open and logs why. If you don't see `Native SystemUI ActivityStarter captured via constructor`\nor `captured via notification constructor` in logcat after SystemUI restarts,\nthe launcher was not captured. An ActivityStarter callback reports attempted dispatch,
 not proof of app foregrounding.
 
 Rollback without a full phone reboot:

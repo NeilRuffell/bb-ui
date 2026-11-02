@@ -28,6 +28,10 @@ final class NativeNotificationClicks {
             "com.android.systemui.statusbar.notification.NotificationClicker";
     private static final String NOTIFICATIONS_CONTROLLER =
             "com.android.systemui.statusbar.notification.init.NotificationsControllerImpl";
+    private static final String NOTIFICATION_ACTIVITY_STARTER =
+            "com.android.systemui.statusbar.phone.StatusBarNotificationActivityStarter";
+    private static final String ACTIVITY_STARTER_IMPL =
+            "com.android.systemui.statusbar.phone.ActivityStarterImpl";
     private static volatile WeakReference<Object> systemActivityStarter =
             new WeakReference<>(null);
 
@@ -66,43 +70,87 @@ final class NativeNotificationClicks {
     }
 
     /**
-     * LineageOS NotificationsControllerImpl.initialize receives the real
-     * StatusBarNotificationActivityStarter supplied by SystemUI's DI graph.
-     * Its mActivityStarter is the platform's existing ActivityStarter service:
-     * no custom intent or activity launch logic is needed.
+     * Capture the existing ActivityStarter at construction time rather than
+     * waiting for NotificationsControllerImpl.initialize(). SystemUI may
+     * initialize its notifications controller before that hook is called.
+     *
+     * LineageOS 24's StatusBarNotificationActivityStarter has the injected
+     * mActivityStarter field; ActivityStarterImpl is the singleton that
+     * implements the native launch API. Hook both normal DI construction
+     * paths, retaining initialize() as a compatibility fallback.
      */
     private static void installActivityStarterObserver(ClassLoader loader) {
+        Class<?> implementation = XposedHelpers.findClassIfExists(
+                ACTIVITY_STARTER_IMPL, loader);
+        if (implementation != null) {
+            try {
+                XposedBridge.hookAllConstructors(implementation, new XC_MethodHook() {
+                    @Override protected void afterHookedMethod(MethodHookParam param) {
+                        if (!param.hasThrowable()) {
+                            captureDirectActivityStarter(param.thisObject, "constructor");
+                        }
+                    }
+                });
+                Log.i(TAG, "SystemUI ActivityStarterImpl constructor observer registered");
+            } catch (Throwable error) {
+                Log.e(TAG, "Unable to observe ActivityStarterImpl construction", error);
+            }
+        } else {
+            Log.w(TAG, "SystemUI ActivityStarterImpl absent in this classloader");
+        }
+
+        Class<?> starter = XposedHelpers.findClassIfExists(
+                NOTIFICATION_ACTIVITY_STARTER, loader);
+        if (starter != null) {
+            try {
+                XposedBridge.hookAllConstructors(starter, new XC_MethodHook() {
+                    @Override protected void afterHookedMethod(MethodHookParam param) {
+                        if (!param.hasThrowable()) {
+                            captureActivityStarter(param.thisObject, "notification constructor");
+                        }
+                    }
+                });
+                Log.i(TAG, "Notification activity starter constructor observer registered");
+            } catch (Throwable error) {
+                Log.e(TAG, "Unable to observe notification starter construction", error);
+            }
+        } else {
+            Log.w(TAG, "StatusBarNotificationActivityStarter absent in this classloader");
+        }
+
         Class<?> controller = XposedHelpers.findClassIfExists(
                 NOTIFICATIONS_CONTROLLER, loader);
-        if (controller == null) {
-            Log.i(TAG, "Native SystemUI notifications controller absent");
-            return;
-        }
-        try {
-            XposedBridge.hookAllMethods(controller, "initialize", new XC_MethodHook() {
-                @Override protected void afterHookedMethod(MethodHookParam param) {
-                    if (param.hasThrowable() || param.args.length < 3) return;
-                    captureActivityStarter(param.args[2]);
-                }
-            });
-            Log.i(TAG, "Native SystemUI ActivityStarter capture registered");
-        } catch (Throwable error) {
-            Log.e(TAG, "Unable to observe SystemUI launch controller", error);
+        if (controller != null) {
+            try {
+                XposedBridge.hookAllMethods(controller, "initialize", new XC_MethodHook() {
+                    @Override protected void afterHookedMethod(MethodHookParam param) {
+                        if (!param.hasThrowable() && param.args.length >= 3) {
+                            captureActivityStarter(param.args[2], "notifications initialize");
+                        }
+                    }
+                });
+                Log.i(TAG, "SystemUI notifications initialize observer registered");
+            } catch (Throwable error) {
+                Log.e(TAG, "Unable to observe SystemUI notifications initialize", error);
+            }
         }
     }
 
-    private static void captureActivityStarter(Object notificationActivityStarter) {
+    private static void captureActivityStarter(Object notificationActivityStarter, String source) {
         if (notificationActivityStarter == null) return;
         try {
-            Object starter = XposedHelpers.getObjectField(
+            Object nativeStarter = XposedHelpers.getObjectField(
                     notificationActivityStarter, "mActivityStarter");
-            if (starter != null) {
-                systemActivityStarter = new WeakReference<>(starter);
-                Log.i(TAG, "Native SystemUI ActivityStarter captured");
-            }
+            captureDirectActivityStarter(nativeStarter, source);
         } catch (Throwable error) {
-            Log.w(TAG, "Unable to obtain SystemUI native activity launcher", error);
+            Log.w(TAG, "Unable to obtain SystemUI native launcher from " + source, error);
         }
+    }
+
+    private static void captureDirectActivityStarter(Object nativeStarter, String source) {
+        if (nativeStarter == null) return;
+        systemActivityStarter = new WeakReference<>(nativeStarter);
+        Log.i(TAG, "Native SystemUI ActivityStarter captured via " + source);
     }
 
     /**

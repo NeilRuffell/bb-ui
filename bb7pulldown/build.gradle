@@ -7,8 +7,8 @@ android {
         applicationId 'dev.q25.bb7pulldown'
         minSdk 33
         targetSdk 28
-        versionCode 8
-        versionName '0.5.2-native-activity-starter-dev'
+        versionCode 9
+        versionName '0.5.3-native-starter-capture-dev'
     }
 }
 
