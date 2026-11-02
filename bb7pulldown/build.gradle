@@ -7,8 +7,8 @@ android {
         applicationId 'dev.q25.bb7pulldown'
         minSdk 33
         targetSdk 28
-        versionCode 16
-        versionName '0.6.0-inline-actions-dev'
+        versionCode 17
+        versionName '0.6.1-statusbar-key-dev'
     }
 }
 
