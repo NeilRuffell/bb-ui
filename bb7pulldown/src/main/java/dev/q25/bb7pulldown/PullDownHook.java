@@ -8,6 +8,7 @@ import android.content.IntentFilter;
 import android.graphics.PixelFormat;
 import android.os.Handler;
 import android.os.Looper;
+import android.view.ViewConfiguration;
 import android.view.KeyEvent;
 import android.content.pm.PackageManager;
 import android.widget.FrameLayout;
@@ -55,6 +56,8 @@ public final class PullDownHook implements IXposedHookLoadPackage {
     private static final String COMMAND_QUEUE = "com.android.systemui.statusbar.CommandQueue";
     private static Object nativeRecentsQueue;
     private static boolean allowOneNativeRecents;
+    // APP_SWITCH DOWN preloads Recents; UP toggles it.
+    private static volatile long lastAppSwitchDownUptime = -1L;
     // Android internal WindowManager.LayoutParams.TYPE_STATUS_BAR_SUB_PANEL
     // is hidden from public SDK stubs; framework value is FIRST_SYSTEM_WINDOW+17.
     private static final int STATUS_BAR_SUB_PANEL_WINDOW_TYPE = 2017;
@@ -127,12 +130,38 @@ public final class PullDownHook implements IXposedHookLoadPackage {
             return;
         }
         try {
+            XposedBridge.hookAllMethods(queue, "preloadRecentApps", new XC_MethodHook() {
+                @Override protected void beforeHookedMethod(MethodHookParam param) {
+                    if (!enabled()) return;
+                    lastAppSwitchDownUptime = SystemClock.uptimeMillis();
+                    Log.i(TAG, "App Switch preload observed; hold timing started");
+                }
+            });
+            XposedBridge.hookAllMethods(queue, "cancelPreloadRecentApps", new XC_MethodHook() {
+                @Override protected void beforeHookedMethod(MethodHookParam param) {
+                    lastAppSwitchDownUptime = -1L;
+                }
+            });
             XposedBridge.hookAllMethods(queue, "toggleRecentApps", new XC_MethodHook() {
                 @Override protected void beforeHookedMethod(MethodHookParam param) {
                     if (!enabled()) return;
                     if (allowOneNativeRecents) {
                         allowOneNativeRecents = false;
-                        Log.i(TAG, "Native Recents requested explicitly by Down");
+                        lastAppSwitchDownUptime = -1L;
+                        Log.i(TAG, "Native Recents explicitly requested");
+                        return;
+                    }
+                    long pressedAt = lastAppSwitchDownUptime;
+                    lastAppSwitchDownUptime = -1L;
+                    long elapsed = pressedAt < 0 ? -1L
+                            : SystemClock.uptimeMillis() - pressedAt;
+                    if (elapsed >= ViewConfiguration.getLongPressTimeout()) {
+                        // Let the original CommandQueue method dispatch native Recents.
+                        new Handler(Looper.getMainLooper()).post(() -> {
+                            if (focusWindow != null) dismissStatusFocus();
+                        });
+                        Log.i(TAG, "BlackBerry long press: opening native Recents (held "
+                                + elapsed + " ms)");
                         return;
                     }
                     View bar = nativeStatusBar.get();
@@ -148,7 +177,8 @@ public final class PullDownHook implements IXposedHookLoadPackage {
                         if (focusWindow != null) dismissStatusFocus();
                         else showStatusFocus(bar.getContext());
                     });
-                    Log.i(TAG, "Native Recents command consumed; foreground app preserved");
+                    Log.i(TAG, "BlackBerry short press: foreground preserved; status-bar focus toggled"
+                            + " (held " + elapsed + " ms)");
                 }
             });
             Log.i(TAG, "Native Recents command interception registered");
@@ -205,13 +235,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
                     }
                     return true;
                 }
-                if (code == KeyEvent.KEYCODE_DPAD_DOWN) {
-                    if (event.getAction() == KeyEvent.ACTION_UP) {
-                        dismissStatusFocus();
-                        openNativeRecents();
-                    }
-                    return true;
-                }
+                if (code == KeyEvent.KEYCODE_DPAD_DOWN) return true;
                 if (code == KeyEvent.KEYCODE_DPAD_UP) return true;
                 if (code == KeyEvent.KEYCODE_DPAD_CENTER || code == KeyEvent.KEYCODE_ENTER
                         || code == KeyEvent.KEYCODE_NUMPAD_ENTER || code == KeyEvent.KEYCODE_SPACE) {
