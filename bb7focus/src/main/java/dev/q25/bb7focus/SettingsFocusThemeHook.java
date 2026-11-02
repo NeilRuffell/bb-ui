@@ -108,10 +108,19 @@ public final class SettingsFocusThemeHook implements IXposedHookLoadPackage {
     }
 
     private static boolean isPreferenceAdapter(Object adapter) {
-        return adapter != null && (
-                isClassOrSubclass(adapter.getClass(), "androidx.preference.PreferenceGroupAdapter")
-                || isClassOrSubclass(adapter.getClass(),
-                        "android.support.v7.preference.PreferenceGroupAdapter"));
+        if (adapter == null) return false;
+        Class<?> type = adapter.getClass();
+        // LineageOS 24 SettingsPreferenceFragment creates
+        // com.android.settings.widget.HighlightablePreferenceGroupAdapter,
+        // which extends SettingsPreferenceGroupAdapter. Match the actual
+        // shared Settings adapter hierarchy before considering fallback types.
+        return isClassOrSubclass(type,
+                    "com.android.settingslib.widget.SettingsPreferenceGroupAdapter")
+                || isClassOrSubclass(type,
+                    "com.android.settings.widget.HighlightablePreferenceGroupAdapter")
+                || isClassOrSubclass(type, "androidx.preference.PreferenceGroupAdapter")
+                || isClassOrSubclass(type,
+                    "android.support.v7.preference.PreferenceGroupAdapter");
     }
 
     /**
@@ -120,8 +129,11 @@ public final class SettingsFocusThemeHook implements IXposedHookLoadPackage {
      * untouched.
      */
     private static View preferenceRowFor(View focused) {
-        if (focused == null || focused instanceof EditText
-                || focused instanceof CompoundButton) return null;
+        // A SwitchPreferenceCompat can focus its nested switch control.
+        // Highlight its enclosing native preference row, while leaving
+        // actual switch focus, checked state and keyboard behavior alone.
+        // Editable inputs remain excluded to preserve the caret/readability.
+        if (focused == null || focused instanceof EditText) return null;
         for (View node = focused; node != null; ) {
             ViewParent parent = node.getParent();
             if (!(parent instanceof View)) return null;
