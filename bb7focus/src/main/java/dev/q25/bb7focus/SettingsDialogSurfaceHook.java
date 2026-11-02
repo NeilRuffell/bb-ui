@@ -6,7 +6,6 @@ import android.graphics.drawable.GradientDrawable;
 import android.util.Log;
 import android.widget.ListView;
 import android.graphics.drawable.Drawable;
-import android.view.View;
 import android.view.Window;
 
 import dev.q25.trackpad.theme.BB7Theme;
@@ -72,8 +71,17 @@ final class SettingsDialogSurfaceHook {
         ListView list = null;
         if (dialog instanceof android.app.AlertDialog) {
             list = ((android.app.AlertDialog) dialog).getListView();
-        } else if (dialog instanceof androidx.appcompat.app.AlertDialog) {
-            list = ((androidx.appcompat.app.AlertDialog) dialog).getListView();
+        } else {
+            // AppCompat is packaged inside Settings, not a compile-time
+            // dependency of this module. Its public getListView() is queried
+            // only on verified AlertDialog subclasses.
+            try {
+                Object result = de.robv.android.xposed.XposedHelpers.callMethod(
+                        dialog, "getListView");
+                if (result instanceof ListView) list = (ListView) result;
+            } catch (Throwable error) {
+                Log.w(TAG, "Unable to obtain native AppCompat choice list", error);
+            }
         }
         if (list == null) {
             Log.i(TAG, "Alert dialog has no native choice list");
