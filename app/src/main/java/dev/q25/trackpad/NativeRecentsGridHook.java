@@ -5,6 +5,7 @@ import android.content.Context;
 import android.provider.Settings;
 import android.util.Log;
 import android.view.View;
+import android.view.WindowInsets;
 import android.view.ViewGroup;
 import android.view.MotionEvent;
 
@@ -454,7 +455,8 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
                                 originalSize = nativeCardSize;
                         }
                         Rect target = firstGridCell(originalSize, rootWidth,
-                                context.getResources().getDisplayMetrics().density);
+                                context.getResources().getDisplayMetrics().density,
+                                statusBarOverlap(root));
 
                         // When the active TaskView already has its actual
                         // grid layout, the card itself is authoritative.
@@ -514,7 +516,7 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
                             ? root.getWidth() : root.getResources()
                                     .getDisplayMetrics().widthPixels;
                     Rect cell = firstGridCell(size, width,
-                            root.getResources().getDisplayMetrics().density);
+                            root.getResources().getDisplayMetrics().density, 0);
                     if (cell.isEmpty()) return;
                     // The card dimensions must match the simulator target.
                     // Preserve Quickstep's logical vertical alignment; only
@@ -920,6 +922,7 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
         }
 
         int gap = dp(root, 8);
+        int topInset = statusBarOverlap(root);
         int width = (root.getWidth() - gap * 3) / 2;
         int rowHeight = 0;
         for (View card : cards)
@@ -931,7 +934,7 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
 
         int rowStep = rowHeight + gap;
         int rows = (cards.size() + 1) / 2;
-        int contentHeight = gap + rows * rowStep + gap;
+        int contentHeight = topInset + gap + rows * rowStep + gap;
         if (clearAll != null)
             contentHeight += clearAll.getMeasuredHeight() + gap;
         int maxScroll = Math.max(0, contentHeight - root.getHeight());
@@ -941,7 +944,11 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
         if (place) {
             String geometry = "tasks=" + cards.size()
                     + " rows=" + rows + " rowStep=" + rowStep
-                    + " height=" + root.getHeight() + " maxScroll=" + maxScroll;
+                    + " height=" + root.getHeight() + " statusOverlap=" + topInset
+                     + " maxScroll=" + maxScroll
+                     + " currentPage=" + XposedHelpers.callMethod(root, "getCurrentPage")
+                     + " focus=" + (root.findFocus() == null ? "none"
+                             : root.findFocus().getClass().getSimpleName());
             if (!geometry.equals(lastScrollGeometry)) {
                 lastScrollGeometry = geometry;
                 Log.w(TAG, "Native vertical grid geometry: " + geometry);
@@ -958,13 +965,13 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
             // translationX/Y; never cancel those transforms inside layout.
             int x = gap + col * (width + gap)
                     + (width - card.getMeasuredWidth()) / 2;
-            int y = gap + row * rowStep;
+            int y = topInset + gap + row * rowStep;
             if (place) card.layout(x, y, x + card.getMeasuredWidth(),
                     y + card.getMeasuredHeight());
         }
         if (clearAll != null && place) {
             int x = (root.getWidth() - clearAll.getMeasuredWidth()) / 2;
-            int y = gap + rows * rowStep;
+            int y = topInset + gap + rows * rowStep;
             clearAll.layout(x, y, x + clearAll.getMeasuredWidth(),
                     y + clearAll.getMeasuredHeight());
         }
@@ -994,14 +1001,27 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
 
     /** Shared source-of-truth for grid card measurement and animation landing. */
     private static Rect firstGridCell(Rect nativeTaskSize, int rootWidth,
-            float density) {
+            float density, int topInset) {
         if (nativeTaskSize == null || nativeTaskSize.isEmpty()) return new Rect();
         int gap = Math.round(8f * density);
         int cardWidth = (rootWidth - gap * 3) / 2;
         if (cardWidth <= 0) return new Rect();
         int cardHeight = Math.max(1, Math.round(nativeTaskSize.height()
                 * cardWidth / (float) nativeTaskSize.width()));
-        return new Rect(gap, gap, gap + cardWidth, gap + cardHeight);
+        return new Rect(gap, topInset + gap, gap + cardWidth,
+                topInset + gap + cardHeight);
+    }
+
+    /** Native status-bar inset overlapping RecentsView in local pixels. */
+    private static int statusBarOverlap(View root) {
+        if (root == null || !root.isAttachedToWindow()) return 0;
+        WindowInsets insets = root.getRootWindowInsets();
+        if (insets == null) return 0;
+        int statusTop = insets.getInsets(WindowInsets.Type.statusBars()).top;
+        if (statusTop <= 0) return 0;
+        int[] location = new int[2];
+        root.getLocationOnScreen(location);
+        return Math.max(0, statusTop - Math.max(0, location[1]));
     }
 
     private static int dp(View view, int size) {
