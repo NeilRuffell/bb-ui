@@ -1,6 +1,9 @@
 package dev.q25.bb7pulldown;
 
 import android.content.Context;
+import android.text.InputType;
+import android.view.inputmethod.EditorInfo;
+import android.widget.EditText;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.drawable.Drawable;
@@ -32,12 +35,29 @@ import java.util.Objects;
 final class TwoColumnPanel extends FrameLayout {
     interface CloseListener { void onClose(); }
     interface OpenNotificationListener { void onOpen(String notificationKey); }
+    interface NotificationActionListener {
+        void onAction(String notificationKey, int actionIndex);
+        void onDismiss(String notificationKey);
+        boolean onReply(String notificationKey, int actionIndex, String reply);
+    }
 
     private static final String TAG = "BB7-PullDown";
     private final CloseListener onClose;
     private final OpenNotificationListener onOpenNotification;
+    private final NotificationActionListener onActions;
     private final List<LinearLayout> notificationRows = new ArrayList<>();
+    // Focus sequence includes each notification, then its native actions,
+    // then its dismiss control, before the next notification.
+    private final List<View> notificationTargets = new ArrayList<>();
+    private final List<String> notificationTargetKeys = new ArrayList<>();
+    private final List<Integer> notificationTargetActions = new ArrayList<>();
+    private final List<TextView> actionButtons = new ArrayList<>();
+    private static final int FOCUS_CARD = -1;
+    private static final int FOCUS_DISMISS = -2;
     private String selectedNotificationKey;
+    private int selectedActionIndex = FOCUS_CARD;
+    private EditText activeReplyInput;
+    private View activeReplyButton;
     private boolean notificationPaneActive;
     private final LinearLayout iconList;
     private final LinearLayout notificationList;
@@ -53,10 +73,11 @@ final class TwoColumnPanel extends FrameLayout {
     private boolean trackingClose;
 
     TwoColumnPanel(Context context, CloseListener close,
-            OpenNotificationListener openNotification) {
+            OpenNotificationListener openNotification, NotificationActionListener actions) {
         super(context);
         onClose = close;
         onOpenNotification = openNotification;
+        onActions = actions;
         setFocusable(true);
         setFocusableInTouchMode(true);
         setBackgroundColor(Color.rgb(16, 20, 26));
@@ -163,6 +184,7 @@ final class TwoColumnPanel extends FrameLayout {
         if (previousAppVanished) {
             notificationPaneActive = false;
             selectedNotificationKey = null;
+            selectedActionIndex = FOCUS_CARD;
         }
 
         iconList.removeAllViews();
@@ -245,14 +267,24 @@ final class TwoColumnPanel extends FrameLayout {
 
         int oldCardIndex = NotificationFocusPolicy.indexOf(
                 renderedCards, selectedNotificationKey);
+        String previousKey = selectedNotificationKey;
         boolean sameApp = Objects.equals(renderedCardPackage, selectedPackage);
         selectedNotificationKey = NotificationFocusPolicy.retainedKey(
                 selected, sameApp ? selectedNotificationKey : null,
                 sameApp ? oldCardIndex : -1);
+        if (!Objects.equals(previousKey, selectedNotificationKey)) {
+            selectedActionIndex = FOCUS_CARD;
+        }
+        activeReplyInput = null;
+        activeReplyButton = null;
         renderedCardPackage = selectedPackage;
         renderedCards = selected;
         notificationList.removeAllViews();
         notificationRows.clear();
+        notificationTargets.clear();
+        notificationTargetKeys.clear();
+        notificationTargetActions.clear();
+        actionButtons.clear();
 
         if (selectedPackage == null) {
             selectedAppHeading.setText("Notifications");
@@ -301,17 +333,20 @@ final class TwoColumnPanel extends FrameLayout {
         card.setOnFocusChangeListener((view, focused) -> {
             if (focused) {
                 notificationPaneActive = true;
-                selectNotification(item.key);
+                selectNotification(item.key, FOCUS_CARD);
             }
         });
         card.setOnClickListener(view -> {
             notificationPaneActive = true;
-            selectNotification(item.key);
+            selectNotification(item.key, FOCUS_CARD);
             view.requestFocus();
             onOpenNotification.onOpen(item.key);
         });
         card.setOnKeyListener((view, keyCode, event) -> onNotificationKey(
                 view, keyCode, event));
+        notificationTargets.add(card);
+        notificationTargetKeys.add(item.key);
+        notificationTargetActions.add(FOCUS_CARD);
         card.setOrientation(LinearLayout.VERTICAL);
         card.setPadding(dp(12), dp(11), dp(12), dp(11));
         GradientDrawable background = new GradientDrawable();
@@ -346,6 +381,14 @@ final class TwoColumnPanel extends FrameLayout {
             card.addView(time, timeParams);
         }
 
+        for (NotificationItem.ActionItem action : item.actions) {
+            addNotificationAction(card, item.key, action.index, action.title,
+                    action.freeFormReply);
+        }
+        if (item.clearable) {
+            addNotificationAction(card, item.key, FOCUS_DISMISS, "Dismiss", false);
+        }
+
         card.setContentDescription((item.title.isEmpty() ? "Notification" : item.title)
                 + (item.text.isEmpty() ? "" : ", " + item.text));
         LinearLayout.LayoutParams cardParams = new LinearLayout.LayoutParams(
@@ -353,6 +396,92 @@ final class TwoColumnPanel extends FrameLayout {
         cardParams.bottomMargin = dp(9);
         card.setLayoutParams(cardParams);
         return card;
+    }
+
+    /** Compact OS 7-style action rows: no secondary menu or long-press. */
+    private void addNotificationAction(LinearLayout card, String key, int actionIndex,
+            String title, boolean reply) {
+        TextView button = text(title.isEmpty() ? "Action" : title,
+                12, Color.rgb(224, 233, 244));
+        button.setFocusable(true);
+        button.setFocusableInTouchMode(true);
+        button.setClickable(true);
+        button.setSingleLine(true);
+        button.setEllipsize(TextUtils.TruncateAt.END);
+        button.setGravity(Gravity.CENTER_VERTICAL);
+        button.setPadding(dp(12), dp(7), dp(10), dp(7));
+        button.setContentDescription(title);
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                LayoutParams.MATCH_PARENT, dp(35));
+        params.topMargin = dp(5);
+        card.addView(button, params);
+        notificationTargets.add(button);
+        notificationTargetKeys.add(key);
+        notificationTargetActions.add(actionIndex);
+        actionButtons.add(button);
+        button.setOnFocusChangeListener((view, focused) -> {
+            if (focused) {
+                notificationPaneActive = true;
+                selectNotification(key, actionIndex);
+            }
+        });
+        button.setOnKeyListener((view, keyCode, event) ->
+                onNotificationKey(view, keyCode, event));
+        button.setOnClickListener(view -> {
+            notificationPaneActive = true;
+            selectNotification(key, actionIndex);
+            view.requestFocus();
+            if (actionIndex == FOCUS_DISMISS) {
+                onActions.onDismiss(key);
+            } else if (reply) {
+                openInlineReply(card, button, key, actionIndex);
+            } else {
+                onActions.onAction(key, actionIndex);
+            }
+        });
+    }
+
+    private void closeInlineReply() {
+        EditText input = activeReplyInput;
+        View button = activeReplyButton;
+        activeReplyInput = null;
+        activeReplyButton = null;
+        if (input != null && input.getParent() instanceof LinearLayout) {
+            ((LinearLayout) input.getParent()).removeView(input);
+        }
+        if (button != null) button.requestFocus();
+    }
+
+    private void openInlineReply(LinearLayout card, View button, String key, int index) {
+        if (activeReplyInput != null) closeInlineReply();
+        EditText input = new EditText(getContext());
+        input.setSingleLine(true);
+        input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+        input.setImeOptions(EditorInfo.IME_ACTION_SEND);
+        input.setHint("Type reply, Enter to send");
+        input.setTextColor(Color.WHITE);
+        input.setHintTextColor(Color.rgb(153, 170, 184));
+        input.setTextSize(13);
+        input.setShowSoftInputOnFocus(false); // Q25 hardware keyboard
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                LayoutParams.MATCH_PARENT, dp(42));
+        params.topMargin = dp(4);
+        card.addView(input, card.indexOfChild(button) + 1, params);
+        activeReplyInput = input;
+        activeReplyButton = button;
+        input.setOnEditorActionListener((view, actionId, event) -> {
+            if (actionId != EditorInfo.IME_ACTION_SEND
+                    && (event == null || event.getKeyCode() != KeyEvent.KEYCODE_ENTER)) {
+                return false;
+            }
+            if (event != null && event.getAction() != KeyEvent.ACTION_UP) return true;
+            String value = input.getText().toString();
+            if (!value.trim().isEmpty() && onActions.onReply(key, index, value)) {
+                closeInlineReply();
+            }
+            return true;
+        });
+        input.requestFocus();
     }
 
     private void enterNotificationPaneFocus() {
@@ -385,44 +514,73 @@ final class TwoColumnPanel extends FrameLayout {
     }
 
     private void focusSelectedNotification() {
-        int index = NotificationFocusPolicy.indexOf(renderedCards, selectedNotificationKey);
-        if (index < 0 || index >= notificationRows.size()) return;
-        LinearLayout target = notificationRows.get(index);
-        target.requestFocus();
+        int index = findFocusTarget(selectedNotificationKey, selectedActionIndex);
+        if (index < 0) index = findFocusTarget(selectedNotificationKey, FOCUS_CARD);
+        if (index < 0) return;
+        notificationTargets.get(index).requestFocus();
         updateNotificationHighlight();
     }
 
-    private void selectNotification(String key) {
-        if (Objects.equals(selectedNotificationKey, key)) {
-            updateNotificationHighlight();
-            return;
+    private int findFocusTarget(String key, int actionIndex) {
+        for (int i = 0; i < notificationTargets.size(); i++) {
+            if (Objects.equals(key, notificationTargetKeys.get(i))
+                    && notificationTargetActions.get(i) == actionIndex) return i;
         }
+        return -1;
+    }
+
+    private void selectNotification(String key, int actionIndex) {
+        boolean changed = !Objects.equals(selectedNotificationKey, key)
+                || selectedActionIndex != actionIndex;
         selectedNotificationKey = key;
+        selectedActionIndex = actionIndex;
         updateNotificationHighlight();
-        Log.i(TAG, "Selected notification index="
-                + NotificationFocusPolicy.indexOf(renderedCards, key)
-                + " of " + renderedCards.size());
+        if (changed) {
+            Log.i(TAG, "Selected notification focus: card="
+                    + (NotificationFocusPolicy.indexOf(renderedCards, key) + 1)
+                    + " action=" + actionIndex);
+        }
     }
 
     private void updateNotificationHighlight() {
         for (int i = 0; i < notificationRows.size(); i++) {
-            LinearLayout row = notificationRows.get(i);
-            boolean selected = notificationPaneActive
+            LinearLayout card = notificationRows.get(i);
+            boolean selected = notificationPaneActive && selectedActionIndex == FOCUS_CARD
                     && Objects.equals(renderedCards.get(i).key, selectedNotificationKey);
-            row.setSelected(selected);
             GradientDrawable background;
             if (selected) {
-                background = new GradientDrawable(
-                        GradientDrawable.Orientation.TOP_BOTTOM,
-                        new int[]{Color.rgb(91, 180, 231), Color.rgb(20, 95, 169)});
-                background.setStroke(dp(1), Color.rgb(180, 226, 251));
+                background = selectedBlueBackground();
             } else {
                 background = new GradientDrawable();
                 background.setColor(Color.rgb(40, 52, 66));
+                background.setCornerRadius(dp(5));
             }
-            background.setCornerRadius(dp(5));
-            row.setBackground(background);
+            card.setBackground(background);
         }
+        for (TextView button : actionButtons) {
+            int target = notificationTargets.indexOf(button);
+            boolean selected = target >= 0 && notificationPaneActive
+                    && Objects.equals(selectedNotificationKey, notificationTargetKeys.get(target))
+                    && selectedActionIndex == notificationTargetActions.get(target);
+            GradientDrawable background;
+            if (selected) {
+                background = selectedBlueBackground();
+            } else {
+                background = new GradientDrawable();
+                background.setColor(Color.rgb(53, 67, 84));
+                background.setCornerRadius(dp(4));
+            }
+            button.setBackground(background);
+        }
+    }
+
+    private GradientDrawable selectedBlueBackground() {
+        GradientDrawable background = new GradientDrawable(
+                GradientDrawable.Orientation.TOP_BOTTOM,
+                new int[]{Color.rgb(91, 180, 231), Color.rgb(20, 95, 169)});
+        background.setStroke(dp(1), Color.rgb(180, 226, 251));
+        background.setCornerRadius(dp(5));
+        return background;
     }
 
     private boolean onNotificationKey(View view, int keyCode, KeyEvent event) {
@@ -430,11 +588,11 @@ final class TwoColumnPanel extends FrameLayout {
             case KeyEvent.KEYCODE_DPAD_UP:
             case KeyEvent.KEYCODE_DPAD_DOWN:
                 if (event.getAction() == KeyEvent.ACTION_DOWN) {
-                    int current = NotificationFocusPolicy.indexOf(
-                            renderedCards, selectedNotificationKey);
+                    int current = notificationTargets.indexOf(view);
                     int direction = keyCode == KeyEvent.KEYCODE_DPAD_UP ? -1 : 1;
-                    int next = AppSelectionPolicy.move(current, direction, notificationRows.size());
-                    if (next >= 0) notificationRows.get(next).requestFocus();
+                    int next = AppSelectionPolicy.move(current, direction,
+                            notificationTargets.size());
+                    if (next >= 0) notificationTargets.get(next).requestFocus();
                 }
                 return true;
             case KeyEvent.KEYCODE_DPAD_LEFT:
@@ -565,7 +723,8 @@ final class TwoColumnPanel extends FrameLayout {
     public boolean dispatchKeyEvent(KeyEvent event) {
         if (event.getKeyCode() == KeyEvent.KEYCODE_BACK) {
             if (event.getAction() == KeyEvent.ACTION_UP) {
-                if (notificationPaneActive) returnToAppIcons();
+                if (activeReplyInput != null) closeInlineReply();
+                else if (notificationPaneActive) returnToAppIcons();
                 else onClose.onClose();
             }
             return true;
