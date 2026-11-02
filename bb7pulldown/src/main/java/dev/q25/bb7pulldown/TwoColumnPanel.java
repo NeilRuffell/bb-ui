@@ -1,5 +1,7 @@
 package dev.q25.bb7pulldown;
 
+import dev.q25.trackpad.theme.BB7Theme;
+
 import android.content.Context;
 import android.text.InputType;
 import android.view.inputmethod.EditorInfo;
@@ -46,6 +48,7 @@ final class TwoColumnPanel extends FrameLayout {
     }
 
     private static final String TAG = "BB7-PullDown";
+    private final BB7Theme.Palette palette;
     private final CloseListener onClose;
     private final StatusZoneListener onStatusZone;
     private int focusedStatusZone = -1;
@@ -82,13 +85,15 @@ final class TwoColumnPanel extends FrameLayout {
             OpenNotificationListener openNotification, NotificationActionListener actions,
             StatusZoneListener statusZone) {
         super(context);
+        palette = BB7Theme.palette(context);
+        Log.i(TAG, "BB7 shade palette: " + (palette == BB7Theme.Palette.DARK ? "dark" : "light"));
         onClose = close;
         onOpenNotification = openNotification;
         onActions = actions;
         onStatusZone = statusZone;
         setFocusable(true);
         setFocusableInTouchMode(true);
-        setBackgroundColor(Color.rgb(16, 20, 26));
+        setBackgroundColor(palette.canvas);
         setContentDescription("BB7 two-column pull-down");
 
         LinearLayout columns = new LinearLayout(context);
@@ -98,7 +103,7 @@ final class TwoColumnPanel extends FrameLayout {
                 LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
 
         FrameLayout left = new FrameLayout(context);
-        left.setBackgroundColor(Color.rgb(34, 42, 52));
+        left.setBackgroundColor(palette.left);
         columns.addView(left, new LinearLayout.LayoutParams(
                 0, LinearLayout.LayoutParams.MATCH_PARENT, PanelRatio.LEFT_WEIGHT));
 
@@ -118,12 +123,12 @@ final class TwoColumnPanel extends FrameLayout {
                 LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
 
         View divider = new View(context);
-        divider.setBackgroundColor(Color.rgb(71, 111, 143));
+        divider.setBackgroundColor(palette.divider);
         left.addView(divider, new FrameLayout.LayoutParams(
                 dp(1), LayoutParams.MATCH_PARENT, Gravity.END));
 
         FrameLayout right = new FrameLayout(context);
-        right.setBackgroundColor(Color.rgb(22, 28, 36));
+        right.setBackgroundColor(palette.right);
         columns.addView(right, new LinearLayout.LayoutParams(
                 0, LinearLayout.LayoutParams.MATCH_PARENT, PanelRatio.RIGHT_WEIGHT));
 
@@ -133,11 +138,11 @@ final class TwoColumnPanel extends FrameLayout {
                 LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
 
         selectedAppHeading = new TextView(context);
-        selectedAppHeading.setTextColor(Color.rgb(215, 231, 244));
+        selectedAppHeading.setTextColor(palette.headingText);
         selectedAppHeading.setTextSize(14);
         selectedAppHeading.setGravity(Gravity.CENTER_VERTICAL);
         selectedAppHeading.setPadding(dp(12), dp(7), dp(12), dp(7));
-        selectedAppHeading.setBackgroundColor(Color.rgb(28, 37, 48));
+        selectedAppHeading.setBackgroundColor(palette.heading);
         rightContent.addView(selectedAppHeading, new LinearLayout.LayoutParams(
                 LayoutParams.MATCH_PARENT, dp(44)));
 
@@ -332,7 +337,7 @@ final class TwoColumnPanel extends FrameLayout {
     }
 
     private void addPlaceholder(String message) {
-        TextView placeholder = text(message, 13, Color.rgb(151, 168, 182));
+        TextView placeholder = text(message, 13, palette.muted);
         placeholder.setPadding(dp(8), dp(20), dp(8), dp(16));
         notificationList.addView(placeholder);
     }
@@ -362,19 +367,21 @@ final class TwoColumnPanel extends FrameLayout {
         card.setOrientation(LinearLayout.VERTICAL);
         card.setPadding(dp(12), dp(11), dp(12), dp(11));
         GradientDrawable background = new GradientDrawable();
-        background.setColor(Color.rgb(40, 52, 66));
+        background.setColor(palette.card);
         background.setCornerRadius(dp(5));
         card.setBackground(background);
 
         TextView title = text(item.title.isEmpty() ? "Notification" : item.title,
-                14, Color.WHITE);
+                14, palette.title);
+        title.setTag(Integer.valueOf(palette.title));
         title.setTypeface(null, android.graphics.Typeface.BOLD);
         title.setMaxLines(2);
         title.setEllipsize(TextUtils.TruncateAt.END);
         card.addView(title);
 
         if (!item.text.isEmpty()) {
-            TextView body = text(item.text, 12, Color.rgb(213, 221, 230));
+            TextView body = text(item.text, 12, palette.body);
+            body.setTag(Integer.valueOf(palette.body));
             body.setMaxLines(8);
             body.setEllipsize(TextUtils.TruncateAt.END);
             LinearLayout.LayoutParams bodyParams = new LinearLayout.LayoutParams(
@@ -386,7 +393,8 @@ final class TwoColumnPanel extends FrameLayout {
         if (item.postedAt > 0) {
             TextView time = text(DateFormat.getTimeFormat(getContext())
                     .format(new Date(item.postedAt)),
-                    10, Color.rgb(153, 170, 184));
+                    10, palette.muted);
+            time.setTag(Integer.valueOf(palette.muted));
             LinearLayout.LayoutParams timeParams = new LinearLayout.LayoutParams(
                     LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT);
             timeParams.topMargin = dp(6);
@@ -414,7 +422,7 @@ final class TwoColumnPanel extends FrameLayout {
     private void addNotificationAction(LinearLayout card, String key, int actionIndex,
             String title, boolean reply) {
         TextView button = text(title.isEmpty() ? "Action" : title,
-                12, Color.rgb(224, 233, 244));
+                12, palette.actionText);
         button.setFocusable(true);
         button.setFocusableInTouchMode(true);
         button.setClickable(true);
@@ -471,8 +479,8 @@ final class TwoColumnPanel extends FrameLayout {
         input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
         input.setImeOptions(EditorInfo.IME_ACTION_SEND);
         input.setHint("Type reply, Enter to send");
-        input.setTextColor(Color.WHITE);
-        input.setHintTextColor(Color.rgb(153, 170, 184));
+        input.setTextColor(palette.title);
+        input.setHintTextColor(palette.muted);
         input.setTextSize(13);
         input.setShowSoftInputOnFocus(false); // Q25 hardware keyboard
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
@@ -566,10 +574,17 @@ final class TwoColumnPanel extends FrameLayout {
                 background = selectedBlueBackground();
             } else {
                 background = new GradientDrawable();
-                background.setColor(Color.rgb(40, 52, 66));
+                background.setColor(palette.card);
                 background.setCornerRadius(dp(5));
             }
             card.setBackground(background);
+            for (int child = 0; child < card.getChildCount(); child++) {
+                View content = card.getChildAt(child);
+                if (content instanceof TextView && content.getTag() instanceof Integer) {
+                    int regularColor = (Integer) content.getTag();
+                    ((TextView) content).setTextColor(selected ? Color.WHITE : regularColor);
+                }
+            }
         }
         for (TextView button : actionButtons) {
             int target = notificationTargets.indexOf(button);
@@ -581,20 +596,16 @@ final class TwoColumnPanel extends FrameLayout {
                 background = selectedBlueBackground();
             } else {
                 background = new GradientDrawable();
-                background.setColor(Color.rgb(53, 67, 84));
+                background.setColor(palette.action);
                 background.setCornerRadius(dp(4));
             }
             button.setBackground(background);
+            button.setTextColor(selected ? Color.WHITE : palette.actionText);
         }
     }
 
     private GradientDrawable selectedBlueBackground() {
-        GradientDrawable background = new GradientDrawable(
-                GradientDrawable.Orientation.TOP_BOTTOM,
-                new int[]{Color.rgb(91, 180, 231), Color.rgb(20, 95, 169)});
-        background.setStroke(dp(1), Color.rgb(180, 226, 251));
-        background.setCornerRadius(dp(5));
-        return background;
+        return BB7Theme.selected(dp(5), dp(1));
     }
 
     private void enterStatusZone() {
@@ -693,12 +704,7 @@ final class TwoColumnPanel extends FrameLayout {
             boolean selected = renderedPackages.get(i).equals(selectedPackage);
             row.setSelected(selected);
             if (selected) {
-                GradientDrawable blue = new GradientDrawable(
-                        GradientDrawable.Orientation.TOP_BOTTOM,
-                        new int[]{Color.rgb(91, 180, 231), Color.rgb(20, 95, 169)});
-                blue.setCornerRadius(dp(3));
-                blue.setStroke(dp(1), Color.rgb(180, 226, 251));
-                row.setBackground(blue);
+                row.setBackground(BB7Theme.selected(dp(3), dp(1)));
             } else {
                 row.setBackground(null);
             }

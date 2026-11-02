@@ -1,5 +1,7 @@
 package dev.q25.bb7pulldown;
 
+import dev.q25.trackpad.theme.BB7Theme;
+
 import android.app.KeyguardManager;
 import android.content.Context;
 import android.content.BroadcastReceiver;
@@ -14,6 +16,8 @@ import android.widget.FrameLayout;
 import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.Drawable;
+import android.graphics.drawable.LayerDrawable;
+import android.graphics.drawable.ColorDrawable;
 import java.lang.ref.WeakReference;
 import android.os.SystemClock;
 import android.util.Log;
@@ -67,7 +71,8 @@ public final class PullDownHook implements IXposedHookLoadPackage {
     private static BroadcastReceiver screenOffReceiver;
     private static Context receiverContext;
     private static WeakReference<View> nativeStatusBar = new WeakReference<>(null);
-    private static Drawable focusOutline;
+    private static Drawable originalStatusBackground;
+    private static View decoratedStatusBar;
     private static WindowManager focusManager;
     private static View focusWindow;
     private static int focusZone;
@@ -386,22 +391,43 @@ public final class PullDownHook implements IXposedHookLoadPackage {
 
     private static void updateStatusFocus(int zone) {
         View bar = nativeStatusBar.get();
+        // Restore the previous bar even if SystemUI replaced the native view.
+        if (bar == null) bar = decoratedStatusBar;
         if (bar == null) return;
-        bar.post(() -> {
-            if (focusOutline != null) {
-                bar.getOverlay().remove(focusOutline);
-                focusOutline = null;
+        final View target = bar;
+        target.post(() -> {
+            if (decoratedStatusBar != null && decoratedStatusBar != target) {
+                decoratedStatusBar.setBackground(originalStatusBackground);
+                decoratedStatusBar = null;
+                originalStatusBackground = null;
             }
-            if (zone < 0 || bar.getWidth() <= 0 || bar.getHeight() <= 0) return;
-            GradientDrawable outline = new GradientDrawable();
-            outline.setColor(Color.argb(45, 91, 180, 231));
-            outline.setStroke(dp(bar.getContext(), 2), Color.rgb(91, 180, 231));
-            outline.setCornerRadius(dp(bar.getContext(), 3));
-            int mid = bar.getWidth() / 2;
-            outline.setBounds(zone == 0 ? 0 : mid, 0,
-                    zone == 0 ? mid : bar.getWidth(), bar.getHeight());
-            focusOutline = outline;
-            bar.getOverlay().add(outline);
+            if (zone < 0) {
+                if (decoratedStatusBar == target) {
+                    target.setBackground(originalStatusBackground);
+                    decoratedStatusBar = null;
+                    originalStatusBackground = null;
+                }
+                return;
+            }
+            int width = target.getWidth();
+            int height = target.getHeight();
+            if (width <= 0 || height <= 0) return;
+            if (decoratedStatusBar != target) {
+                originalStatusBackground = target.getBackground();
+                decoratedStatusBar = target;
+            }
+            // Draw the same opaque, three-stop Settings highlight BEHIND
+            // native status icons. A ViewOverlay would cover those icons.
+            Drawable original = originalStatusBackground != null
+                    ? originalStatusBackground : new ColorDrawable(Color.TRANSPARENT);
+            GradientDrawable selected = BB7Theme.selected(
+                    dp(target.getContext(), 3), dp(target.getContext(), 1));
+            LayerDrawable background = new LayerDrawable(
+                    new Drawable[] { original, selected });
+            int midpoint = width / 2;
+            background.setLayerInset(1, zone == 0 ? 0 : midpoint, 0,
+                    zone == 0 ? width - midpoint : 0, 0);
+            target.setBackground(background);
         });
     }
 

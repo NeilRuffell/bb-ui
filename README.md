@@ -1,3 +1,69 @@
+## BB7 shade follows Android Light/Dark appearance
+
+The BB7 two-column notification panel now resolves Android's standard
+`Configuration.UI_MODE_NIGHT_MASK` when a new panel is created. It uses
+shared theme palettes for the shade background, app-icon column, notification
+column, header, cards, native action rows, text, dividers and inline reply.
+Focused notifications/actions/app icons retain the same BBOS7 blue gradient;
+selected card and action text switches to white for contrast.
+
+There is no custom preference, timer, observer or appearance service. To test
+a theme change, switch Android Light/Dark mode and **reopen the shade**.
+The current panel instance does not live-update while already displayed.
+This modifies styling only; notification handling and keyboard navigation
+are unchanged.
+
+```sh
+cd ~/Projects/bb-ui
+git pull --ff-only
+./gradlew :app:assembleDebug
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+adb shell am crash com.android.systemui
+```
+
+---
+
+## Unified BBOS7 appearance — shared visual tokens
+
+**Branch:** `feat/unified-bb7-visual-theme`, based on merged `master`.
+The single `BB UI` Vector APK compiles `BB7Theme` in the common app
+source root. Settings focused rows, native SystemUI notification focused
+rows, BB7 shade cards/actions, and the status-bar focus outline now
+reference the same theme constants (blue gradient, focus border, primary
+and secondary text, graphite pane surfaces).
+
+This change is visual only. Existing trackpad focus logic, physical key
+handling, notification actions, SystemUI shade ownership, and Quickstep
+task layout/navigation are unchanged. The native Quickstep task cards
+retain their existing platform styling at this stage; their focus rendering
+is intentionally not replaced until a device-proven hook is identified.
+This avoids introducing a second focus/navigation pipeline.
+
+Only the unified `:app` APK is built. Retain the existing single
+`BB UI` module and its four scopes in Vector. The retired BB7 Appearance
+and BB7 Pull-down APKs must remain disabled to avoid duplicate hooks.
+
+```sh
+cd ~/Projects/bb-ui
+git fetch origin
+git switch feat/unified-bb7-visual-theme
+git pull --ff-only
+./gradlew :app:assembleDebug
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+adb shell am force-stop com.android.settings
+adb shell am force-stop com.android.launcher3
+adb shell am start -a android.intent.action.MAIN -c android.intent.category.HOME
+adb shell am crash com.android.systemui
+```
+
+Validate that only one Settings row highlights at once, native
+notification focus still clears when moving away, and BB7 notification
+cards/actions and status zones share a consistent blue tone.
+Check the native 2×2 Recents grid and BlackBerry key behavior for regressions.
+Do not merge until device testing passes.
+
+---
+
 # One Vector module: BB UI (migration candidate)
 
 **Branch:** `feat/unified-vector-module`, derived from the device-tested
