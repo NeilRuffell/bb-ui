@@ -427,8 +427,9 @@ feature branch.
 Branch: `feat/bb7-blackberry-key-statusbar-focus`.
 
 The normal BB7 pull-down still runs in the `com.android.systemui` scope.
-The global hardware-key interception additionally requires the Android framework
-(`android`, system_server) scope in Vector/LSPosed. **Do not enable that
+The global hardware-key interception requires Vector's special **System Framework**
+(`system`, user 0) scope, **not** the separate `android` app-process scope.
+The legacy callback reports `packageName=android`, `processName=system_server`. **Do not enable that
 additional scope without a way to recover via ADB.**
 
 The shortcut is inactive by default. First identify the physical BlackBerry
