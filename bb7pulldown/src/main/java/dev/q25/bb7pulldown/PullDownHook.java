@@ -121,8 +121,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
     }
 
     private static void installFocusReceiver() {
-        // This receiver only accepts broadcasts from callers holding the
-        // platform STATUS_BAR_SERVICE permission (system_server).
+        // Validate the Quickstep sender UID before accepting any focus request.
         focusReceiver = new BroadcastReceiver() {
             @Override public void onReceive(Context context, Intent intent) {
                 if (!FOCUS_ACTION.equals(intent.getAction()) || !enabled()
@@ -148,7 +147,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
                     null, new Handler(Looper.getMainLooper()),
                     Context.RECEIVER_EXPORTED);
             focusReceiverRegistered = true;
-            Log.i(TAG, "Protected BlackBerry key focus receiver registered");
+            Log.i(TAG, "Unified Overview status focus receiver registered");
         } catch (Throwable error) {
             Log.e(TAG, "BlackBerry key focus receiver registration failed", error);
         }
@@ -218,6 +217,9 @@ public final class PullDownHook implements IXposedHookLoadPackage {
                     if (event.getAction() == KeyEvent.ACTION_UP) {
                         int selected = focusZone;
                         dismissStatusFocus();
+                        // Leave native Overview before opening either destination;
+                        // otherwise the concealed grid would remain behind it.
+                        signalLauncher(getContext(), EXIT_ACTION);
                         if (selected == 0) showPanel(getContext());
                         else showSystemControls(getContext());
                     }
