@@ -319,6 +319,9 @@ final class TwoColumnPanel extends FrameLayout {
         }
         if (notificationPaneActive && notificationRows.isEmpty()) {
             returnToAppIcons();
+        } else if (focusedStatusZone >= 0) {
+            // A live notification refresh must not steal focus from the status bar.
+            updateNotificationHighlight();
         } else if (notificationPaneActive) {
             focusSelectedNotification();
         } else {
