@@ -7,8 +7,8 @@ android {
         applicationId 'dev.q25.trackpad'
         minSdk 33
         targetSdk 28
-        versionCode 38
-        versionName '0.9.8-light-dark-notification-cards-dev'
+        versionCode 39
+        versionName '0.9.9-native-groups-silent-dev'
     }
     // Compile legacy feature sources into this one APK. These directories
     // are source roots only; their former application modules are not built.
