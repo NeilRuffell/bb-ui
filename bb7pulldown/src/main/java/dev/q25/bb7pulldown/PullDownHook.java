@@ -1,5 +1,7 @@
 package dev.q25.bb7pulldown;
 
+import dev.q25.trackpad.theme.BB7Theme;
+
 import android.app.KeyguardManager;
 import android.content.Context;
 import android.content.BroadcastReceiver;
@@ -394,8 +396,8 @@ public final class PullDownHook implements IXposedHookLoadPackage {
             }
             if (zone < 0 || bar.getWidth() <= 0 || bar.getHeight() <= 0) return;
             GradientDrawable outline = new GradientDrawable();
-            outline.setColor(Color.argb(45, 91, 180, 231));
-            outline.setStroke(dp(bar.getContext(), 2), Color.rgb(91, 180, 231));
+            outline.setColor((BB7Theme.BLUE_TOP & 0x00ffffff) | 0x2d000000);
+            outline.setStroke(dp(bar.getContext(), 2), BB7Theme.BLUE_BORDER);
             outline.setCornerRadius(dp(bar.getContext(), 3));
             int mid = bar.getWidth() / 2;
             outline.setBounds(zone == 0 ? 0 : mid, 0,
