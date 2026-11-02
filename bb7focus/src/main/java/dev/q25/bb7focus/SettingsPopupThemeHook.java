@@ -36,6 +36,7 @@ final class SettingsPopupThemeHook {
         SettingsComposeMenuFocusHook.install(loader);
         installComposeMenuPadding(loader);
         installNativeMenuAppearance(loader);
+        SettingsMenuGeometryHook.install(loader);
     }
 
     private static void installComposeMenuColor(ClassLoader loader) {
@@ -162,7 +163,7 @@ final class SettingsPopupThemeHook {
                                 GradientDrawable.Orientation.TOP_BOTTOM,
                                 dark ? new int[]{0xff374657, 0xff273544, 0xff192633}
                                         : new int[]{0xfff9fafc, 0xffedf1f5, 0xffe5eaf0});
-                        surface.setCornerRadius(8f * density);
+                        surface.setCornerRadius(0f);
                         surface.setStroke(lineWidth, palette.divider);
                         XposedHelpers.callMethod(
                                 param.thisObject, "setBackgroundDrawable", surface);
