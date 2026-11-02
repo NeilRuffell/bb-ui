@@ -5,6 +5,7 @@ import android.content.pm.ApplicationInfo;
 import android.util.Log;
 
 import de.robv.android.xposed.IXposedHookLoadPackage;
+import de.robv.android.xposed.IXposedHookZygoteInit;
 import de.robv.android.xposed.callbacks.XC_LoadPackage;
 
 /**
@@ -18,8 +19,26 @@ import de.robv.android.xposed.callbacks.XC_LoadPackage;
  * All hooks affect visual presentation only: no key interception, synthetic
  * input, preference changes, task-stack changes, or package-specific screens.
  */
-public final class SystemBb7VisualHook implements IXposedHookLoadPackage {
+public final class SystemBb7VisualHook
+        implements IXposedHookLoadPackage, IXposedHookZygoteInit {
     private static final String TAG = "BB7-SystemSkin";
+
+    /**
+     * Root framework entry: native View rendering is part of the boot class
+     * loader and is shared by app processes. The callback checks each View's
+     * OS-owned Context, so installed third-party apps remain visually stock.
+     * Compose/Material3 classes are not available here; those remain handled
+     * by their shared per-process theme hooks in handleLoadPackage().
+     */
+    @Override
+    public void initZygote(StartupParam startupParam) {
+        try {
+            SystemBb7RootViewHook.install();
+            Log.i(TAG, "Zygote native View appearance endpoint installed");
+        } catch (Throwable error) {
+            Log.e(TAG, "Unable to install zygote View endpoint", error);
+        }
+    }
 
     @Override
     public void handleLoadPackage(XC_LoadPackage.LoadPackageParam load) {
@@ -62,7 +81,7 @@ public final class SystemBb7VisualHook implements IXposedHookLoadPackage {
         }
     }
 
-    private static boolean enabled() {
+    static boolean enabled() {
         try {
             Class<?> properties = de.robv.android.xposed.XposedHelpers.findClass(
                     "android.os.SystemProperties", null);
