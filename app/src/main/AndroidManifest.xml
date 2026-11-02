@@ -1,7 +1,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application android:label="BB UI" android:description="@string/module_description" android:hasCode="true">
         <meta-data android:name="xposedmodule" android:value="true" />
-        <meta-data android:name="xposeddescription" android:value="Unified BlackBerry UI: Settings, focus styling, status-bar navigation, notifications and Quickstep Recents" />
+        <meta-data android:name="xposeddescription" android:value="Unified BBOS7 UI: OS-owned system visual skin, Settings, status navigation, notifications, and Recents" />
         <meta-data android:name="xposedminversion" android:value="82" />
     </application>
 </manifest>
