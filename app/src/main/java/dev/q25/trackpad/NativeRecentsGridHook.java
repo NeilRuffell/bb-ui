@@ -922,6 +922,18 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
             else if (child.getClass().getName().endsWith(".ClearAllButton")) clearAll = child;
         }
 
+        // Quickstep's native keyboard focus search sees ClearAllButton as a
+        // focus target even though it sits after the last row. With the
+        // vertical two-column layout it jumps directly from page 0 to the
+        // final page (observed 0 -> 10). Clear All is intentionally disabled
+        // in this BB UI grid; exclude it from native focus search without
+        // intercepting keys or changing TaskView focus handling.
+        if (clearAll != null && clearAll.isFocusable()) {
+            clearAll.setFocusable(false);
+            clearAll.setFocusableInTouchMode(false);
+            Log.w(TAG, "Native ClearAllButton excluded from grid focus navigation");
+        }
+
         if (place && !FOCUS_DIAGNOSTICS.containsKey(root)) {
             FOCUS_DIAGNOSTICS.put(root, Boolean.TRUE);
             // Observe native Android focus without intercepting key events,
