@@ -2,6 +2,7 @@ package dev.q25.bb7pulldown;
 
 import android.app.Notification;
 import android.app.PendingIntent;
+import android.app.RemoteInput;
 import android.os.Bundle;
 import android.service.notification.NotificationListenerService;
 import android.service.notification.StatusBarNotification;
@@ -35,6 +36,8 @@ final class SystemUiNotificationObserver {
     // Keys avoid duplicate posts and preserve the insertion order across apps.
     private static final Map<String, NotificationItem> NOTIFICATIONS = new LinkedHashMap<>();
     private static final Map<String, PendingIntent> OPEN_ACTIONS = new LinkedHashMap<>();
+    // Real platform notification references: action intents and clearability are never synthesized.
+    private static final Map<String, StatusBarNotification> ACTIVE_SBNS = new LinkedHashMap<>();
     private static volatile List<String> activePackages = Collections.emptyList();
     private static volatile List<NotificationItem> activeItems = Collections.emptyList();
     private static volatile WeakReference<NotificationListenerService> listener =
@@ -70,6 +73,7 @@ final class SystemUiNotificationObserver {
                     listener = new WeakReference<>((NotificationListenerService) param.thisObject);
                     synchronized (LOCK) {
                         NOTIFICATIONS.put(sbn.getKey(), toItem(sbn));
+                        ACTIVE_SBNS.put(sbn.getKey(), sbn);
                         saveOpenAction(sbn);
                         publishLocked();
                     }
@@ -82,6 +86,7 @@ final class SystemUiNotificationObserver {
                     StatusBarNotification sbn = (StatusBarNotification) param.args[0];
                     synchronized (LOCK) {
                         NOTIFICATIONS.remove(sbn.getKey());
+                        ACTIVE_SBNS.remove(sbn.getKey());
                         OPEN_ACTIONS.remove(sbn.getKey());
                         NativeNotificationClicks.forget(sbn.getKey());
                         publishLocked();
@@ -118,10 +123,12 @@ final class SystemUiNotificationObserver {
             }
             synchronized (LOCK) {
                 NOTIFICATIONS.clear();
+                ACTIVE_SBNS.clear();
                 OPEN_ACTIONS.clear();
                 for (StatusBarNotification sbn : current) {
                     if (sbn == null) continue;
                     NOTIFICATIONS.put(sbn.getKey(), toItem(sbn));
+                    ACTIVE_SBNS.put(sbn.getKey(), sbn);
                     saveOpenAction(sbn);
                 }
                 if (!snapshotLogged || "open".equals(source)) {
@@ -145,6 +152,42 @@ final class SystemUiNotificationObserver {
         synchronized (LOCK) {
             if (!NOTIFICATIONS.containsKey(notificationKey)) return null;
             return OPEN_ACTIONS.get(notificationKey);
+        }
+    }
+
+    /** Get only a currently active, app-supplied Android notification action. */
+    static Notification.Action getAction(String key, int index) {
+        synchronized (LOCK) {
+            StatusBarNotification sbn = ACTIVE_SBNS.get(key);
+            Notification notification = sbn == null ? null : sbn.getNotification();
+            Notification.Action[] actions = notification == null ? null : notification.actions;
+            if (actions == null || index < 0 || index >= actions.length) return null;
+            Notification.Action action = actions[index];
+            return action != null && action.actionIntent != null ? action : null;
+        }
+    }
+
+    /** Native NotificationListenerService cancellation: NMS owns removal and callbacks. */
+    static boolean dismiss(String key) {
+        NotificationListenerService service = listener.get();
+        if (service == null) {
+            Log.w(TAG, "Dismiss unavailable: native SystemUI listener not captured");
+            return false;
+        }
+        synchronized (LOCK) {
+            StatusBarNotification sbn = ACTIVE_SBNS.get(key);
+            if (sbn == null || !sbn.isClearable()) {
+                Log.i(TAG, "Dismiss unavailable: notification is not clearable/active");
+                return false;
+            }
+        }
+        try {
+            service.cancelNotification(key);
+            Log.i(TAG, "Native NotificationListenerService dismissal requested");
+            return true;
+        } catch (Throwable error) {
+            Log.e(TAG, "Native notification dismissal failed", error);
+            return false;
         }
     }
 
@@ -215,8 +258,28 @@ final class SystemUiNotificationObserver {
         if ((body == null || body.length() == 0) && notification != null) {
             body = notification.tickerText;
         }
+        List<NotificationItem.ActionItem> buttons = new ArrayList<>();
+        if (notification != null && notification.actions != null) {
+            for (int i = 0; i < notification.actions.length; i++) {
+                Notification.Action action = notification.actions[i];
+                if (action == null || action.actionIntent == null) continue;
+                RemoteInput[] inputs = action.getRemoteInputs();
+                boolean freeFormReply = false;
+                if (inputs != null) {
+                    for (RemoteInput input : inputs) {
+                        if (input != null && input.getAllowFreeFormInput()) {
+                            freeFormReply = true;
+                            break;
+                        }
+                    }
+                }
+                buttons.add(new NotificationItem.ActionItem(i, plain(action.title, 60),
+                        freeFormReply));
+            }
+        }
         return new NotificationItem(sbn.getKey(), sbn.getPackageName(),
-                plain(title, 140), plain(body, 700), sbn.getPostTime());
+                plain(title, 140), plain(body, 700), sbn.getPostTime(),
+                sbn.isClearable(), buttons);
     }
 
     /** Drop app-supplied formatting before displaying text in the panel. */
