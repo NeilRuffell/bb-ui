@@ -175,6 +175,45 @@ final class NativeNotificationClicks {
         }
     }
 
+    /** Native SystemUI activity launch for a notification action PendingIntent. */
+    static boolean startActionActivity(PendingIntent intent, Runnable onDispatched) {
+        Object starter = systemActivityStarter.get();
+        if (starter == null) {
+            Log.w(TAG, "Native ActivityStarter unavailable for notification action");
+            return false;
+        }
+        try {
+            XposedHelpers.callMethod(starter, "startPendingIntentDismissingKeyguard",
+                    intent, (Runnable) () -> {
+                        Log.i(TAG, "Native notification action ActivityStarter callback");
+                        onDispatched.run();
+                    });
+            return true;
+        } catch (Throwable error) {
+            Log.e(TAG, "Native notification action ActivityStarter failed", error);
+            return false;
+        }
+    }
+
+    /** Match SystemUI NotificationRemoteInputManager's action click notifier. */
+    static void reportActionClick(String key, int index, android.app.Notification.Action action) {
+        Object notifier = clickNotifier.get();
+        Class<?> visibilityType = notificationVisibilityClass;
+        if (notifier == null || visibilityType == null) {
+            Log.w(TAG, "Native notification action click notifier unavailable");
+            return;
+        }
+        try {
+            Object visibility = XposedHelpers.callStaticMethod(visibilityType,
+                    "obtain", key, -1, SystemUiNotificationObserver.itemsSnapshot().size(), false);
+            XposedHelpers.callMethod(notifier, "onNotificationActionClick",
+                    key, index, action, visibility, false);
+            Log.i(TAG, "Native notification action click reported");
+        } catch (Throwable error) {
+            Log.e(TAG, "Native notification action click reporting failed", error);
+        }
+    }
+
     static void forget(String key) {
         if (key == null) return;
         synchronized (CLICKABLE_ROWS) {
