@@ -1,3 +1,115 @@
+# One Vector module: BB UI (migration candidate)
+
+**Branch:** `feat/unified-vector-module`, derived from the device-tested
+`feat/bb7-unified-overview-entry`. Not merged.
+
+This changes the APK packaging, **not** the working functionality:
+`settings.gradle` builds only `:app`. The BB UI app Gradle source set compiles
+the original `bb7focus` and `bb7pulldown` Java classes alongside Settings
+type-to-search and Quickstep Recents. Those directories are retained as
+source roots; they no longer produce separate APKs from the root Gradle build.
+The five original Xposed entry classes retain their class/package names and
+process guards.
+
+| Vector package (new single APK) | Scope | Function |
+| --- | --- | --- |
+| `dev.q25.trackpad` | `com.android.settings` | Settings type-to-search and focused-row appearance |
+| `dev.q25.trackpad` | `com.android.settings.intelligence` | Settings search integration |
+| `dev.q25.trackpad` | `com.android.launcher3` | Native 2-column Recents |
+| `dev.q25.trackpad` | `com.android.systemui` | Native notification focus, BB7 shade, status-bar focus and BlackBerry-key handling |
+
+**Critical migration:** In Vector, add SystemUI scope to **BB UI** and
+ensure the other three scopes listed above are selected. After that, disable
+the old **BB7 Appearance** and **BB7 Pull-down** Vector modules. Do not leave
+their scopes active concurrently with the consolidated APK: that would load
+duplicate hooks into Settings/SystemUI. Do not remove the old APKs until the
+new one passes device tests. This migration does **not** require framework
+`system` or `android` scope for BB UI.
+
+Build and install the **one APK**:
+
+```sh
+cd ~/Projects/bb-ui
+git fetch origin
+git switch feat/unified-vector-module
+git pull --ff-only
+./gradlew clean :app:assembleDebug
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+```
+
+After completing the Vector scope/enablement migration, restart the affected
+processes **without root or reboot**:
+
+```sh
+adb shell settings put global bb_ui_vertical_recents 1
+adb shell setprop debug.bb7pulldown.enabled true
+adb shell am force-stop com.android.settings
+adb shell am force-stop com.android.settings.intelligence
+adb shell am force-stop com.android.launcher3
+adb shell am start -a android.intent.action.MAIN -c android.intent.category.HOME
+adb shell am crash com.android.systemui
+```
+
+Test: Settings search and focus highlighting; BlackBerry key leaves the active
+app on screen and focuses status bar; Left/Right switches zones; Enter
+opens Notifications or system controls; Down reveals native Recents; Back
+dismisses focus; 2×2 Recents and native notification actions remain functional.
+
+If this build fails or regresses, disable consolidated BB UI's new
+`com.android.systemui` scope, re-enable the former two modules with their
+original scopes, and reinstall the last verified app APK if necessary.
+**Compilation and Q25 device testing are pending.**
+
+---
+
+## Unified BlackBerry-key status navigation (experimental)
+
+**Branch:** `feat/bb7-unified-overview-entry`.
+
+The BlackBerry key is still mapped by Android to its **Recents command**, but
+the BB7 Pull-down module intercepts **SystemUI's CommandQueue.toggleRecentApps()**
+before it forwards the request to Quickstep. SystemUI displays only a
+focusable status-bar-height navigation window. The foreground app remains
+visible underneath: no Overview transition is started, no Recents activity
+is opened, and no task grid is drawn or concealed.
+
+- Left/Right moves between the Notifications and System Controls zones.
+- Click/Enter opens the chosen destination without entering Overview.
+- Back closes status-bar focus, returning input to the foreground application.
+- Down dismisses status-bar focus and explicitly forwards one native Recents
+  command, revealing the unchanged existing 2-column Quickstep grid.
+
+The prior experiment that entered Quickstep and made RecentsView transparent
+has been **removed**. The app module's existing Recents implementation has
+been restored unchanged. No framework/system_server hook is used.
+
+This catches the SystemUI `toggleRecentApps` route. Device validation must
+confirm that the Q25 BlackBerry key uses that route on this build.
+If the status bar view is unavailable or the module is disabled, the
+original Android Recents command is left intact.
+
+Build/install both modules (the app APK removes the previous concealment code):
+
+```sh
+cd ~/Projects/bb-ui
+git fetch origin
+git switch feat/bb7-unified-overview-entry
+git pull --ff-only
+./gradlew :app:assembleDebug :bb7pulldown:assembleDebug
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+adb install -r bb7pulldown/build/outputs/apk/debug/bb7pulldown-debug.apk
+adb shell settings put global bb_ui_vertical_recents 1
+adb shell setprop debug.bb7pulldown.enabled true
+adb shell am force-stop com.android.launcher3
+adb shell am start -a android.intent.action.MAIN -c android.intent.category.HOME
+adb shell am crash com.android.systemui
+```
+
+Diagnostics: `adb logcat -d -s BB7-PullDown:I BB-UI-Recents:W '*:S'`.
+This is unverified on the Q25; do not merge until foreground-app preservation,
+status navigation, Back, Down, and notification activation are confirmed.
+
+---
 # BB UI
 
 ## BB7 Pull-down — inline native notification actions (v0.6.0)
