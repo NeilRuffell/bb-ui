@@ -10,7 +10,8 @@ and native row by notification key. Where no row exists, it delegates the origin
 notification opening action to the native ActivityStarter, then uses the
 native OnUserInteractionCallback.registerFutureDismissal(..., REASON_CLICK)
 only when Android's FLAG_AUTO_CANCEL applies, and reports the click through
-the existing NotificationClickNotifier. It does not force-clear ongoing
+the existing NotificationClickNotifier. Notifications that Android treats as
+bubbles use the existing SystemUI bubble expansion method. It does not force-clear ongoing
 or non-auto-cancel notifications.
 
 Home uses Android's ACTION_CLOSE_SYSTEM_DIALOGS broadcast, already handled by
@@ -47,9 +48,11 @@ delegates to the existing native SystemUI notification-row click handler
 when a native row is available. When no stock row has been inflated, it
 delegates the notification's original opening PendingIntent to LineageOS's
 existing SystemUI ActivityStarter (which handles Android background launches).
-The full stock row-click path additionally handles bubbles, auto-cancel and
-notification click reporting; those additional semantics are not guaranteed
-for notifications using the ActivityStarter fallback. Back returns to the same app icon, then Back again
+With no native row, the fallback uses the actual NotifCollection entry and
+the stock OnUserInteractionCallback/NotificationClickNotifier for click
+reporting and FLAG_AUTO_CANCEL, and the native BubblesManager for bubbles.
+Notifications not marked auto-cancelable remain in the shade, as on Android.
+No direct notification cancellation method is invoked. Back returns to the same app icon, then Back again
 closes the pull-down. Touch can tap apps and notification cards directly.
 Left/Right never changes navigation levels. Notifications without a
 native clickable row and no original opening PendingIntent remain selectable,
