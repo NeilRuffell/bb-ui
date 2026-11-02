@@ -129,8 +129,11 @@ public final class SettingsFocusThemeHook implements IXposedHookLoadPackage {
      * untouched.
      */
     private static View preferenceRowFor(View focused) {
-        if (focused == null || focused instanceof EditText
-                || focused instanceof CompoundButton) return null;
+        // A SwitchPreferenceCompat can focus its nested switch control.
+        // Highlight its enclosing native preference row, while leaving
+        // actual switch focus, checked state and keyboard behavior alone.
+        // Editable inputs remain excluded to preserve the caret/readability.
+        if (focused == null || focused instanceof EditText) return null;
         for (View node = focused; node != null; ) {
             ViewParent parent = node.getParent();
             if (!(parent instanceof View)) return null;
