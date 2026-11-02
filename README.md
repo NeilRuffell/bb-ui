@@ -14,11 +14,13 @@ with the same no-native-entry representation used by LineageOS's
 dependency on a captured visibility-provider instance.
 
 LineageOS `NotificationManagerService.onNotificationClick()` performs stock
-cancellation of notifications eligible for auto-cancel; persistent, foreground
-and other non-eligible notifications remain. There is **no** direct cancellation,
-custom `FutureDismissal`, synthetic notification or bubble-dispatch code in
-this module. If SystemUI click reporting services are unavailable, this is
-logged rather than replaced with a custom clearing algorithm.
+auto-cancellation after a notification is opened; persistent, foreground
+and other non-eligible notifications remain. The module adds no custom
+automatic dismissal, `FutureDismissal`, synthetic notification or bubble
+handling. A separate, explicitly selected **Dismiss** control calls Android's
+native notification listener cancellation API only for clearable notifications.
+If SystemUI click reporting services are unavailable, this is logged rather
+than replaced with a custom clearing algorithm.
 
 Android 17 requires the `RECEIVER_NOT_EXPORTED` flag when registering
 the Home/system-dialog receiver. If that mixed-action registration is
@@ -90,7 +92,7 @@ on the lock screen.
 begin on the visible status bar while enabled. Fullscreen immersive apps
 that hide the status bar may not expose that gesture source. It does not
 intercept other SystemUI routes that open the stock shade. This stage
-only tests the global pull-down and the 15/85 layout.
+adds inline Android notification actions to the validated 15/85 layout.
 
 ### Build and enable
 
