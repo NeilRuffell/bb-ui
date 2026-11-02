@@ -297,6 +297,74 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
                 }
             });
 
+            // Quickstep's stock RecentsView.dispatchKeyEvent navigates a
+            // linear carousel (including treating Up and Down as page-next).
+            // In our two-column grid, map only hardware directional keys to
+            // physical card neighbors. Continue using real TaskView focus and
+            // PagedView.snapToPage, with no synthetic events or extra selector.
+            XposedBridge.hookAllMethods(recents, "dispatchKeyEvent",
+                    new XC_MethodHook() {
+                @Override protected void beforeHookedMethod(MethodHookParam p) {
+                    if (p.args.length == 0 || !(p.args[0] instanceof android.view.KeyEvent))
+                        return;
+                    ViewGroup root = (ViewGroup) p.thisObject;
+                    if (!active(root)) return;
+                    android.view.KeyEvent key = (android.view.KeyEvent) p.args[0];
+                    int direction = key.getKeyCode();
+                    if (direction != android.view.KeyEvent.KEYCODE_DPAD_UP
+                            && direction != android.view.KeyEvent.KEYCODE_DPAD_DOWN
+                            && direction != android.view.KeyEvent.KEYCODE_DPAD_LEFT
+                            && direction != android.view.KeyEvent.KEYCODE_DPAD_RIGHT) return;
+                    // Consume the matching release too, but navigate once per press.
+                    if (key.getAction() == android.view.KeyEvent.ACTION_UP) {
+                        p.setResult(true);
+                        return;
+                    }
+                    if (key.getAction() != android.view.KeyEvent.ACTION_DOWN) return;
+                    View focused = root.findFocus();
+                    List<View> cards = new ArrayList<>();
+                    int selected = -1;
+                    for (int i = 0; i < root.getChildCount(); i++) {
+                        View child = root.getChildAt(i);
+                        if (!task.isInstance(child)) continue;
+                        if (child == focused || (focused != null
+                                && isDescendantOf(focused, child))) selected = cards.size();
+                        cards.add(child);
+                    }
+                    if (cards.isEmpty()) return;
+                    // If native focus is initially absent, start at the first card.
+                    if (selected < 0) selected = 0;
+                    int next = selected;
+                    switch (direction) {
+                        case android.view.KeyEvent.KEYCODE_DPAD_UP:
+                            if (selected >= 2) next = selected - 2;
+                            break;
+                        case android.view.KeyEvent.KEYCODE_DPAD_DOWN:
+                            if (selected + 2 < cards.size()) next = selected + 2;
+                            break;
+                        case android.view.KeyEvent.KEYCODE_DPAD_LEFT:
+                            if ((selected & 1) == 1) next = selected - 1;
+                            break;
+                        case android.view.KeyEvent.KEYCODE_DPAD_RIGHT:
+                            if ((selected & 1) == 0 && selected + 1 < cards.size())
+                                next = selected + 1;
+                            break;
+                        default:
+                            return;
+                    }
+                    // A bounded key must not fall through into carousel logic.
+                    if (next != selected) {
+                        View target = cards.get(next);
+                        target.requestFocus();
+                        XposedHelpers.callMethod(root, "snapToPage", root.indexOfChild(target));
+                        Log.w(TAG, "Native grid key: " + direction
+                                + " card=" + selected + " -> " + next
+                                + " scrollY=" + root.getScrollY());
+                    }
+                    p.setResult(true);
+                }
+            });
+
             // Input route instrumentation; no touch interception changes here.
             // When a vertical gesture doesn't scroll, these messages distinguish
             // a missing input event from a zero native scroll range.
@@ -802,6 +870,14 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
         synchronized (SCREENSHOT_PENDING) {
             SCREENSHOT_PENDING.remove(root);
         }
+    }
+
+    private static boolean isDescendantOf(View view, View ancestor) {
+        for (android.view.ViewParent parent = view.getParent(); parent != null;
+                parent = parent.getParent()) {
+            if (parent == ancestor) return true;
+        }
+        return false;
     }
 
     private static boolean activeDismissController(Object controller) {
