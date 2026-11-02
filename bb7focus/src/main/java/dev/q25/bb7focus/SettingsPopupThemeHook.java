@@ -28,8 +28,12 @@ final class SettingsPopupThemeHook {
     private SettingsPopupThemeHook() {}
 
     static void install(ClassLoader loader) {
-        installPresenter(android.widget.ListPopupWindow.class,
-                XposedHelpers.findClassIfExists("android.widget.MenuPopupWindow", loader),
+        // Framework ListPopupWindow is hidden from the public SDK stubs.
+        // Resolve it at runtime in the Settings process.
+        installPresenter(XposedHelpers.findClassIfExists(
+                        "android.widget.ListPopupWindow", loader),
+                XposedHelpers.findClassIfExists(
+                        "android.widget.MenuPopupWindow", loader),
                 "framework");
         Class<?> appCompatList = XposedHelpers.findClassIfExists(
                 "androidx.appcompat.widget.ListPopupWindow", loader);
