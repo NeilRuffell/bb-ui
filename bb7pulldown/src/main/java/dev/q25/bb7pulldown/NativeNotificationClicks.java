@@ -281,6 +281,27 @@ final class NativeNotificationClicks {
             return;
         }
 
+        // Stock SystemUI handles bubble clicks through its BubblesManager,
+        // not by sending the notification's content intent.
+        try {
+            if ((Boolean) XposedHelpers.callMethod(entry, "canBubble")) {
+                Object nativeStarter = notificationActivityStarter.get();
+                if (nativeStarter == null) {
+                    Log.w(TAG, "Native bubble click unavailable: notification starter missing");
+                    return;
+                }
+                XposedHelpers.callMethod(
+                        nativeStarter, "expandBubbleStackOnMainThread", entry);
+                recordNativeClick(notificationKey, entry);
+                Log.i(TAG, "Native notification bubble expansion dispatched");
+                onDispatched.run();
+                return;
+            }
+        } catch (Throwable error) {
+            Log.e(TAG, "Native notification bubble dispatch failed", error);
+            return;
+        }
+
         PendingIntent action = SystemUiNotificationObserver.getOpenAction(notificationKey);
         if (action == null) {
             Log.i(TAG, "Notification has no native opening action");
