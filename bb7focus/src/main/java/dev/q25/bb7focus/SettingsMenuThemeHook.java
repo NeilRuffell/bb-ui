@@ -76,8 +76,20 @@ public final class SettingsMenuThemeHook implements IXposedHookLoadPackage {
             GradientDrawable selector = BB7Theme.selected(0f, densityBorder);
             list.setSelector(selector);
             list.setDrawSelectorOnTop(false);
-            // Preserve Settings' active light/dark text colors. Do not
-            // recolor content or replace any original item views.
+            // Use the matching system-light/dark BB7 card surface so
+            // existing native menu item text maintains its theme contrast.
+            BB7Theme.Palette palette = BB7Theme.palette(list.getContext());
+            GradientDrawable surface = new GradientDrawable();
+            surface.setColor(palette.card);
+            surface.setCornerRadius(3f * list.getResources().getDisplayMetrics().density);
+            surface.setStroke(densityBorder, palette.divider);
+            int start = list.getPaddingStart();
+            int top = list.getPaddingTop();
+            int end = list.getPaddingEnd();
+            int bottom = list.getPaddingBottom();
+            list.setBackground(surface);
+            list.setPaddingRelative(start, top, end, bottom);
+            // Preserve native menu item contents and layout.
             STYLED.put(list, Boolean.TRUE);
             Log.i(TAG, "Native Settings list selector styled: "
                     + list.getClass().getName());
