@@ -647,9 +647,10 @@ final class TwoColumnPanel extends FrameLayout {
                     int direction = keyCode == KeyEvent.KEYCODE_DPAD_UP ? -1 : 1;
                     int next = AppSelectionPolicy.move(current, direction,
                             notificationTargets.size());
-                    if (keyCode == KeyEvent.KEYCODE_DPAD_UP && current == 0) {
-                        enterStatusZone();
-                    } else if (next >= 0) {
+                    // Keep Up bounded inside the notification/action list.
+                    // Back explicitly returns to the app-icon column; only
+                    // that column may move Up into the native status bar.
+                    if (next >= 0) {
                         notificationTargets.get(next).requestFocus();
                     }
                 }
