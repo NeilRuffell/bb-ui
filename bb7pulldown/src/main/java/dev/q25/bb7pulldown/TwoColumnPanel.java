@@ -316,7 +316,18 @@ final class TwoColumnPanel extends FrameLayout {
         if (selected.isEmpty()) {
             addPlaceholder("No notifications for this app");
         } else {
+            boolean silentHeadingAdded = false;
             for (NotificationItem item : selected) {
+                if (item.silent && !silentHeadingAdded) {
+                    // A purely visual separator. Not in notificationTargets,
+                    // so it cannot add an extra trackpad/keyboard stop.
+                    TextView heading = text("Silent", 12, palette.muted);
+                    heading.setTypeface(null, android.graphics.Typeface.BOLD);
+                    heading.setFocusable(false);
+                    heading.setPadding(dp(8), dp(12), dp(8), dp(8));
+                    notificationList.addView(heading);
+                    silentHeadingAdded = true;
+                }
                 LinearLayout card = createNotificationCard(item);
                 notificationList.addView(card);
                 notificationRows.add(card);
@@ -636,9 +647,10 @@ final class TwoColumnPanel extends FrameLayout {
                     int direction = keyCode == KeyEvent.KEYCODE_DPAD_UP ? -1 : 1;
                     int next = AppSelectionPolicy.move(current, direction,
                             notificationTargets.size());
-                    if (keyCode == KeyEvent.KEYCODE_DPAD_UP && current == 0) {
-                        enterStatusZone();
-                    } else if (next >= 0) {
+                    // Keep Up bounded inside the notification/action list.
+                    // Back explicitly returns to the app-icon column; only
+                    // that column may move Up into the native status bar.
+                    if (next >= 0) {
                         notificationTargets.get(next).requestFocus();
                     }
                 }

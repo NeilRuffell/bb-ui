@@ -1,6 +1,7 @@
 package dev.q25.bb7pulldown;
 
 import android.app.Notification;
+import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.RemoteInput;
 import android.os.Bundle;
@@ -72,9 +73,26 @@ final class SystemUiNotificationObserver {
                     StatusBarNotification sbn = (StatusBarNotification) param.args[0];
                     listener = new WeakReference<>((NotificationListenerService) param.thisObject);
                     synchronized (LOCK) {
-                        NOTIFICATIONS.put(sbn.getKey(), toItem(sbn));
+                        NOTIFICATIONS.put(sbn.getKey(), toItem(sbn,
+                                ((NotificationListenerService) param.thisObject).getCurrentRanking()));
                         ACTIVE_SBNS.put(sbn.getKey(), sbn);
                         saveOpenAction(sbn);
+                        publishLocked();
+                    }
+                }
+            });
+            XposedBridge.hookAllMethods(type, "onNotificationRankingUpdate",
+                    new XC_MethodHook() {
+                @Override protected void afterHookedMethod(MethodHookParam param) {
+                    if (param.args.length == 0
+                            || !(param.args[0] instanceof NotificationListenerService.RankingMap))
+                        return;
+                    NotificationListenerService.RankingMap rankings =
+                            (NotificationListenerService.RankingMap) param.args[0];
+                    synchronized (LOCK) {
+                        for (StatusBarNotification sbn : ACTIVE_SBNS.values()) {
+                            NOTIFICATIONS.put(sbn.getKey(), toItem(sbn, rankings));
+                        }
                         publishLocked();
                     }
                 }
@@ -127,7 +145,8 @@ final class SystemUiNotificationObserver {
                 OPEN_ACTIONS.clear();
                 for (StatusBarNotification sbn : current) {
                     if (sbn == null) continue;
-                    NOTIFICATIONS.put(sbn.getKey(), toItem(sbn));
+                    NOTIFICATIONS.put(sbn.getKey(), toItem(sbn,
+                            service.getCurrentRanking()));
                     ACTIVE_SBNS.put(sbn.getKey(), sbn);
                     saveOpenAction(sbn);
                 }
@@ -232,7 +251,8 @@ final class SystemUiNotificationObserver {
         return NotificationAppIndex.uniquePackages(names);
     }
 
-    private static NotificationItem toItem(StatusBarNotification sbn) {
+    private static NotificationItem toItem(StatusBarNotification sbn,
+            NotificationListenerService.RankingMap rankings) {
         Notification notification = sbn.getNotification();
         Bundle extras = notification == null ? null : notification.extras;
         CharSequence title = extras == null ? null
@@ -277,9 +297,21 @@ final class SystemUiNotificationObserver {
                         freeFormReply));
             }
         }
+        boolean summary = notification != null
+                && (notification.flags & Notification.FLAG_GROUP_SUMMARY) != 0;
+        // Importance is Android's authoritative channel-level interruptiveness.
+        // Missing rankings remain unclassified (displayed with alerting items).
+        boolean silent = false;
+        if (rankings != null) {
+            NotificationListenerService.Ranking ranking =
+                    new NotificationListenerService.Ranking();
+            if (rankings.getRanking(sbn.getKey(), ranking)) {
+                silent = ranking.getImportance() < NotificationManager.IMPORTANCE_DEFAULT;
+            }
+        }
         return new NotificationItem(sbn.getKey(), sbn.getPackageName(),
                 plain(title, 140), plain(body, 700), sbn.getPostTime(),
-                sbn.isClearable(), buttons);
+                sbn.isClearable(), buttons, sbn.getGroupKey(), summary, silent);
     }
 
     /** Drop app-supplied formatting before displaying text in the panel. */
