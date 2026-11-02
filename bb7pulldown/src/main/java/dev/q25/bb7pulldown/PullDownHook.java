@@ -51,10 +51,10 @@ public final class PullDownHook implements IXposedHookLoadPackage {
     private static final String STATUS_BAR =
             "com.android.systemui.statusbar.phone.PhoneStatusBarView";
     private static final String ENABLE_PROP = "debug.bb7pulldown.enabled";
-    private static final String FOCUS_ACTION = "dev.q25.bb7pulldown.FOCUS_STATUS";
-    private static final String REVEAL_ACTION = "dev.q25.bb7pulldown.REVEAL_RECENTS";
-    private static final String EXIT_ACTION = "dev.q25.bb7pulldown.EXIT_RECENTS";
-    private static final String LAUNCHER_PACKAGE = "com.android.launcher3";
+    // Intercept SystemUI's native Recents command before Quickstep changes activities.
+    private static final String COMMAND_QUEUE = "com.android.systemui.statusbar.CommandQueue";
+    private static Object nativeRecentsQueue;
+    private static boolean allowOneNativeRecents;
     // Android internal WindowManager.LayoutParams.TYPE_STATUS_BAR_SUB_PANEL
     // is hidden from public SDK stubs; framework value is FIRST_SYSTEM_WINDOW+17.
     private static final int STATUS_BAR_SUB_PANEL_WINDOW_TYPE = 2017;
@@ -81,7 +81,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
             Log.i(TAG, "Disabled by " + ENABLE_PROP + "; stock status bar retained");
             return;
         }
-        installFocusReceiver();
+        installRecentsInterception(lp.classLoader);
         SystemUiNotificationObserver.install(lp.classLoader);
         NativeNotificationClicks.install(lp.classLoader);
         Class<?> viewClass = XposedHelpers.findClassIfExists(STATUS_BAR, lp.classLoader);
@@ -120,55 +120,57 @@ public final class PullDownHook implements IXposedHookLoadPackage {
         }
     }
 
-    private static void installFocusReceiver() {
-        // Validate the Quickstep sender UID before accepting any focus request.
-        focusReceiver = new BroadcastReceiver() {
-            @Override public void onReceive(Context context, Intent intent) {
-                if (!FOCUS_ACTION.equals(intent.getAction()) || !enabled()
-                        || locked(context)) return;
-                // The unified launcher entry is the only permitted caller.
-                int uid = getSentFromUid();
-                if (uid < 0 || !senderIsLauncher(context, uid)) {
-                    Log.w(TAG, "Rejected status focus request from uid=" + uid);
-                    return;
-                }
-                if (focusWindow != null) dismissStatusFocus();
-                else showStatusFocus(context);
-            }
-        };
-        // Registration needs a SystemUI context; PhoneStatusBarView provides it.
-    }
-
-    private static void registerFocusReceiver(Context context) {
-        if (focusReceiver == null) installFocusReceiver();
-        if (focusReceiverRegistered) return;
+    private static void installRecentsInterception(ClassLoader loader) {
+        Class<?> queue = XposedHelpers.findClassIfExists(COMMAND_QUEUE, loader);
+        if (queue == null) {
+            Log.w(TAG, "Native Recents command queue unavailable; preserving stock behavior");
+            return;
+        }
         try {
-            context.registerReceiver(focusReceiver, new IntentFilter(FOCUS_ACTION),
-                    null, new Handler(Looper.getMainLooper()),
-                    Context.RECEIVER_EXPORTED);
-            focusReceiverRegistered = true;
-            Log.i(TAG, "Unified Overview status focus receiver registered");
+            XposedBridge.hookAllMethods(queue, "toggleRecentApps", new XC_MethodHook() {
+                @Override protected void beforeHookedMethod(MethodHookParam param) {
+                    if (!enabled()) return;
+                    if (allowOneNativeRecents) {
+                        allowOneNativeRecents = false;
+                        Log.i(TAG, "Native Recents requested explicitly by Down");
+                        return;
+                    }
+                    View bar = nativeStatusBar.get();
+                    if (bar == null || locked(bar.getContext())) {
+                        Log.w(TAG, "Recents toggle: native bar unavailable/locked; stock retained");
+                        return;
+                    }
+                    nativeRecentsQueue = param.thisObject;
+                    if (focusWindow != null) dismissStatusFocus();
+                    else showStatusFocus(bar.getContext());
+                    if (focusWindow != null) {
+                        param.setResult(null); // native void command: never enter Overview
+                        Log.i(TAG, "Native Recents toggle intercepted; foreground app preserved");
+                    } else {
+                        Log.w(TAG, "Status focus unavailable; original Recents command retained");
+                    }
+                }
+            });
+            Log.i(TAG, "Native Recents command interception registered");
         } catch (Throwable error) {
-            Log.e(TAG, "BlackBerry key focus receiver registration failed", error);
+            Log.e(TAG, "Unable to register native Recents interception", error);
         }
     }
 
-    private static boolean senderIsLauncher(Context context, int uid) {
-        String[] packages = context.getPackageManager().getPackagesForUid(uid);
-        if (packages == null) return false;
-        for (String name : packages) {
-            if (LAUNCHER_PACKAGE.equals(name)) return true;
+    private static void openNativeRecents() {
+        Object queue = nativeRecentsQueue;
+        if (queue == null) {
+            Log.w(TAG, "Native Recents command unavailable");
+            return;
         }
-        return false;
+        allowOneNativeRecents = true;
+        try {
+            XposedHelpers.callMethod(queue, "toggleRecentApps");
+        } catch (Throwable error) {
+            allowOneNativeRecents = false;
+            Log.e(TAG, "Unable to open native Recents", error);
+        }
     }
-
-    private static void signalLauncher(Context context, String action) {
-        Intent intent = new Intent(action);
-        intent.setPackage(LAUNCHER_PACKAGE);
-        context.sendBroadcast(intent);
-    }
-
-    private static boolean focusReceiverRegistered;
 
     private static void dismissStatusFocus() {
         updateStatusFocus(-1);
@@ -189,10 +191,9 @@ public final class PullDownHook implements IXposedHookLoadPackage {
         FrameLayout root = new FrameLayout(context) {
             @Override public boolean dispatchKeyEvent(KeyEvent event) {
                 int code = event.getKeyCode();
-                 if (code == KeyEvent.KEYCODE_BACK || code == KeyEvent.KEYCODE_ESCAPE) {
+                if (code == KeyEvent.KEYCODE_BACK || code == KeyEvent.KEYCODE_ESCAPE) {
                     if (event.getAction() == KeyEvent.ACTION_UP) {
                         dismissStatusFocus();
-                        signalLauncher(getContext(), EXIT_ACTION);
                     }
                     return true;
                 }
@@ -207,7 +208,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
                 if (code == KeyEvent.KEYCODE_DPAD_DOWN) {
                     if (event.getAction() == KeyEvent.ACTION_UP) {
                         dismissStatusFocus();
-                        signalLauncher(getContext(), REVEAL_ACTION);
+                        openNativeRecents();
                     }
                     return true;
                 }
@@ -217,10 +218,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
                     if (event.getAction() == KeyEvent.ACTION_UP) {
                         int selected = focusZone;
                         dismissStatusFocus();
-                        // Leave native Overview before opening either destination;
-                        // otherwise the concealed grid would remain behind it.
-                        signalLauncher(getContext(), EXIT_ACTION);
-                        if (selected == 0) showPanel(getContext());
+                         if (selected == 0) showPanel(getContext());
                         else showSystemControls(getContext());
                     }
                     return true;
