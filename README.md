@@ -1,6 +1,6 @@
 # BB UI
 
-## BB7 Pull-down — native notification click lifecycle (v0.5.6)
+## BB7 Pull-down — native notification click lifecycle (v0.5.7)
 
 **Branch:** `feat/bb7-native-notification-click` (from `master`). No code from the abandoned
 `feat/bb7-shade` notification/QS hooks is included.
@@ -12,13 +12,19 @@ ActivityStarter. An unavailable NotifCollection entry must never prevent this
 native activity-start route from being invoked.
 
 The native NotifCollection, OnUserInteractionCallbackImpl and
-NotificationClickNotifier are captured independently through their existing
-SystemUI constructors. If all are available for a notification, the module
-delegates to the native registerFutureDismissal(..., REASON_CLICK) path
-for FLAG_AUTO_CANCEL notifications and reports the click through the native
-NotificationClickNotifier. If those services are not available, activity
-launches may work but native click/auto-cancel reporting cannot be guaranteed;
-the module logs the unavailable services rather than inventing replacements.
+NotificationClickNotifier are observed independently in their existing
+SystemUI lifecycles. On notification activation, the system-owned
+ActivityStarter is invoked first. Native FLAG_AUTO_CANCEL dismissal is then
+registered via OnUserInteractionCallback.registerFutureDismissal(entry, REASON_CLICK)
+and posted to SystemUI's main thread, as LineageOS does. Click reporting
+through NotificationClickNotifier is independent: an unavailable notifier
+cannot suppress stock auto-dismiss, and vice versa.
+
+The module logs the native entry, interaction-callback, and notifier
+availability and Android's actual auto-cancel/bubble policy. A notification
+without FLAG_AUTO_CANCEL is not automatically removed (matching stock
+behavior). If native components are unavailable, the module logs that
+limitation and never fabricates a cancellation.
 Actual bubble notifications use SystemUI's bubble expansion service when available.
 It does not force-clear ongoing or non-auto-cancel notifications.
 
