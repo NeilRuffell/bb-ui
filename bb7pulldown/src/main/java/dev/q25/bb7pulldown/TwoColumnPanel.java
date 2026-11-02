@@ -86,6 +86,7 @@ final class TwoColumnPanel extends FrameLayout {
             StatusZoneListener statusZone) {
         super(context);
         palette = BB7Theme.palette(context);
+        Log.i(TAG, "BB7 shade palette: " + (palette == BB7Theme.Palette.DARK ? "dark" : "light"));
         onClose = close;
         onOpenNotification = openNotification;
         onActions = actions;
@@ -573,7 +574,7 @@ final class TwoColumnPanel extends FrameLayout {
                 background = selectedBlueBackground();
             } else {
                 background = new GradientDrawable();
-                background.setColor(BB7Theme.ROW);
+                background.setColor(palette.card);
                 background.setCornerRadius(dp(5));
             }
             card.setBackground(background);
