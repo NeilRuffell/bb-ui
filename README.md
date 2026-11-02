@@ -2,7 +2,7 @@
 
 ## BB7 Pull-down — native notification opening (v0.5.1)
 
-**Branch:** `feat/bb7-pulldown` (fresh from `master`). No code from the abandoned
+**Branch:** `feat/bb7-native-notification-click` (from `master`). No code from the abandoned
 `feat/bb7-shade` notification/QS hooks is included.
 
 A separate Vector/LSPosed module, `:bb7pulldown` (`dev.q25.bb7pulldown`),
@@ -52,7 +52,7 @@ only tests the global pull-down and the 15/85 layout.
 ```sh
 cd ~/Projects/bb-ui
 git fetch origin
-git switch feat/bb7-pulldown
+git switch feat/bb7-native-notification-click
 git pull --ff-only
 ./gradlew :bb7pulldown:assembleDebug
 adb install -r bb7pulldown/build/outputs/apk/debug/bb7pulldown-debug.apk
@@ -69,6 +69,13 @@ Logs:
 ```sh
 adb logcat -d -s BB7-PullDown:I '*:S'
 ```
+
+The module observes `NotificationClicker.register()` and dispatches
+`performClick()` on the original SystemUI notification row. It does not
+send the application's `PendingIntent` itself. If a native row is not
+available or Android did not register a click action for that notification,
+the custom panel stays open and logs why instead of pretending it opened
+the app.
 
 Rollback without a full phone reboot:
 
