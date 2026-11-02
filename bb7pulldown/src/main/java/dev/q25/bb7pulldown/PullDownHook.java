@@ -76,8 +76,9 @@ public final class PullDownHook implements IXposedHookLoadPackage {
 
     @Override
     public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lp) {
-        if ("android".equals(lp.packageName)
-                && (SYSTEM_SERVER.equals(lp.processName) || "android".equals(lp.processName))) {
+        if (("system".equals(lp.packageName) && "system".equals(lp.processName))
+                || ("android".equals(lp.packageName)
+                    && SYSTEM_SERVER.equals(lp.processName))) {
             Log.i(TAG, "Framework input-policy initialization: package="
                     + lp.packageName + " process=" + lp.processName);
             installInputPolicy(lp.classLoader);
