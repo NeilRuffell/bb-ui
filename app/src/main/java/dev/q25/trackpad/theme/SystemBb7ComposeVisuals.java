@@ -36,6 +36,7 @@ final class SystemBb7ComposeVisuals {
         installMaterialColors(loader,
                 "androidx.compose.material.Colors", "Material2");
         installMaterialShapes(loader);
+        installSharedCornerShapeRenderer(loader);
     }
 
     private static void installMaterialColors(ClassLoader loader,
@@ -145,6 +146,70 @@ final class SystemBb7ComposeVisuals {
             default:
                 return p.canvas;
         }
+    }
+
+    /**
+     * Actual Compose shape-rendering boundary, below Material2/Material3
+     * and below individual composables.
+     *
+     * Both Material theme shapes and explicit RoundedCornerShape/CircleShape
+     * ultimately call a CornerBasedShape subclass createOutline(size,
+     * topStart, topEnd, bottomEnd, bottomStart, layoutDirection).
+     * Setting only those four *resolved corner sizes* to zero makes the
+     * original Compose implementation produce its native rectangular
+     * Outline. This never replaces clipping or drawing engines and never
+     * needs an individual Settings screen's class name.
+     *
+     * The overload with four floats is the subclass method, not the final
+     * packed-Size/LayoutDirection/Density method on CornerBasedShape.
+     */
+    private static void installSharedCornerShapeRenderer(ClassLoader loader) {
+        String[] classes = {
+                "androidx.compose.foundation.shape.RoundedCornerShape",
+                "androidx.compose.foundation.shape.AbsoluteRoundedCornerShape",
+                "androidx.compose.foundation.shape.CutCornerShape",
+                "androidx.compose.foundation.shape.AbsoluteCutCornerShape"
+        };
+        int hooks = 0;
+        for (String name : classes) {
+            Class<?> cls = XposedHelpers.findClassIfExists(name, loader);
+            if (cls == null) continue;
+            for (Method method : cls.getDeclaredMethods()) {
+                if (!method.getName().startsWith("createOutline")) continue;
+                Class<?>[] parameters = method.getParameterTypes();
+                int firstCorner = -1;
+                for (int i = 0; i + 3 < parameters.length; i++) {
+                    if (parameters[i] == float.class
+                            && parameters[i + 1] == float.class
+                            && parameters[i + 2] == float.class
+                            && parameters[i + 3] == float.class) {
+                        firstCorner = i;
+                        break;
+                    }
+                }
+                if (firstCorner < 0) continue;
+                final int start = firstCorner;
+                try {
+                    XposedBridge.hookMethod(method, new XC_MethodHook() {
+                        @Override protected void beforeHookedMethod(MethodHookParam param) {
+                            // The original method still owns the resulting
+                            // Outline and the AndroidX clip/draw lifecycle.
+                            for (int i = start; i < start + 4; i++)
+                                param.args[i] = 0f;
+                            if (SHAPE_LOG.compareAndSet(false, true))
+                                Log.i(TAG, "Global OS Compose corners squared at "
+                                        + method.getDeclaringClass().getName()
+                                        + "." + method.getName());
+                        }
+                    });
+                    hooks++;
+                } catch (Throwable error) {
+                    Log.w(TAG, "Compose shape-renderer hook skipped: "
+                            + cls.getName() + "." + method.getName(), error);
+                }
+            }
+        }
+        Log.i(TAG, "Global OS Compose shape-renderer hooks=" + hooks);
     }
 
     private static void installMaterialShapes(ClassLoader loader) {
