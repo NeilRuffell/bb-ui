@@ -255,7 +255,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
         try {
             Class<?> props = Class.forName("android.os.SystemProperties");
             return (Boolean) XposedHelpers.callStaticMethod(
-                    props, "getBoolean", ENABLE_PROP, false);
+                    props, "getBoolean", ENABLE_PROP, true);
         } catch (Throwable error) {
             Log.e(TAG, "Cannot read rollback property; leaving stock shade", error);
             return false;
