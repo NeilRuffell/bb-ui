@@ -54,7 +54,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
     private static final String BB_KEYCODE_PROP = "debug.bb7pulldown.bb_keycode";
     private static final String FOCUS_ACTION = "dev.q25.bb7pulldown.FOCUS_STATUS";
     private static final String FOCUS_PERMISSION = "android.permission.STATUS_BAR_SERVICE";
-    private static final String SYSTEM_SERVER = "android";
+    private static final String SYSTEM_SERVER = "system_server";
     private static final String INPUT_POLICY = "com.android.server.policy.PhoneWindowManager";
     // Android internal WindowManager.LayoutParams.TYPE_STATUS_BAR_SUB_PANEL
     // is hidden from public SDK stubs; framework value is FIRST_SYSTEM_WINDOW+17.
@@ -76,7 +76,10 @@ public final class PullDownHook implements IXposedHookLoadPackage {
 
     @Override
     public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lp) {
-        if ("android".equals(lp.packageName) && SYSTEM_SERVER.equals(lp.processName)) {
+        if ("android".equals(lp.packageName)
+                && (SYSTEM_SERVER.equals(lp.processName) || "android".equals(lp.processName))) {
+            Log.i(TAG, "Framework input-policy initialization: package="
+                    + lp.packageName + " process=" + lp.processName);
             installInputPolicy(lp.classLoader);
             return;
         }
