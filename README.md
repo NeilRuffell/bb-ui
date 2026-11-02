@@ -420,3 +420,45 @@ wrapper from your existing `tv-dv` workspace, as done previously.
 
 GitHub Actions also creates `bb-ui-debug-apk` artifacts on pushes to the
 feature branch.
+
+
+### Experimental BlackBerry-key status-bar focus (Q25)
+
+Branch: `feat/bb7-blackberry-key-statusbar-focus`.
+
+The normal BB7 pull-down still runs in the `com.android.systemui` scope.
+The global hardware-key interception additionally requires the Android framework
+(`android`, system_server) scope in Vector/LSPosed. **Do not enable that
+additional scope without a way to recover via ADB.**
+
+The shortcut is inactive by default. First identify the physical BlackBerry
+key from the device, e.g. `adb shell getevent -lt` while pressing the key,
+then inspect the corresponding `*.kl` keylayout mapping for the Android
+`KEYCODE_*` name. The Linux input event number is not necessarily the
+Android KeyEvent keycode.
+
+After confirming the Android keycode number:
+
+```sh
+adb shell setprop debug.bb7pulldown.bb_keycode NUMBER
+adb shell am crash com.android.systemui
+```
+
+The property is intentionally nonpersistent. When the hook receives the key,
+it requests focus on the **existing native** status bar without opening the
+shade. Left/Right chooses Notifications/System Controls; trackpad click enters
+the chosen destination; Back/Escape or a second BlackBerry-key press exits
+focus mode. Native system icons and the existing status-bar tap-to-open gesture
+remain in place. Recent-apps integration is not part of this branch.
+
+Emergency rollback (with ADB connected):
+
+```sh
+adb shell setprop debug.bb7pulldown.bb_keycode 0
+adb shell setprop debug.bb7pulldown.enabled false
+adb shell am crash com.android.systemui
+```
+
+The system_server hook reads the keycode property for each event, so changing
+the keycode to zero deactivates interception without restarting system_server.
+The SystemUI restart above reloads the disabled UI hook.
