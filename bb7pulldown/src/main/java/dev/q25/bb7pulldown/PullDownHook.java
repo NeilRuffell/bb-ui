@@ -54,9 +54,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
     private static final String ENABLE_PROP = "debug.bb7pulldown.enabled";
     // Intercept SystemUI's native Recents command before Quickstep changes activities.
     private static final String COMMAND_QUEUE = "com.android.systemui.statusbar.CommandQueue";
-    private static Object nativeRecentsQueue;
-    private static boolean allowOneNativeRecents;
-    // APP_SWITCH DOWN preloads Recents; UP toggles it.
+     // APP_SWITCH DOWN preloads Recents; UP toggles it.
     private static volatile long lastAppSwitchDownUptime = -1L;
     // Android internal WindowManager.LayoutParams.TYPE_STATUS_BAR_SUB_PANEL
     // is hidden from public SDK stubs; framework value is FIRST_SYSTEM_WINDOW+17.
@@ -145,12 +143,6 @@ public final class PullDownHook implements IXposedHookLoadPackage {
             XposedBridge.hookAllMethods(queue, "toggleRecentApps", new XC_MethodHook() {
                 @Override protected void beforeHookedMethod(MethodHookParam param) {
                     if (!enabled()) return;
-                    if (allowOneNativeRecents) {
-                        allowOneNativeRecents = false;
-                        lastAppSwitchDownUptime = -1L;
-                        Log.i(TAG, "Native Recents explicitly requested");
-                        return;
-                    }
                     long pressedAt = lastAppSwitchDownUptime;
                     lastAppSwitchDownUptime = -1L;
                     long elapsed = pressedAt < 0 ? -1L
@@ -169,7 +161,6 @@ public final class PullDownHook implements IXposedHookLoadPackage {
                         Log.w(TAG, "Recents toggle: native bar unavailable/locked; stock retained");
                         return;
                     }
-                    nativeRecentsQueue = param.thisObject;
                     // CommandQueue entry may be on a Binder thread. Window operations
                     // must run on SystemUI's main thread; consume the command now.
                     param.setResult(null); // void command: prevent Overview transition
@@ -184,21 +175,6 @@ public final class PullDownHook implements IXposedHookLoadPackage {
             Log.i(TAG, "Native Recents command interception registered");
         } catch (Throwable error) {
             Log.e(TAG, "Unable to register native Recents interception", error);
-        }
-    }
-
-    private static void openNativeRecents() {
-        Object queue = nativeRecentsQueue;
-        if (queue == null) {
-            Log.w(TAG, "Native Recents command unavailable");
-            return;
-        }
-        allowOneNativeRecents = true;
-        try {
-            XposedHelpers.callMethod(queue, "toggleRecentApps");
-        } catch (Throwable error) {
-            allowOneNativeRecents = false;
-            Log.e(TAG, "Unable to open native Recents", error);
         }
     }
 
