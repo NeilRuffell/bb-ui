@@ -65,6 +65,7 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
     private static final WeakHashMap<Object, Rect> LOGGED_ANIMATION_TARGETS = new WeakHashMap<>();
     private static final WeakHashMap<Object, Boolean> HOME_SIMULATORS = new WeakHashMap<>();
     private static final WeakHashMap<View, Boolean> OVERVIEW_ENTRY_SELECTED = new WeakHashMap<>();
+    private static final WeakHashMap<View, Boolean> FOCUS_DIAGNOSTICS = new WeakHashMap<>();
 
     @Override public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lp) {
         if (!TARGET.equals(lp.packageName)) return;
@@ -921,6 +922,17 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
             else if (child.getClass().getName().endsWith(".ClearAllButton")) clearAll = child;
         }
 
+        if (place && !FOCUS_DIAGNOSTICS.containsKey(root)) {
+            FOCUS_DIAGNOSTICS.put(root, Boolean.TRUE);
+            // Observe native Android focus without intercepting key events,
+            // creating a parallel selector, or changing the focus target.
+            root.getViewTreeObserver().addOnGlobalFocusChangeListener((from, to) ->
+                    Log.w(TAG, "Native Recents focus: from="
+                            + (from == null ? "none" : from.getClass().getSimpleName())
+                            + " to=" + (to == null ? "none" : to.getClass().getSimpleName())
+                            + " currentPage=" + XposedHelpers.callMethod(root, "getCurrentPage")
+                            + " scrollY=" + root.getScrollY()));
+        }
         int gap = dp(root, 8);
         int topInset = statusBarOverlap(root);
         int width = (root.getWidth() - gap * 3) / 2;
