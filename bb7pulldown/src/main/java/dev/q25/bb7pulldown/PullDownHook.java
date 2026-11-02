@@ -63,6 +63,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
             return;
         }
         SystemUiNotificationObserver.install(lp.classLoader);
+        NativeNotificationClicks.install(lp.classLoader);
         Class<?> viewClass = XposedHelpers.findClassIfExists(STATUS_BAR, lp.classLoader);
         if (viewClass == null) {
             Log.w(TAG, "Native status-bar gesture source not present");
@@ -159,7 +160,9 @@ public final class PullDownHook implements IXposedHookLoadPackage {
             dismissPanelImmediately();
             return;
         }
-        if (SystemUiNotificationObserver.openNotification(key)) {
+        // Route through SystemUI's own notification row OnClickListener.
+        // A missing native click handler must not silently close the panel.
+        if (NativeNotificationClicks.open(key)) {
             dismissPanelImmediately();
         }
     }

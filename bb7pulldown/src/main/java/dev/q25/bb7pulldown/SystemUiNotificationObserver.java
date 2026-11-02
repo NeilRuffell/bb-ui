@@ -1,7 +1,6 @@
 package dev.q25.bb7pulldown;
 
 import android.app.Notification;
-import android.app.PendingIntent;
 import android.os.Bundle;
 import android.service.notification.NotificationListenerService;
 import android.service.notification.StatusBarNotification;
@@ -34,7 +33,6 @@ final class SystemUiNotificationObserver {
     private static final Object LOCK = new Object();
     // Keys avoid duplicate posts and preserve the insertion order across apps.
     private static final Map<String, NotificationItem> NOTIFICATIONS = new LinkedHashMap<>();
-    private static final Map<String, PendingIntent> CONTENT_INTENTS = new LinkedHashMap<>();
     private static volatile List<String> activePackages = Collections.emptyList();
     private static volatile List<NotificationItem> activeItems = Collections.emptyList();
     private static volatile WeakReference<NotificationListenerService> listener =
@@ -70,7 +68,6 @@ final class SystemUiNotificationObserver {
                     listener = new WeakReference<>((NotificationListenerService) param.thisObject);
                     synchronized (LOCK) {
                         NOTIFICATIONS.put(sbn.getKey(), toItem(sbn));
-                        updateContentIntent(sbn);
                         publishLocked();
                     }
                 }
@@ -82,7 +79,7 @@ final class SystemUiNotificationObserver {
                     StatusBarNotification sbn = (StatusBarNotification) param.args[0];
                     synchronized (LOCK) {
                         NOTIFICATIONS.remove(sbn.getKey());
-                        CONTENT_INTENTS.remove(sbn.getKey());
+                        NativeNotificationClicks.forget(sbn.getKey());
                         publishLocked();
                     }
                 }
@@ -117,11 +114,9 @@ final class SystemUiNotificationObserver {
             }
             synchronized (LOCK) {
                 NOTIFICATIONS.clear();
-                CONTENT_INTENTS.clear();
                 for (StatusBarNotification sbn : current) {
                     if (sbn == null) continue;
                     NOTIFICATIONS.put(sbn.getKey(), toItem(sbn));
-                    updateContentIntent(sbn);
                 }
                 if (!snapshotLogged || "open".equals(source)) {
                     snapshotLogged = true;
@@ -139,34 +134,11 @@ final class SystemUiNotificationObserver {
         }
     }
 
-    /** Execute only the live notification's genuine Android tap action. */
-    static boolean openNotification(String key) {
-        if (key == null) return false;
-        PendingIntent intent;
+    /** Guard against stale notification cards during live notification updates. */
+    static boolean isActive(String notificationKey) {
         synchronized (LOCK) {
-            if (!NOTIFICATIONS.containsKey(key)) return false;
-            intent = CONTENT_INTENTS.get(key);
+            return NOTIFICATIONS.containsKey(notificationKey);
         }
-        if (intent == null) {
-            Log.i(TAG, "Selected notification has no content intent");
-            return false;
-        }
-        try {
-            intent.send();
-            Log.i(TAG, "Selected notification content intent dispatched");
-            return true;
-        } catch (PendingIntent.CanceledException | SecurityException error) {
-            Log.w(TAG, "Unable to open selected notification", error);
-            return false;
-        }
-    }
-
-    /** Must hold LOCK. */
-    private static void updateContentIntent(StatusBarNotification sbn) {
-        Notification notification = sbn.getNotification();
-        PendingIntent intent = notification == null ? null : notification.contentIntent;
-        if (intent == null) CONTENT_INTENTS.remove(sbn.getKey());
-        else CONTENT_INTENTS.put(sbn.getKey(), intent);
     }
 
     /** Must hold LOCK. Publish on new, changed or removed notification data. */

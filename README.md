@@ -1,6 +1,6 @@
 # BB UI
 
-## BB7 Pull-down — two-stage notification navigation (v0.5.0)
+## BB7 Pull-down — native notification opening (v0.5.1)
 
 **Branch:** `feat/bb7-pulldown` (fresh from `master`). No code from the abandoned
 `feat/bb7-shade` notification/QS hooks is included.
@@ -31,11 +31,13 @@ refresh it. This filters our presentation, not Android's notification list.
 Navigation has two explicit levels: Up/Down selects application icons;
 trackpad click/Enter enters that app's notifications. Up/Down then selects
 individual notification cards, with a blue highlight. Trackpad click/Enter
-opens the selected notification via its existing Android contentIntent,
-when one is provided. Back returns to the same app icon, then Back again
+delegates to the existing native SystemUI notification-row click handler.
+The native click handler is responsible for activity launches, bubbles,
+notification dismissal and system notification click reporting. Back returns to the same app icon, then Back again
 closes the pull-down. Touch can tap apps and notification cards directly.
 Left/Right never changes navigation levels. Notifications without a
-contentIntent remain selectable but cannot be opened. Dismissal,
+native clickable row remain selectable, but activating them leaves the
+pull-down open and logs the reason. Dismissal,
 inline reply, custom layouts and attachments are not implemented. The panel closes on screen-off to avoid exposing previews
 on the lock screen.
 
