@@ -23,6 +23,10 @@ public final class SystemBb7VisualHook implements IXposedHookLoadPackage {
     @Override
     public void handleLoadPackage(XC_LoadPackage.LoadPackageParam load) {
         if (!isOsOwned(load.packageName, load.appInfo)) return;
+        if (!enabled()) {
+            Log.i(TAG, "Shared BB7 skin disabled by debug.bb7.systemskin.enabled");
+            return;
+        }
 
         Log.i(TAG, "Installing shared BB7 appearance in " + load.packageName
                 + " process=" + load.processName);
@@ -45,6 +49,19 @@ public final class SystemBb7VisualHook implements IXposedHookLoadPackage {
             SystemBb7RowFocus.install(load.packageName, load.classLoader);
         } catch (Throwable error) {
             Log.e(TAG, "System list focus visuals unavailable", error);
+        }
+    }
+
+    private static boolean enabled() {
+        try {
+            Class<?> properties = de.robv.android.xposed.XposedHelpers.findClass(
+                    "android.os.SystemProperties", null);
+            Object state = de.robv.android.xposed.XposedHelpers.callStaticMethod(
+                    properties, "getBoolean", "debug.bb7.systemskin.enabled", true);
+            return !Boolean.FALSE.equals(state);
+        } catch (Throwable error) {
+            // A missing optional debug property must never block normal BB UI.
+            return true;
         }
     }
 
