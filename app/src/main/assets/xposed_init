@@ -1,6 +1,5 @@
 dev.q25.trackpad.SettingsTypeToSearchHook
 dev.q25.trackpad.NativeRecentsGridHook
 dev.q25.bb7focus.SettingsFocusThemeHook
-dev.q25.bb7focus.SettingsMenuThemeHook
 dev.q25.bb7focus.SystemUiFocusThemeHook
 dev.q25.bb7pulldown.PullDownHook
