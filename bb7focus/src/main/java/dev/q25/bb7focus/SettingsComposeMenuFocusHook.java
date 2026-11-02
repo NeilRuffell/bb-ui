@@ -50,8 +50,10 @@ final class SettingsComposeMenuFocusHook {
                 "androidx.compose.ui.draw.DrawModifierKt", loader);
         Class<?> stateKt = XposedHelpers.findClassIfExists(
                 "androidx.compose.runtime.SnapshotStateKt", loader);
-        Class<?> policyKt = XposedHelpers.findClassIfExists(
-                "androidx.compose.runtime.SnapshotMutationPolicyKt", loader);
+        // Both mutableStateOf() and structuralEqualityPolicy() are exported
+        // from SnapshotStateKt. AndroidX marks SnapshotMutationPolicy.kt
+        // @file:JvmName("SnapshotStateKt") / @file:JvmMultifileClass;
+        // there is no SnapshotMutationPolicyKt runtime facade.
         Class<?> function1 = XposedHelpers.findClassIfExists(
                 "kotlin.jvm.functions.Function1", loader);
         Class<?> modifier = XposedHelpers.findClassIfExists(
@@ -59,15 +61,22 @@ final class SettingsComposeMenuFocusHook {
         Class<?> unitType = XposedHelpers.findClassIfExists("kotlin.Unit", loader);
 
         if (menuKt == null || focusKt == null || drawKt == null
-                || stateKt == null || policyKt == null || function1 == null
+                || stateKt == null || function1 == null
                 || modifier == null || unitType == null) {
-            Log.w(TAG, "Compose focus dependencies unavailable; menu items unchanged");
+            Log.w(TAG, "Compose focus dependencies unavailable: "
+                    + "menuKt=" + (menuKt != null)
+                    + " focusKt=" + (focusKt != null)
+                    + " drawKt=" + (drawKt != null)
+                    + " stateKt=" + (stateKt != null)
+                    + " function1=" + (function1 != null)
+                    + " modifier=" + (modifier != null)
+                    + " unitType=" + (unitType != null));
             return;
         }
 
         try {
             final Object policy = XposedHelpers.callStaticMethod(
-                    policyKt, "structuralEqualityPolicy");
+                    stateKt, "structuralEqualityPolicy");
             final Object unit = unitType.getField("INSTANCE").get(null);
             int hooks = 0;
             for (Method method : menuKt.getDeclaredMethods()) {
