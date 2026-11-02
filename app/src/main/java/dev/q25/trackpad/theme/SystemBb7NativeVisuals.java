@@ -142,7 +142,29 @@ final class SystemBb7NativeVisuals {
         try {
             XposedBridge.hookAllMethods(View.class, "setPadding", stripSideInsets);
             XposedBridge.hookAllMethods(View.class, "setPaddingRelative", stripSideInsets);
-            Log.i(TAG, "Shared system preference-list side-inset hook registered");
+
+            // Settings' TopLevelSettings may set its RecyclerView padding
+            // BEFORE setAdapter(), so the earlier View.setPadding hook misses
+            // the target. Remove the inherited insets once the shared
+            // PreferenceGroupAdapter is attached, irrespective of screen.
+            XposedBridge.hookAllMethods(recyclerView, "setAdapter",
+                    new XC_MethodHook() {
+                @Override protected void afterHookedMethod(MethodHookParam param) {
+                    if (param.args.length != 1
+                            || !preferenceAdapter.isInstance(param.args[0])
+                            || !(param.thisObject instanceof View)) return;
+                    View list = (View) param.thisObject;
+                    if (list.getPaddingLeft() == 0
+                            && list.getPaddingRight() == 0) return;
+                    int top = list.getPaddingTop();
+                    int bottom = list.getPaddingBottom();
+                    list.setPaddingRelative(0, top, 0, bottom);
+                    if (PADDING_LOG.compareAndSet(false, true))
+                        Log.i(TAG, "Preference list made edge-to-edge after adapter attach");
+                }
+            });
+            Log.i(TAG, "Shared preference-list insets hooked at both "
+                    + "View padding and RecyclerView adapter attachment");
         } catch (Throwable error) {
             Log.w(TAG, "System preference side-inset hook unavailable", error);
         }
