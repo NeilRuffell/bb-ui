@@ -160,11 +160,12 @@ public final class PullDownHook implements IXposedHookLoadPackage {
             dismissPanelImmediately();
             return;
         }
-        // Route through SystemUI's own notification row OnClickListener.
-        // A missing native click handler must not silently close the panel.
-        if (NativeNotificationClicks.open(key)) {
-            dismissPanelImmediately();
-        }
+        // Reuse the system-owned notification row click, or the system-owned
+        // ActivityStarter when there is no native row. This callback is async
+        // for ActivityStarter; only close the same panel after dispatch.
+        NativeNotificationClicks.open(key, () -> current.post(() -> {
+            if (panel == current && shown) dismissPanelImmediately();
+        }));
     }
 
     private static void showPanel(Context context) {

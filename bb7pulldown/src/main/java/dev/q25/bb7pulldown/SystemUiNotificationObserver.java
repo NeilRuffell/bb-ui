@@ -1,6 +1,7 @@
 package dev.q25.bb7pulldown;
 
 import android.app.Notification;
+import android.app.PendingIntent;
 import android.os.Bundle;
 import android.service.notification.NotificationListenerService;
 import android.service.notification.StatusBarNotification;
@@ -33,6 +34,7 @@ final class SystemUiNotificationObserver {
     private static final Object LOCK = new Object();
     // Keys avoid duplicate posts and preserve the insertion order across apps.
     private static final Map<String, NotificationItem> NOTIFICATIONS = new LinkedHashMap<>();
+    private static final Map<String, PendingIntent> OPEN_ACTIONS = new LinkedHashMap<>();
     private static volatile List<String> activePackages = Collections.emptyList();
     private static volatile List<NotificationItem> activeItems = Collections.emptyList();
     private static volatile WeakReference<NotificationListenerService> listener =
@@ -68,6 +70,7 @@ final class SystemUiNotificationObserver {
                     listener = new WeakReference<>((NotificationListenerService) param.thisObject);
                     synchronized (LOCK) {
                         NOTIFICATIONS.put(sbn.getKey(), toItem(sbn));
+                        saveOpenAction(sbn);
                         publishLocked();
                     }
                 }
@@ -79,6 +82,7 @@ final class SystemUiNotificationObserver {
                     StatusBarNotification sbn = (StatusBarNotification) param.args[0];
                     synchronized (LOCK) {
                         NOTIFICATIONS.remove(sbn.getKey());
+                        OPEN_ACTIONS.remove(sbn.getKey());
                         NativeNotificationClicks.forget(sbn.getKey());
                         publishLocked();
                     }
@@ -114,9 +118,11 @@ final class SystemUiNotificationObserver {
             }
             synchronized (LOCK) {
                 NOTIFICATIONS.clear();
+                OPEN_ACTIONS.clear();
                 for (StatusBarNotification sbn : current) {
                     if (sbn == null) continue;
                     NOTIFICATIONS.put(sbn.getKey(), toItem(sbn));
+                    saveOpenAction(sbn);
                 }
                 if (!snapshotLogged || "open".equals(source)) {
                     snapshotLogged = true;
@@ -132,6 +138,24 @@ final class SystemUiNotificationObserver {
                 Log.w(TAG, "Cannot read active notifications from SystemUI", error);
             }
         }
+    }
+
+    /** Return only the real Android action attached to an active notification. */
+    static PendingIntent getOpenAction(String notificationKey) {
+        synchronized (LOCK) {
+            if (!NOTIFICATIONS.containsKey(notificationKey)) return null;
+            return OPEN_ACTIONS.get(notificationKey);
+        }
+    }
+
+    /** Must hold LOCK. Mirrors stock NotificationActivityStarter intent choice. */
+    private static void saveOpenAction(StatusBarNotification sbn) {
+        Notification notification = sbn.getNotification();
+        PendingIntent action = notification == null ? null :
+                (notification.contentIntent != null
+                        ? notification.contentIntent : notification.fullScreenIntent);
+        if (action == null) OPEN_ACTIONS.remove(sbn.getKey());
+        else OPEN_ACTIONS.put(sbn.getKey(), action);
     }
 
     /** Guard against stale notification cards during live notification updates. */

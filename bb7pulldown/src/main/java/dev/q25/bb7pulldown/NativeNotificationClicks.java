@@ -1,5 +1,6 @@
 package dev.q25.bb7pulldown;
 
+import android.app.PendingIntent;
 import android.service.notification.StatusBarNotification;
 import android.util.Log;
 import android.view.View;
@@ -13,32 +14,37 @@ import de.robv.android.xposed.XposedBridge;
 import de.robv.android.xposed.XposedHelpers;
 
 /**
- * Forward custom notification-card activation to the native SystemUI row.
+ * Route custom notification-card activation through LineageOS SystemUI.
  *
- * NotificationClicker.register(...) attaches SystemUI's genuine click
- * listener to each native ExpandableNotificationRow. Reusing View.performClick()
- * executes that listener unchanged, including EntryAdapter's notification
- * activity starter, bubble behavior, NMS click reporting and auto-cancel
- * handling. It does NOT send PendingIntents or launch activities itself.
+ * Prefer a native row click (full stock notification click semantics).
+ * If the stock shade never inflated a row, use SystemUI's existing
+ * ActivityStarter to dispatch the original notification PendingIntent.
+ * This fixes the Android background-activity-start handling that ordinary
+ * PendingIntent.send() bypassed. No custom app-launch intent is constructed.
  */
 final class NativeNotificationClicks {
     private static final String TAG = "BB7-PullDown";
     private static final String CLICKER_CLASS =
             "com.android.systemui.statusbar.notification.NotificationClicker";
+    private static final String NOTIFICATIONS_CONTROLLER =
+            "com.android.systemui.statusbar.notification.init.NotificationsControllerImpl";
+    private static volatile WeakReference<Object> systemActivityStarter =
+            new WeakReference<>(null);
 
     // Row lifecycle remains owned by SystemUI. No strong references to rows.
     private static final Map<String, WeakReference<View>> CLICKABLE_ROWS = new HashMap<>();
 
     static void install(ClassLoader loader) {
+        installClickerObserver(loader);
+        installActivityStarterObserver(loader);
+    }
+
+    private static void installClickerObserver(ClassLoader loader) {
         Class<?> clicker = XposedHelpers.findClassIfExists(CLICKER_CLASS, loader);
-        if (clicker == null) {
-            Log.i(TAG, "Native NotificationClicker absent in this classloader");
-            return;
-        }
+        if (clicker == null) return;
         try {
             XposedBridge.hookAllMethods(clicker, "register", new XC_MethodHook() {
-                @Override
-                protected void afterHookedMethod(MethodHookParam param) {
+                @Override protected void afterHookedMethod(MethodHookParam param) {
                     if (param.hasThrowable() || param.args.length != 2
                             || !(param.args[0] instanceof View)
                             || !(param.args[1] instanceof StatusBarNotification)) return;
@@ -53,37 +59,109 @@ final class NativeNotificationClicks {
                     }
                 }
             });
-            Log.i(TAG, "Native notification click forwarding registered");
+            Log.i(TAG, "Native notification row observer registered");
         } catch (Throwable e) {
-            Log.e(TAG, "Unable to observe native notification click registration", e);
+            Log.e(TAG, "Unable to observe native notification rows", e);
         }
     }
 
-    static boolean open(String notificationKey) {
-        if (notificationKey == null || !SystemUiNotificationObserver.isActive(notificationKey)) {
+    /**
+     * LineageOS NotificationsControllerImpl.initialize receives the real
+     * StatusBarNotificationActivityStarter supplied by SystemUI's DI graph.
+     * Its mActivityStarter is the platform's existing ActivityStarter service:
+     * no custom intent or activity launch logic is needed.
+     */
+    private static void installActivityStarterObserver(ClassLoader loader) {
+        Class<?> controller = XposedHelpers.findClassIfExists(
+                NOTIFICATIONS_CONTROLLER, loader);
+        if (controller == null) {
+            Log.i(TAG, "Native SystemUI notifications controller absent");
+            return;
+        }
+        try {
+            XposedBridge.hookAllMethods(controller, "initialize", new XC_MethodHook() {
+                @Override protected void afterHookedMethod(MethodHookParam param) {
+                    if (param.hasThrowable() || param.args.length < 3) return;
+                    captureActivityStarter(param.args[2]);
+                }
+            });
+            Log.i(TAG, "Native SystemUI ActivityStarter capture registered");
+        } catch (Throwable error) {
+            Log.e(TAG, "Unable to observe SystemUI launch controller", error);
+        }
+    }
+
+    private static void captureActivityStarter(Object notificationActivityStarter) {
+        if (notificationActivityStarter == null) return;
+        try {
+            Object starter = XposedHelpers.getObjectField(
+                    notificationActivityStarter, "mActivityStarter");
+            if (starter != null) {
+                systemActivityStarter = new WeakReference<>(starter);
+                Log.i(TAG, "Native SystemUI ActivityStarter captured");
+            }
+        } catch (Throwable error) {
+            Log.w(TAG, "Unable to obtain SystemUI native activity launcher", error);
+        }
+    }
+
+    /**
+     * Prefer the genuine notification row click. If SystemUI has no native
+     * row inflated, ask its already-initialized ActivityStarter to launch
+     * the original notification PendingIntent with its standard BAL/options
+     * handling. Our module never sends a PendingIntent directly.
+     *
+     * onDispatched is called when native click dispatches or ActivityStarter's
+     * intent-sent callback fires, not as a guarantee the target app opened.
+     */
+    static void open(String notificationKey, Runnable onDispatched) {
+        if (notificationKey == null
+                || !SystemUiNotificationObserver.isActive(notificationKey)) {
             Log.i(TAG, "Notification click skipped: notification is no longer active");
-            return false;
+            return;
         }
         View row;
         synchronized (CLICKABLE_ROWS) {
             WeakReference<View> reference = CLICKABLE_ROWS.get(notificationKey);
             row = reference == null ? null : reference.get();
         }
-        if (row == null) {
-            Log.i(TAG, "Notification click unavailable: no native row registered");
-            return false;
+        if (row != null) {
+            if (!row.hasOnClickListeners() || !row.isEnabled()) {
+                Log.i(TAG, "Notification click unavailable: native row is not actionable");
+                return;
+            }
+            try {
+                if (row.performClick()) {
+                    Log.i(TAG, "Notification click dispatched through native row");
+                    onDispatched.run();
+                } else {
+                    Log.w(TAG, "Native notification row rejected click");
+                }
+            } catch (Throwable error) {
+                Log.e(TAG, "Native notification row click failed", error);
+            }
+            return;
         }
-        if (!row.hasOnClickListeners() || !row.isEnabled()) {
-            Log.i(TAG, "Notification click unavailable: native row not actionable");
-            return false;
+
+        PendingIntent action = SystemUiNotificationObserver.getOpenAction(notificationKey);
+        if (action == null) {
+            Log.i(TAG, "Notification has no native opening action");
+            return;
+        }
+        Object starter = systemActivityStarter.get();
+        if (starter == null) {
+            Log.w(TAG, "Native SystemUI ActivityStarter not captured; leaving panel open");
+            return;
         }
         try {
-            boolean dispatched = row.performClick();
-            Log.i(TAG, "Native notification click performed=" + dispatched);
-            return dispatched;
-        } catch (Throwable e) {
-            Log.e(TAG, "Native notification click failed", e);
-            return false;
+            Log.i(TAG, "Dispatching notification via native SystemUI ActivityStarter");
+            XposedHelpers.callMethod(starter, "startPendingIntentDismissingKeyguard",
+                    action, (Runnable) () -> {
+                        Log.i(TAG, "Native SystemUI ActivityStarter intent-sent callback");
+                        onDispatched.run();
+                    });
+        } catch (Throwable error) {
+            Log.e(TAG, "Native SystemUI activity start failed", error);
         }
     }
 

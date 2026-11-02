@@ -1,6 +1,6 @@
 # BB UI
 
-## BB7 Pull-down — native notification opening (v0.5.1)
+## BB7 Pull-down — native notification opening (v0.5.2)
 
 **Branch:** `feat/bb7-native-notification-click` (from `master`). No code from the abandoned
 `feat/bb7-shade` notification/QS hooks is included.
@@ -31,13 +31,17 @@ refresh it. This filters our presentation, not Android's notification list.
 Navigation has two explicit levels: Up/Down selects application icons;
 trackpad click/Enter enters that app's notifications. Up/Down then selects
 individual notification cards, with a blue highlight. Trackpad click/Enter
-delegates to the existing native SystemUI notification-row click handler.
-The native click handler is responsible for activity launches, bubbles,
-notification dismissal and system notification click reporting. Back returns to the same app icon, then Back again
+delegates to the existing native SystemUI notification-row click handler
+when a native row is available. When no stock row has been inflated, it
+delegates the notification's original opening PendingIntent to LineageOS's
+existing SystemUI ActivityStarter (which handles Android background launches).
+The full stock row-click path additionally handles bubbles, auto-cancel and
+notification click reporting; those additional semantics are not guaranteed
+for notifications using the ActivityStarter fallback. Back returns to the same app icon, then Back again
 closes the pull-down. Touch can tap apps and notification cards directly.
 Left/Right never changes navigation levels. Notifications without a
-native clickable row remain selectable, but activating them leaves the
-pull-down open and logs the reason. Dismissal,
+native clickable row and no original opening PendingIntent remain selectable,
+but activating them leaves the pull-down open and logs the reason. Dismissal,
 inline reply, custom layouts and attachments are not implemented. The panel closes on screen-off to avoid exposing previews
 on the lock screen.
 
@@ -70,12 +74,14 @@ Logs:
 adb logcat -d -s BB7-PullDown:I '*:S'
 ```
 
-The module observes `NotificationClicker.register()` and dispatches
-`performClick()` on the original SystemUI notification row. It does not
-send the application's `PendingIntent` itself. If a native row is not
-available or Android did not register a click action for that notification,
-the custom panel stays open and logs why instead of pretending it opened
-the app.
+The module observes `NotificationClicker.register()` and uses the original
+SystemUI notification row when available. If no native row exists, it captures
+the native `ActivityStarter` provided to `NotificationsControllerImpl` and
+calls `startPendingIntentDismissingKeyguard()` on the notification's original
+action; it never directly calls `PendingIntent.send()`. If that launcher
+is unavailable or the notification has no opening action, the panel stays
+open and logs why. An ActivityStarter callback reports attempted dispatch,
+not proof of app foregrounding.
 
 Rollback without a full phone reboot:
 
