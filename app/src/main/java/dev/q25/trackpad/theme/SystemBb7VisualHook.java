@@ -61,6 +61,7 @@ public final class SystemBb7VisualHook implements IXposedHookLoadPackage {
                 + identity);
         run("native View backgrounds", () -> SystemBb7RootViewHook.install());
         run("framework theme colors", () -> SystemBb7NativeTheme.install());
+        run("native Material resource colors", () -> SystemBb7ResourceColors.install());
         run("native shared components", () ->
                 SystemBb7NativeVisuals.install(load.packageName, load.classLoader));
         run("Compose Material2/3", () ->
