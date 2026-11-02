@@ -7,8 +7,8 @@ android {
         applicationId 'dev.q25.trackpad'
         minSdk 33
         targetSdk 28
-        versionCode 43
-        versionName '0.9.13-bbos7-statusbar-dev'
+        versionCode 42
+        versionName '0.9.12-native-grid-dpad-dev'
     }
     // Compile legacy feature sources into this one APK. These directories
     // are source roots only; their former application modules are not built.
