@@ -258,19 +258,62 @@ final class NativeNotificationClicks {
     }
 
     /**
-     * Apply SystemUI's own notification-click services, matching the
-     * row-based activity starter's auto-cancel and notification click reporting.
-     * Only native NotificationEntry, OnUserInteractionCallbackImpl,
-     * NotificationVisibilityProvider and NotificationClickNotifier are used.
-     * Do not fabricate a dismissal or cancel an unmarked notification.
+     * Copy the native StatusBarNotificationActivityStarter's policy and calls,
+     * not a custom notification removal. This is executed immediately after
+     * dispatching ActivityStarter, as stock SystemUI does after starting an
+     * activity, rather than waiting for an asynchronous intent-sent callback.
+     *
+     * Keep auto-dismiss independent from NMS click reporting: availability of
+     * one native service must not suppress the other.
      */
     private static void recordNativeClick(String key, Object entry) {
         Object interaction = nativeInteraction.get();
         Object notifier = nativeClickNotifier.get();
-        if (entry == null || interaction == null || notifier == null) {
-            Log.w(TAG, "Native click bookkeeping unavailable: entry=" + (entry != null)
-                    + " interaction=" + (interaction != null)
-                    + " notifier=" + (notifier != null));
+        Log.i(TAG, "Native click services: entry=" + (entry != null)
+                + " interaction=" + (interaction != null)
+                + " notifier=" + (notifier != null));
+        if (entry == null) {
+            Log.w(TAG, "No native notification entry for click bookkeeping");
+            return;
+        }
+        StatusBarNotification sbn;
+        boolean canBubble;
+        try {
+            sbn = (StatusBarNotification) XposedHelpers.callMethod(entry, "getSbn");
+            canBubble = (Boolean) XposedHelpers.callMethod(entry, "canBubble");
+        } catch (Throwable error) {
+            Log.e(TAG, "Unable to read native notification click policy", error);
+            return;
+        }
+
+        boolean autoCancel = !canBubble && sbn != null && sbn.getNotification() != null
+                && (sbn.getNotification().flags & Notification.FLAG_AUTO_CANCEL)
+                == Notification.FLAG_AUTO_CANCEL;
+        Log.i(TAG, "Native click policy: autoCancel=" + autoCancel
+                + " canBubble=" + canBubble);
+
+        // Matches StatusBarNotificationActivityStarter:
+        // registerFutureDismissal(entry, REASON_CLICK) and execute its
+        // system-owned Runnable on SystemUI main. No manual cancel call.
+        if (autoCancel) {
+            if (interaction == null) {
+                Log.w(TAG, "Native auto-cancel unavailable: interaction callback not captured");
+            } else {
+                try {
+                    Runnable removal = (Runnable) XposedHelpers.callMethod(
+                            interaction, "registerFutureDismissal",
+                            entry, NotificationListenerService.REASON_CLICK);
+                    removal.run();
+                    Log.i(TAG, "Native auto-cancel notification dismissal dispatched");
+                } catch (Throwable error) {
+                    Log.e(TAG, "Native auto-cancel notification dismissal failed", error);
+                }
+            }
+        }
+
+        // The stock notification-click notifier is independent of auto-cancel.
+        if (notifier == null || interaction == null) {
+            Log.w(TAG, "Native notification click reporting unavailable");
             return;
         }
         try {
@@ -278,22 +321,10 @@ final class NativeNotificationClicks {
                     interaction, "mVisibilityProvider");
             Object visibility = XposedHelpers.callMethod(
                     visibilityProvider, "obtain", entry, true);
-            StatusBarNotification sbn = (StatusBarNotification)
-                    XposedHelpers.callMethod(entry, "getSbn");
-            boolean isBubble = (Boolean) XposedHelpers.callMethod(entry, "isBubble");
-            if (!isBubble && sbn != null && sbn.getNotification() != null
-                    && (sbn.getNotification().flags & Notification.FLAG_AUTO_CANCEL)
-                    == Notification.FLAG_AUTO_CANCEL) {
-                Runnable removal = (Runnable) XposedHelpers.callMethod(
-                        interaction, "registerFutureDismissal",
-                        entry, NotificationListenerService.REASON_CLICK);
-                removal.run();
-                Log.i(TAG, "Native auto-cancel notification dismissal dispatched");
-            }
             XposedHelpers.callMethod(notifier, "onNotificationClick", key, visibility);
             Log.i(TAG, "Native notification click reported to notification manager");
         } catch (Throwable error) {
-            Log.e(TAG, "Native notification click bookkeeping failed", error);
+            Log.e(TAG, "Native notification click reporting failed", error);
         }
     }
 
@@ -390,9 +421,11 @@ final class NativeNotificationClicks {
             XposedHelpers.callMethod(starter, "startPendingIntentDismissingKeyguard",
                     action, (Runnable) () -> {
                         Log.i(TAG, "Native SystemUI ActivityStarter intent-sent callback");
-                        recordNativeClick(notificationKey, nativeEntry);
                         onDispatched.run();
                     });
+            // Stock SystemUI registers the native future-dismissal immediately
+            // after requesting the launch, not in the intent-sent callback.
+            recordNativeClick(notificationKey, nativeEntry);
         } catch (Throwable error) {
             Log.e(TAG, "Native SystemUI activity start failed", error);
         }
