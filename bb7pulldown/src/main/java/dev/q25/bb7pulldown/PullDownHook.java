@@ -152,6 +152,18 @@ public final class PullDownHook implements IXposedHookLoadPackage {
         });
     }
 
+    private static void openNotification(String key) {
+        TwoColumnPanel current = panel;
+        if (current == null || !shown || openingOrClosing) return;
+        if (locked(current.getContext())) {
+            dismissPanelImmediately();
+            return;
+        }
+        if (SystemUiNotificationObserver.openNotification(key)) {
+            dismissPanelImmediately();
+        }
+    }
+
     private static void showPanel(Context context) {
         if (shown || openingOrClosing || !enabled() || locked(context)) return;
         openingOrClosing = true;
@@ -165,7 +177,8 @@ public final class PullDownHook implements IXposedHookLoadPackage {
         // Query the live, system-owned notification listener before drawing.
         // The gesture and 15/85 geometry are unchanged.
         SystemUiNotificationObserver.refreshBeforeOpen();
-        TwoColumnPanel root = new TwoColumnPanel(context, PullDownHook::dismissPanel);
+        TwoColumnPanel root = new TwoColumnPanel(
+                context, PullDownHook::dismissPanel, PullDownHook::openNotification);
         root.setNotifications(SystemUiNotificationObserver.itemsSnapshot());
         WindowManager.LayoutParams params = new WindowManager.LayoutParams(
                 WindowManager.LayoutParams.MATCH_PARENT,
