@@ -108,10 +108,19 @@ public final class SettingsFocusThemeHook implements IXposedHookLoadPackage {
     }
 
     private static boolean isPreferenceAdapter(Object adapter) {
-        return adapter != null && (
-                isClassOrSubclass(adapter.getClass(), "androidx.preference.PreferenceGroupAdapter")
-                || isClassOrSubclass(adapter.getClass(),
-                        "android.support.v7.preference.PreferenceGroupAdapter"));
+        if (adapter == null) return false;
+        Class<?> type = adapter.getClass();
+        // LineageOS 24 SettingsPreferenceFragment creates
+        // com.android.settings.widget.HighlightablePreferenceGroupAdapter,
+        // which extends SettingsPreferenceGroupAdapter. Match the actual
+        // shared Settings adapter hierarchy before considering fallback types.
+        return isClassOrSubclass(type,
+                    "com.android.settingslib.widget.SettingsPreferenceGroupAdapter")
+                || isClassOrSubclass(type,
+                    "com.android.settings.widget.HighlightablePreferenceGroupAdapter")
+                || isClassOrSubclass(type, "androidx.preference.PreferenceGroupAdapter")
+                || isClassOrSubclass(type,
+                    "android.support.v7.preference.PreferenceGroupAdapter");
     }
 
     /**
