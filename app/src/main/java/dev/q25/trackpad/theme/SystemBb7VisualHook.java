@@ -27,6 +27,11 @@ public final class SystemBb7VisualHook implements IXposedHookLoadPackage {
         Log.i(TAG, "Installing shared BB7 appearance in " + load.packageName
                 + " process=" + load.processName);
         try {
+            SystemBb7NativeTheme.install();
+        } catch (Throwable error) {
+            Log.e(TAG, "Framework colour theme unavailable", error);
+        }
+        try {
             SystemBb7NativeVisuals.install(load.packageName, load.classLoader);
         } catch (Throwable error) {
             Log.e(TAG, "Native visuals unavailable", error);
