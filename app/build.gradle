@@ -7,8 +7,8 @@ android {
         applicationId 'dev.q25.trackpad'
         minSdk 33
         targetSdk 28
-        versionCode 44
-        versionName '0.9.14-context-statusbar-dev'
+        versionCode 45
+        versionName '0.9.15-shared-settings-focus-dev'
     }
     // Compile legacy feature sources into this one APK. These directories
     // are source roots only; their former application modules are not built.
