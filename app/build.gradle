@@ -7,8 +7,8 @@ android {
         applicationId 'dev.q25.trackpad'
         minSdk 33
         targetSdk 28
-        versionCode 35
-        versionName '0.9.5-unified-bb7-theme-dev'
+        versionCode 36
+        versionName '0.9.6-filled-status-focus-dev'
     }
     // Compile legacy feature sources into this one APK. These directories
     // are source roots only; their former application modules are not built.
