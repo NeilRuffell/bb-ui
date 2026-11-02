@@ -374,11 +374,11 @@ final class NativeNotificationClicks {
             return;
         }
 
-        // A native bubble must be expanded by SystemUI's real bubble manager.
-        // Merely being eligible for bubbles (canBubble) does not make a
-        // notification a bubble.
+        // Match StatusBarNotificationActivityStarter exactly: it uses
+        // entry.canBubble() when selecting the native bubble expansion path,
+        // and excludes those entries from FLAG_AUTO_CANCEL dismissal.
         try {
-            if (entry != null && (Boolean) XposedHelpers.callMethod(entry, "isBubble")) {
+            if (entry != null && (Boolean) XposedHelpers.callMethod(entry, "canBubble")) {
                 Object nativeStarter = notificationActivityStarter.get();
                 if (nativeStarter == null) {
                     Log.w(TAG, "Native bubble click unavailable: notification starter missing");
