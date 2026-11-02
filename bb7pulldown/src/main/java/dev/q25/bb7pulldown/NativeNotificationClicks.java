@@ -290,6 +290,13 @@ final class NativeNotificationClicks {
                     Log.w(TAG, "Native bubble click unavailable: notification starter missing");
                     return;
                 }
+                java.util.Optional<?> bubbles =
+                        (java.util.Optional<?>) XposedHelpers.getObjectField(
+                                nativeStarter, "mBubblesManagerOptional");
+                if (!bubbles.isPresent()) {
+                    Log.i(TAG, "Native bubble manager absent; leaving pull-down open");
+                    return;
+                }
                 XposedHelpers.callMethod(
                         nativeStarter, "expandBubbleStackOnMainThread", entry);
                 recordNativeClick(notificationKey, entry);
