@@ -46,24 +46,8 @@ jobs:
         with:
           gradle-version: '8.11.1'
 
-      - name: Compile debug APK
-        run: gradle :app:assembleDebug :bb7focus:assembleDebug :bb7pulldown:assembleDebug :bb7pulldown:testDebugUnitTest --no-daemon --stacktrace
-
-      - name: Upload BB7 Appearance debug APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: bb7-appearance-debug-apk
-          path: bb7focus/build/outputs/apk/debug/bb7focus-debug.apk
-          if-no-files-found: error
-          retention-days: 14
-
-      - name: Upload BB7 Pull-down debug APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: bb7-pulldown-debug-apk
-          path: bb7pulldown/build/outputs/apk/debug/bb7pulldown-debug.apk
-          if-no-files-found: error
-          retention-days: 14
+      - name: Compile and test unified BB UI APK
+        run: gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
