@@ -2,6 +2,8 @@ package dev.q25.bb7pulldown;
 
 import android.app.Notification;
 import android.app.PendingIntent;
+import android.os.Handler;
+import android.os.Looper;
 import android.service.notification.NotificationListenerService;
 import android.service.notification.StatusBarNotification;
 import android.util.Log;
@@ -303,8 +305,10 @@ final class NativeNotificationClicks {
                     Runnable removal = (Runnable) XposedHelpers.callMethod(
                             interaction, "registerFutureDismissal",
                             entry, NotificationListenerService.REASON_CLICK);
-                    removal.run();
-                    Log.i(TAG, "Native auto-cancel notification dismissal dispatched");
+                    // LineageOS posts its native FutureDismissal to the
+                    // main thread after dispatching the launch request.
+                    new Handler(Looper.getMainLooper()).post(removal);
+                    Log.i(TAG, "Native auto-cancel notification dismissal scheduled");
                 } catch (Throwable error) {
                     Log.e(TAG, "Native auto-cancel notification dismissal failed", error);
                 }
