@@ -316,7 +316,18 @@ final class TwoColumnPanel extends FrameLayout {
         if (selected.isEmpty()) {
             addPlaceholder("No notifications for this app");
         } else {
+            boolean silentHeadingAdded = false;
             for (NotificationItem item : selected) {
+                if (item.silent && !silentHeadingAdded) {
+                    // A purely visual separator. Not in notificationTargets,
+                    // so it cannot add an extra trackpad/keyboard stop.
+                    TextView heading = text("Silent", 12, palette.muted);
+                    heading.setTypeface(null, android.graphics.Typeface.BOLD);
+                    heading.setFocusable(false);
+                    heading.setPadding(dp(8), dp(12), dp(8), dp(8));
+                    notificationList.addView(heading);
+                    silentHeadingAdded = true;
+                }
                 LinearLayout card = createNotificationCard(item);
                 notificationList.addView(card);
                 notificationRows.add(card);
