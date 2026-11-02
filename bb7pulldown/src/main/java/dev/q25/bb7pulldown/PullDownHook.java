@@ -168,6 +168,40 @@ public final class PullDownHook implements IXposedHookLoadPackage {
         }));
     }
 
+    /** Native notification actions; keep the existing card-open route untouched. */
+    private static void activateNotificationAction(String key, int index) {
+        TwoColumnPanel current = panel;
+        if (current == null || !shown || openingOrClosing) return;
+        if (locked(current.getContext())) {
+            dismissPanelImmediately();
+            return;
+        }
+        NativeNotificationActions.activate(key, index, current.getContext(),
+                () -> current.post(() -> {
+                    if (panel == current && shown) dismissPanelImmediately();
+                }));
+    }
+
+    private static void dismissNotification(String key) {
+        TwoColumnPanel current = panel;
+        if (current == null || !shown || openingOrClosing) return;
+        if (locked(current.getContext())) {
+            dismissPanelImmediately();
+            return;
+        }
+        SystemUiNotificationObserver.dismiss(key);
+    }
+
+    private static boolean sendNotificationReply(String key, int index, String reply) {
+        TwoColumnPanel current = panel;
+        if (current == null || !shown || openingOrClosing) return false;
+        if (locked(current.getContext())) {
+            dismissPanelImmediately();
+            return false;
+        }
+        return NativeNotificationActions.reply(key, index, reply, current.getContext());
+    }
+
     private static void showPanel(Context context) {
         if (shown || openingOrClosing || !enabled() || locked(context)) return;
         openingOrClosing = true;
@@ -182,7 +216,18 @@ public final class PullDownHook implements IXposedHookLoadPackage {
         // The gesture and 15/85 geometry are unchanged.
         SystemUiNotificationObserver.refreshBeforeOpen();
         TwoColumnPanel root = new TwoColumnPanel(
-                context, PullDownHook::dismissPanel, PullDownHook::openNotification);
+                context, PullDownHook::dismissPanel, PullDownHook::openNotification,
+                new TwoColumnPanel.NotificationActionListener() {
+                    @Override public void onAction(String key, int index) {
+                        activateNotificationAction(key, index);
+                    }
+                    @Override public void onDismiss(String key) {
+                        dismissNotification(key);
+                    }
+                    @Override public boolean onReply(String key, int index, String reply) {
+                        return sendNotificationReply(key, index, reply);
+                    }
+                });
         root.setNotifications(SystemUiNotificationObserver.itemsSnapshot());
         WindowManager.LayoutParams params = new WindowManager.LayoutParams(
                 WindowManager.LayoutParams.MATCH_PARENT,
