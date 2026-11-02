@@ -267,7 +267,19 @@ public final class PullDownHook implements IXposedHookLoadPackage {
         IntentFilter filter = new IntentFilter();
         filter.addAction(Intent.ACTION_CLOSE_SYSTEM_DIALOGS);
         filter.addAction(Intent.ACTION_SCREEN_OFF);
-        context.registerReceiver(receiver, filter);
+        try {
+            // Android 13+ requires an explicit receiver export flag when
+            // a filter contains non-exempt system broadcasts.
+            context.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED);
+        } catch (SecurityException registrationError) {
+            // Never regress panel opening solely because Home-collapse
+            // broadcasts cannot be registered on this system image.
+            // Retain the essential screen-off privacy receiver.
+            Log.w(TAG, "System-dialog close receiver rejected; using screen-off only",
+                    registrationError);
+            context.registerReceiver(receiver, new IntentFilter(Intent.ACTION_SCREEN_OFF),
+                    Context.RECEIVER_NOT_EXPORTED);
+        }
         screenOffReceiver = receiver;
         receiverContext = context;
     }
