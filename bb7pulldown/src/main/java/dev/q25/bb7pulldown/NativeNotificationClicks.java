@@ -34,9 +34,21 @@ final class NativeNotificationClicks {
             "com.android.systemui.statusbar.phone.StatusBarNotificationActivityStarter";
     private static final String ACTIVITY_STARTER_IMPL =
             "com.android.systemui.statusbar.phone.ActivityStarterImpl";
+    private static final String NOTIF_COLLECTION =
+            "com.android.systemui.statusbar.notification.collection.NotifCollection";
+    private static final String USER_INTERACTION =
+            "com.android.systemui.statusbar.notification.collection.inflation.OnUserInteractionCallbackImpl";
+    private static final String CLICK_NOTIFIER =
+            "com.android.systemui.statusbar.NotificationClickNotifier";
     private static volatile WeakReference<Object> systemActivityStarter =
             new WeakReference<>(null);
     private static volatile WeakReference<Object> notificationActivityStarter =
+            new WeakReference<>(null);
+    private static volatile WeakReference<Object> nativeCollection =
+            new WeakReference<>(null);
+    private static volatile WeakReference<Object> nativeInteraction =
+            new WeakReference<>(null);
+    private static volatile WeakReference<Object> nativeClickNotifier =
             new WeakReference<>(null);
 
     // Row lifecycle remains owned by SystemUI. No strong references to rows.
@@ -45,6 +57,7 @@ final class NativeNotificationClicks {
     static void install(ClassLoader loader) {
         installClickerObserver(loader);
         installActivityStarterObserver(loader);
+        installNotificationPipelineObservers(loader);
     }
 
     private static void installClickerObserver(ClassLoader loader) {
@@ -140,9 +153,77 @@ final class NativeNotificationClicks {
         }
     }
 
+    /**
+     * Capture SystemUI's independently constructed notification services.
+     * On the Q25, ActivityStarterImpl is constructed while
+     * StatusBarNotificationActivityStarter may never be constructed.
+     * None of these services is constructed or replaced by this module.
+     */
+    private static void installNotificationPipelineObservers(ClassLoader loader) {
+        observeConstructor(loader, NOTIF_COLLECTION, "NotifCollection",
+                object -> nativeCollection = new WeakReference<>(object));
+        observeConstructor(loader, USER_INTERACTION, "OnUserInteractionCallback",
+                object -> {
+                    nativeInteraction = new WeakReference<>(object);
+                    try {
+                        Object collection = XposedHelpers.getObjectField(
+                                object, "mNotifCollection");
+                        if (collection != null) {
+                            nativeCollection = new WeakReference<>(collection);
+                        }
+                    } catch (Throwable error) {
+                        Log.w(TAG, "Native interaction collection unavailable", error);
+                    }
+                });
+        observeConstructor(loader, CLICK_NOTIFIER, "NotificationClickNotifier",
+                object -> nativeClickNotifier = new WeakReference<>(object));
+    }
+
+    private interface Capture { void accept(Object value); }
+
+    private static void observeConstructor(ClassLoader loader, String className,
+            String label, Capture capture) {
+        Class<?> type = XposedHelpers.findClassIfExists(className, loader);
+        if (type == null) {
+            Log.i(TAG, "Native " + label + " class absent in this classloader");
+            return;
+        }
+        try {
+            XposedBridge.hookAllConstructors(type, new XC_MethodHook() {
+                @Override protected void afterHookedMethod(MethodHookParam param) {
+                    if (param.hasThrowable() || param.thisObject == null) return;
+                    try {
+                        capture.accept(param.thisObject);
+                        Log.i(TAG, "Native " + label + " captured");
+                    } catch (Throwable error) {
+                        Log.w(TAG, "Unable to capture native " + label, error);
+                    }
+                }
+            });
+            Log.i(TAG, "Native " + label + " constructor observer registered");
+        } catch (Throwable error) {
+            Log.e(TAG, "Unable to observe native " + label, error);
+        }
+    }
+
     private static void captureActivityStarter(Object nativeNotificationStarter, String source) {
         if (nativeNotificationStarter == null) return;
         notificationActivityStarter = new WeakReference<>(nativeNotificationStarter);
+        try {
+            Object interaction = XposedHelpers.getObjectField(
+                    nativeNotificationStarter, "mOnUserInteractionCallback");
+            if (interaction != null) {
+                nativeInteraction = new WeakReference<>(interaction);
+                Object collection = XposedHelpers.getObjectField(
+                        interaction, "mNotifCollection");
+                if (collection != null) nativeCollection = new WeakReference<>(collection);
+            }
+            Object notifier = XposedHelpers.getObjectField(
+                    nativeNotificationStarter, "mClickNotifier");
+            if (notifier != null) nativeClickNotifier = new WeakReference<>(notifier);
+        } catch (Throwable error) {
+            Log.i(TAG, "Notification starter lacks optional click service references");
+        }
         try {
             Object nativeStarter = XposedHelpers.getObjectField(
                     nativeNotificationStarter, "mActivityStarter");
@@ -159,71 +240,57 @@ final class NativeNotificationClicks {
         Log.i(TAG, "Native SystemUI ActivityStarter captured via " + source);
     }
 
-    /**
-     * Obtain the native NotificationEntry from the exact NotifCollection owned
-     * by SystemUI. Looking up by key avoids missing rows inflated before our
-     * hooks were registered and prevents fabricating a notification entry.
-     */
+    /** Retrieve an actual SystemUI NotificationEntry by its notification key. */
     private static Object getNativeEntry(String key) {
-        Object starter = notificationActivityStarter.get();
-        if (starter == null) {
-            Log.w(TAG, "Native notification activity starter not captured");
+        Object collection = nativeCollection.get();
+        if (collection == null) {
+            Log.i(TAG, "Native NotifCollection unavailable (launch remains permitted)");
             return null;
         }
         try {
-            Object interaction = XposedHelpers.getObjectField(
-                    starter, "mOnUserInteractionCallback");
-            Object collection = XposedHelpers.getObjectField(interaction, "mNotifCollection");
             Object entry = XposedHelpers.callMethod(collection, "getEntry", key);
-            if (entry == null) {
-                Log.i(TAG, "No native NotifCollection entry for selected key");
-            }
+            if (entry == null) Log.i(TAG, "No native entry for selected notification");
             return entry;
         } catch (Throwable error) {
-            Log.e(TAG, "Native NotifCollection entry lookup failed", error);
+            Log.w(TAG, "Native NotifCollection entry lookup failed", error);
             return null;
         }
     }
 
     /**
-     * This follows the same native methods used by
-     * StatusBarNotificationActivityStarter.handleNotificationClickAfterPanelCollapsed.
-     * The stock pipeline decides whether an entry is auto-cancelable; no
-     * NotificationListenerService.cancelNotification or custom removal is used.
-     *
-     * Called on the UI thread after ActivityStarter's intent-sent callback.
+     * Apply SystemUI's own notification-click services, matching the
+     * row-based activity starter's auto-cancel and notification click reporting.
+     * Only native NotificationEntry, OnUserInteractionCallbackImpl,
+     * NotificationVisibilityProvider and NotificationClickNotifier are used.
+     * Do not fabricate a dismissal or cancel an unmarked notification.
      */
     private static void recordNativeClick(String key, Object entry) {
-        Object starter = notificationActivityStarter.get();
-        if (starter == null || entry == null) {
-            Log.w(TAG, "Native click bookkeeping unavailable: no native entry/starter");
+        Object interaction = nativeInteraction.get();
+        Object notifier = nativeClickNotifier.get();
+        if (entry == null || interaction == null || notifier == null) {
+            Log.w(TAG, "Native click bookkeeping unavailable: entry=" + (entry != null)
+                    + " interaction=" + (interaction != null)
+                    + " notifier=" + (notifier != null));
             return;
         }
         try {
-            StatusBarNotification sbn = (StatusBarNotification)
-                    XposedHelpers.callMethod(entry, "getSbn");
-            boolean isBubble = (Boolean) XposedHelpers.callMethod(entry, "canBubble");
-            boolean autoCancel = !isBubble && sbn != null && sbn.getNotification() != null
-                    && (sbn.getNotification().flags & Notification.FLAG_AUTO_CANCEL)
-                    == Notification.FLAG_AUTO_CANCEL;
             Object visibilityProvider = XposedHelpers.getObjectField(
-                    starter, "mVisibilityProvider");
+                    interaction, "mVisibilityProvider");
             Object visibility = XposedHelpers.callMethod(
                     visibilityProvider, "obtain", entry, true);
-            if (autoCancel) {
-                Object interaction = XposedHelpers.getObjectField(
-                        starter, "mOnUserInteractionCallback");
+            StatusBarNotification sbn = (StatusBarNotification)
+                    XposedHelpers.callMethod(entry, "getSbn");
+            boolean isBubble = (Boolean) XposedHelpers.callMethod(entry, "isBubble");
+            if (!isBubble && sbn != null && sbn.getNotification() != null
+                    && (sbn.getNotification().flags & Notification.FLAG_AUTO_CANCEL)
+                    == Notification.FLAG_AUTO_CANCEL) {
                 Runnable removal = (Runnable) XposedHelpers.callMethod(
                         interaction, "registerFutureDismissal",
                         entry, NotificationListenerService.REASON_CLICK);
-                // Call native future dismissal on SystemUI main, as stock does.
                 removal.run();
                 Log.i(TAG, "Native auto-cancel notification dismissal dispatched");
-            } else {
-                Log.i(TAG, "Notification not auto-cancelable; stock policy retained");
             }
-            Object clickNotifier = XposedHelpers.getObjectField(starter, "mClickNotifier");
-            XposedHelpers.callMethod(clickNotifier, "onNotificationClick", key, visibility);
+            XposedHelpers.callMethod(notifier, "onNotificationClick", key, visibility);
             Log.i(TAG, "Native notification click reported to notification manager");
         } catch (Throwable error) {
             Log.e(TAG, "Native notification click bookkeeping failed", error);
@@ -276,15 +343,11 @@ final class NativeNotificationClicks {
             return;
         }
 
-        if (entry == null) {
-            Log.w(TAG, "No native notification entry; cannot apply stock click semantics");
-            return;
-        }
-
-        // Stock SystemUI handles bubble clicks through its BubblesManager,
-        // not by sending the notification's content intent.
+        // A native bubble must be expanded by SystemUI's real bubble manager.
+        // Merely being eligible for bubbles (canBubble) does not make a
+        // notification a bubble.
         try {
-            if ((Boolean) XposedHelpers.callMethod(entry, "canBubble")) {
+            if (entry != null && (Boolean) XposedHelpers.callMethod(entry, "isBubble")) {
                 Object nativeStarter = notificationActivityStarter.get();
                 if (nativeStarter == null) {
                     Log.w(TAG, "Native bubble click unavailable: notification starter missing");
@@ -322,7 +385,8 @@ final class NativeNotificationClicks {
 
         try {
             final Object nativeEntry = entry;
-            Log.i(TAG, "Dispatching notification via native SystemUI ActivityStarter");
+            Log.i(TAG, "Dispatching via native SystemUI ActivityStarter"
+                    + " nativeEntry=" + (nativeEntry != null));
             XposedHelpers.callMethod(starter, "startPendingIntentDismissingKeyguard",
                     action, (Runnable) () -> {
                         Log.i(TAG, "Native SystemUI ActivityStarter intent-sent callback");
