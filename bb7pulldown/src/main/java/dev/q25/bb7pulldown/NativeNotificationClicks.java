@@ -1,6 +1,8 @@
 package dev.q25.bb7pulldown;
 
+import android.app.Notification;
 import android.app.PendingIntent;
+import android.service.notification.NotificationListenerService;
 import android.service.notification.StatusBarNotification;
 import android.util.Log;
 import android.view.View;
@@ -33,6 +35,8 @@ final class NativeNotificationClicks {
     private static final String ACTIVITY_STARTER_IMPL =
             "com.android.systemui.statusbar.phone.ActivityStarterImpl";
     private static volatile WeakReference<Object> systemActivityStarter =
+            new WeakReference<>(null);
+    private static volatile WeakReference<Object> notificationActivityStarter =
             new WeakReference<>(null);
 
     // Row lifecycle remains owned by SystemUI. No strong references to rows.
@@ -136,12 +140,14 @@ final class NativeNotificationClicks {
         }
     }
 
-    private static void captureActivityStarter(Object notificationActivityStarter, String source) {
-        if (notificationActivityStarter == null) return;
+    private static void captureActivityStarter(Object nativeNotificationStarter, String source) {
+        if (nativeNotificationStarter == null) return;
+        notificationActivityStarter = new WeakReference<>(nativeNotificationStarter);
         try {
             Object nativeStarter = XposedHelpers.getObjectField(
-                    notificationActivityStarter, "mActivityStarter");
+                    nativeNotificationStarter, "mActivityStarter");
             captureDirectActivityStarter(nativeStarter, source);
+            Log.i(TAG, "Native notification click services captured via " + source);
         } catch (Throwable error) {
             Log.w(TAG, "Unable to obtain SystemUI native launcher from " + source, error);
         }
@@ -154,13 +160,80 @@ final class NativeNotificationClicks {
     }
 
     /**
-     * Prefer the genuine notification row click. If SystemUI has no native
-     * row inflated, ask its already-initialized ActivityStarter to launch
-     * the original notification PendingIntent with its standard BAL/options
-     * handling. Our module never sends a PendingIntent directly.
+     * Obtain the native NotificationEntry from the exact NotifCollection owned
+     * by SystemUI. Looking up by key avoids missing rows inflated before our
+     * hooks were registered and prevents fabricating a notification entry.
+     */
+    private static Object getNativeEntry(String key) {
+        Object starter = notificationActivityStarter.get();
+        if (starter == null) {
+            Log.w(TAG, "Native notification activity starter not captured");
+            return null;
+        }
+        try {
+            Object interaction = XposedHelpers.getObjectField(
+                    starter, "mOnUserInteractionCallback");
+            Object collection = XposedHelpers.getObjectField(interaction, "mNotifCollection");
+            Object entry = XposedHelpers.callMethod(collection, "getEntry", key);
+            if (entry == null) {
+                Log.i(TAG, "No native NotifCollection entry for selected key");
+            }
+            return entry;
+        } catch (Throwable error) {
+            Log.e(TAG, "Native NotifCollection entry lookup failed", error);
+            return null;
+        }
+    }
+
+    /**
+     * This follows the same native methods used by
+     * StatusBarNotificationActivityStarter.handleNotificationClickAfterPanelCollapsed.
+     * The stock pipeline decides whether an entry is auto-cancelable; no
+     * NotificationListenerService.cancelNotification or custom removal is used.
      *
-     * onDispatched is called when native click dispatches or ActivityStarter's
-     * intent-sent callback fires, not as a guarantee the target app opened.
+     * Called on the UI thread after ActivityStarter's intent-sent callback.
+     */
+    private static void recordNativeClick(String key, Object entry) {
+        Object starter = notificationActivityStarter.get();
+        if (starter == null || entry == null) {
+            Log.w(TAG, "Native click bookkeeping unavailable: no native entry/starter");
+            return;
+        }
+        try {
+            StatusBarNotification sbn = (StatusBarNotification)
+                    XposedHelpers.callMethod(entry, "getSbn");
+            boolean isBubble = (Boolean) XposedHelpers.callMethod(entry, "canBubble");
+            boolean autoCancel = !isBubble && sbn != null && sbn.getNotification() != null
+                    && (sbn.getNotification().flags & Notification.FLAG_AUTO_CANCEL)
+                    == Notification.FLAG_AUTO_CANCEL;
+            Object visibilityProvider = XposedHelpers.getObjectField(
+                    starter, "mVisibilityProvider");
+            Object visibility = XposedHelpers.callMethod(
+                    visibilityProvider, "obtain", entry, true);
+            if (autoCancel) {
+                Object interaction = XposedHelpers.getObjectField(
+                        starter, "mOnUserInteractionCallback");
+                Runnable removal = (Runnable) XposedHelpers.callMethod(
+                        interaction, "registerFutureDismissal",
+                        entry, NotificationListenerService.REASON_CLICK);
+                // Call native future dismissal on SystemUI main, as stock does.
+                removal.run();
+                Log.i(TAG, "Native auto-cancel notification dismissal dispatched");
+            } else {
+                Log.i(TAG, "Notification not auto-cancelable; stock policy retained");
+            }
+            Object clickNotifier = XposedHelpers.getObjectField(starter, "mClickNotifier");
+            XposedHelpers.callMethod(clickNotifier, "onNotificationClick", key, visibility);
+            Log.i(TAG, "Native notification click reported to notification manager");
+        } catch (Throwable error) {
+            Log.e(TAG, "Native notification click bookkeeping failed", error);
+        }
+    }
+
+    /**
+     * Prefer the actual clickable SystemUI row. For notifications whose stock
+     * rows have not been inflated, delegate to SystemUI's own ActivityStarter
+     * and then its actual click/auto-cancel machinery (using the native entry).
      */
     static void open(String notificationKey, Runnable onDispatched) {
         if (notificationKey == null
@@ -168,19 +241,31 @@ final class NativeNotificationClicks {
             Log.i(TAG, "Notification click skipped: notification is no longer active");
             return;
         }
-        View row;
-        synchronized (CLICKABLE_ROWS) {
-            WeakReference<View> reference = CLICKABLE_ROWS.get(notificationKey);
-            row = reference == null ? null : reference.get();
+
+        Object entry = getNativeEntry(notificationKey);
+        View row = null;
+        if (entry != null) {
+            try {
+                Object nativeRow = XposedHelpers.callMethod(entry, "getRow");
+                if (nativeRow instanceof View) row = (View) nativeRow;
+            } catch (Throwable error) {
+                Log.w(TAG, "Native entry has no usable notification row", error);
+            }
+        }
+        if (row == null) {
+            synchronized (CLICKABLE_ROWS) {
+                WeakReference<View> reference = CLICKABLE_ROWS.get(notificationKey);
+                row = reference == null ? null : reference.get();
+            }
         }
         if (row != null) {
             if (!row.hasOnClickListeners() || !row.isEnabled()) {
-                Log.i(TAG, "Notification click unavailable: native row is not actionable");
+                Log.i(TAG, "Notification click unavailable: native row not actionable");
                 return;
             }
             try {
                 if (row.performClick()) {
-                    Log.i(TAG, "Notification click dispatched through native row");
+                    Log.i(TAG, "Native notification row click dispatched");
                     onDispatched.run();
                 } else {
                     Log.w(TAG, "Native notification row rejected click");
@@ -188,6 +273,11 @@ final class NativeNotificationClicks {
             } catch (Throwable error) {
                 Log.e(TAG, "Native notification row click failed", error);
             }
+            return;
+        }
+
+        if (entry == null) {
+            Log.w(TAG, "No native notification entry; cannot apply stock click semantics");
             return;
         }
 
@@ -201,11 +291,14 @@ final class NativeNotificationClicks {
             Log.w(TAG, "Native SystemUI ActivityStarter not captured; leaving panel open");
             return;
         }
+
         try {
+            final Object nativeEntry = entry;
             Log.i(TAG, "Dispatching notification via native SystemUI ActivityStarter");
             XposedHelpers.callMethod(starter, "startPendingIntentDismissingKeyguard",
                     action, (Runnable) () -> {
                         Log.i(TAG, "Native SystemUI ActivityStarter intent-sent callback");
+                        recordNativeClick(notificationKey, nativeEntry);
                         onDispatched.run();
                     });
         } catch (Throwable error) {
