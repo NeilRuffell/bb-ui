@@ -8,7 +8,6 @@ import android.content.IntentFilter;
 import android.graphics.PixelFormat;
 import android.os.Handler;
 import android.os.Looper;
-import android.view.ViewConfiguration;
 import android.view.KeyEvent;
 import android.content.pm.PackageManager;
 import android.widget.FrameLayout;
@@ -54,13 +53,8 @@ public final class PullDownHook implements IXposedHookLoadPackage {
     private static final String ENABLE_PROP = "debug.bb7pulldown.enabled";
     // Intercept SystemUI's native Recents command before Quickstep changes activities.
     private static final String COMMAND_QUEUE = "com.android.systemui.statusbar.CommandQueue";
-    private static final Handler RECENTS_HANDLER = new Handler(Looper.getMainLooper());
-    private static final Object RECENTS_PRESS_LOCK = new Object();
-    private static final ThreadLocal<Boolean> NATIVE_RECENTS_BYPASS = new ThreadLocal<>();
-    private static long appSwitchPressSequence;
-    private static long appSwitchPressStart = -1L;
-    private static boolean recentsOpenedForHold;
-    private static Runnable pendingRecentsLongPress;
+    private static Object nativeRecentsQueue;
+    private static boolean allowOneNativeRecents;
     // Android internal WindowManager.LayoutParams.TYPE_STATUS_BAR_SUB_PANEL
     // is hidden from public SDK stubs; framework value is FIRST_SYSTEM_WINDOW+17.
     private static final int STATUS_BAR_SUB_PANEL_WINDOW_TYPE = 2017;
@@ -133,84 +127,12 @@ public final class PullDownHook implements IXposedHookLoadPackage {
             return;
         }
         try {
-            XposedBridge.hookAllMethods(queue, "preloadRecentApps", new XC_MethodHook() {
-                @Override protected void beforeHookedMethod(MethodHookParam param) {
-                    if (!enabled()) return;
-                    final Object nativeQueue = param.thisObject;
-                    final long sequence;
-                    final long started = SystemClock.uptimeMillis();
-                    synchronized (RECENTS_PRESS_LOCK) {
-                        cancelPendingLongPressLocked();
-                        sequence = ++appSwitchPressSequence;
-                        appSwitchPressStart = started;
-                        recentsOpenedForHold = false;
-                        pendingRecentsLongPress = () -> {
-                            synchronized (RECENTS_PRESS_LOCK) {
-                                if (sequence != appSwitchPressSequence
-                                        || appSwitchPressStart != started
-                                        || recentsOpenedForHold) return;
-                                View bar = nativeStatusBar.get();
-                                if (bar == null || locked(bar.getContext())) return;
-                                recentsOpenedForHold = true;
-                            }
-                            // Trigger while held. Some Android input paths do not send
-                            // a regular toggleRecentApps() when the key is long-held.
-                            if (focusWindow != null) dismissStatusFocus();
-                            try {
-                                NATIVE_RECENTS_BYPASS.set(Boolean.TRUE);
-                                XposedHelpers.callMethod(nativeQueue, "toggleRecentApps");
-                                Log.i(TAG, "BlackBerry long press: native Recents opened at threshold");
-                            } catch (Throwable error) {
-                                synchronized (RECENTS_PRESS_LOCK) {
-                                    recentsOpenedForHold = false;
-                                }
-                                Log.e(TAG, "BlackBerry long-press native Recents failed", error);
-                            } finally {
-                                NATIVE_RECENTS_BYPASS.remove();
-                            }
-                        };
-                        RECENTS_HANDLER.postDelayed(pendingRecentsLongPress,
-                                ViewConfiguration.getLongPressTimeout());
-                    }
-                    Log.i(TAG, "App Switch preload observed; hold timing started");
-                }
-            });
-            XposedBridge.hookAllMethods(queue, "cancelPreloadRecentApps", new XC_MethodHook() {
-                @Override protected void beforeHookedMethod(MethodHookParam param) {
-                    synchronized (RECENTS_PRESS_LOCK) {
-                        cancelPendingLongPressLocked();
-                        // Keep recentsOpenedForHold until release so any trailing
-                        // native toggle cannot close the freshly opened Recents.
-                        if (!recentsOpenedForHold) appSwitchPressStart = -1L;
-                    }
-                }
-            });
             XposedBridge.hookAllMethods(queue, "toggleRecentApps", new XC_MethodHook() {
                 @Override protected void beforeHookedMethod(MethodHookParam param) {
-                    if (!enabled() || Boolean.TRUE.equals(NATIVE_RECENTS_BYPASS.get()))
-                        return;
-                    long elapsed;
-                    boolean alreadyOpened;
-                    synchronized (RECENTS_PRESS_LOCK) {
-                        cancelPendingLongPressLocked();
-                        elapsed = appSwitchPressStart < 0 ? -1L
-                                : SystemClock.uptimeMillis() - appSwitchPressStart;
-                        appSwitchPressStart = -1L;
-                        ++appSwitchPressSequence;
-                        alreadyOpened = recentsOpenedForHold;
-                        recentsOpenedForHold = false;
-                    }
-                    if (alreadyOpened) {
-                        param.setResult(null);
-                        Log.i(TAG, "BlackBerry long-press release consumed; Recents stays open");
-                        return;
-                    }
-                    if (elapsed >= ViewConfiguration.getLongPressTimeout()) {
-                        RECENTS_HANDLER.post(() -> {
-                            if (focusWindow != null) dismissStatusFocus();
-                        });
-                        Log.i(TAG, "BlackBerry long press: original native Recents toggle"
-                                + " on release (held " + elapsed + " ms)");
+                    if (!enabled()) return;
+                    if (allowOneNativeRecents) {
+                        allowOneNativeRecents = false;
+                        Log.i(TAG, "Native Recents requested explicitly by Down");
                         return;
                     }
                     View bar = nativeStatusBar.get();
@@ -218,25 +140,35 @@ public final class PullDownHook implements IXposedHookLoadPackage {
                         Log.w(TAG, "Recents toggle: native bar unavailable/locked; stock retained");
                         return;
                     }
-                    param.setResult(null); // void method: preserve foreground app
-                    RECENTS_HANDLER.post(() -> {
+                    nativeRecentsQueue = param.thisObject;
+                    // CommandQueue entry may be on a Binder thread. Window operations
+                    // must run on SystemUI's main thread; consume the command now.
+                    param.setResult(null); // void command: prevent Overview transition
+                    new Handler(Looper.getMainLooper()).post(() -> {
                         if (focusWindow != null) dismissStatusFocus();
                         else showStatusFocus(bar.getContext());
                     });
-                    Log.i(TAG, "BlackBerry short press: foreground preserved; status focus toggled"
-                            + " (held " + elapsed + " ms)");
+                    Log.i(TAG, "Native Recents command consumed; foreground app preserved");
                 }
             });
-            Log.i(TAG, "Native Recents long-press interception registered");
+            Log.i(TAG, "Native Recents command interception registered");
         } catch (Throwable error) {
             Log.e(TAG, "Unable to register native Recents interception", error);
         }
     }
 
-    private static void cancelPendingLongPressLocked() {
-        if (pendingRecentsLongPress != null) {
-            RECENTS_HANDLER.removeCallbacks(pendingRecentsLongPress);
-            pendingRecentsLongPress = null;
+    private static void openNativeRecents() {
+        Object queue = nativeRecentsQueue;
+        if (queue == null) {
+            Log.w(TAG, "Native Recents command unavailable");
+            return;
+        }
+        allowOneNativeRecents = true;
+        try {
+            XposedHelpers.callMethod(queue, "toggleRecentApps");
+        } catch (Throwable error) {
+            allowOneNativeRecents = false;
+            Log.e(TAG, "Unable to open native Recents", error);
         }
     }
 
@@ -273,7 +205,13 @@ public final class PullDownHook implements IXposedHookLoadPackage {
                     }
                     return true;
                 }
-                if (code == KeyEvent.KEYCODE_DPAD_DOWN) return true;
+                if (code == KeyEvent.KEYCODE_DPAD_DOWN) {
+                    if (event.getAction() == KeyEvent.ACTION_UP) {
+                        dismissStatusFocus();
+                        openNativeRecents();
+                    }
+                    return true;
+                }
                 if (code == KeyEvent.KEYCODE_DPAD_UP) return true;
                 if (code == KeyEvent.KEYCODE_DPAD_CENTER || code == KeyEvent.KEYCODE_ENTER
                         || code == KeyEvent.KEYCODE_NUMPAD_ENTER || code == KeyEvent.KEYCODE_SPACE) {
