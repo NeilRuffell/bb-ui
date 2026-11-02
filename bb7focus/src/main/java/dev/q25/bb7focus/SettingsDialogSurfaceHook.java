@@ -4,6 +4,9 @@ import android.app.Dialog;
 import android.content.Context;
 import android.graphics.drawable.GradientDrawable;
 import android.util.Log;
+import android.widget.ListView;
+import android.graphics.drawable.Drawable;
+import android.view.View;
 import android.view.Window;
 
 import dev.q25.trackpad.theme.BB7Theme;
@@ -47,6 +50,7 @@ final class SettingsDialogSurfaceHook {
                     // Styling only: the existing dialog theme still supplies
                     // size, margins, typography, action buttons and animations.
                     window.setBackgroundDrawable(surface(dialog.getContext()));
+                    styleNativeChoiceList(dialog);
                     Log.i(TAG, "Styled native Settings alert-dialog window: "
                             + dialog.getClass().getName());
                 } catch (Throwable error) {
@@ -55,6 +59,36 @@ final class SettingsDialogSurfaceHook {
             }
         });
         Log.i(TAG, "Shared Settings alert-dialog surface hook registered");
+    }
+
+    /**
+     * AndroidX ListPreferenceDialogFragmentCompat uses
+     * AlertDialog.Builder.setSingleChoiceItems(). AppCompat AlertController
+     * inflates a RecycleListView and exposes it via AlertDialog.getListView().
+     * The native ListView selector is the actual keyboard-row visual;
+     * checked radio state and item click handling remain unchanged.
+     */
+    private static void styleNativeChoiceList(Dialog dialog) {
+        ListView list = null;
+        if (dialog instanceof android.app.AlertDialog) {
+            list = ((android.app.AlertDialog) dialog).getListView();
+        } else if (dialog instanceof androidx.appcompat.app.AlertDialog) {
+            list = ((androidx.appcompat.app.AlertDialog) dialog).getListView();
+        }
+        if (list == null) {
+            Log.i(TAG, "Alert dialog has no native choice list");
+            return;
+        }
+        final ListView nativeList = list;
+        int border = Math.max(1, Math.round(
+                nativeList.getResources().getDisplayMetrics().density));
+        Drawable selector = BB7Theme.selected(0f, border);
+        nativeList.setSelector(selector);
+        nativeList.setDrawSelectorOnTop(false);
+        Log.i(TAG, "Native alert choice selector installed: "
+                + nativeList.getClass().getName()
+                + " selected=" + nativeList.getSelectedItemPosition()
+                + " checked=" + nativeList.getCheckedItemPosition());
     }
 
     private static boolean isAlertDialog(Class<?> type) {
