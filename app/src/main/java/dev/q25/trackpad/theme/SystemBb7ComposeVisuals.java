@@ -182,6 +182,7 @@ final class SystemBb7ComposeVisuals {
         // components whose defaults use Material3's own token shapes.
         String[] types = {
                 "androidx.compose.material3.Shapes",
+                "androidx.compose.material3.ShapeDefaults",
                 "androidx.compose.material3.tokens.ShapeTokens",
                 "androidx.compose.material3.MenuDefaults",
                 "androidx.compose.material3.CardDefaults",
@@ -198,6 +199,7 @@ final class SystemBb7ComposeVisuals {
                 String name = method.getName();
                 if (!name.startsWith("get") || !name.contains("Shape")
                         && !className.endsWith(".Shapes")
+                        && !className.endsWith(".ShapeDefaults")
                         && !className.endsWith(".ShapeTokens")) continue;
                 if (!shape.isAssignableFrom(method.getReturnType())) continue;
                 final Object replacement = cornerBased != null
