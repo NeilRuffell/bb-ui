@@ -1,32 +1,21 @@
 # BB UI
 
-## BB7 Pull-down — native notification click lifecycle (v0.5.7)
+## BB7 Pull-down — stock notification click path (v0.5.8)
 
-**Branch:** `feat/bb7-native-notification-click` (from `master`). No code from the abandoned
-`feat/bb7-shade` notification/QS hooks is included.
+**Branch:** `feat/bb7-native-notification-click` (from `master`).
 
-The notification activation queries SystemUI's actual NotifCollection entry
-and native row by notification key when available. Where no row exists, it
-delegates the notification's original opening action to the existing SystemUI
-ActivityStarter. An unavailable NotifCollection entry must never prevent this
-native activity-start route from being invoked.
+Notification activation uses the native SystemUI notification row click listener
+if one exists. Otherwise, it invokes SystemUI's existing `ActivityStarter` with
+the notification's real `PendingIntent`, and reports the click with SystemUI's
+`NotificationClickNotifier.onNotificationClick()` using visibility metadata
+obtained from the native `NotificationVisibilityProviderImpl`.
 
-The native NotifCollection, OnUserInteractionCallbackImpl and
-NotificationClickNotifier are observed independently in their existing
-SystemUI lifecycles. On notification activation, the system-owned
-ActivityStarter is invoked first. Native FLAG_AUTO_CANCEL dismissal is then
-registered via OnUserInteractionCallback.registerFutureDismissal(entry, REASON_CLICK)
-and posted to SystemUI's main thread, as LineageOS does. Click reporting
-through NotificationClickNotifier is independent: an unavailable notifier
-cannot suppress stock auto-dismiss, and vice versa.
-
-The module logs the native entry, interaction-callback, and notifier
-availability and Android's actual auto-cancel/bubble policy. A notification
-without FLAG_AUTO_CANCEL is not automatically removed (matching stock
-behavior). If native components are unavailable, the module logs that
-limitation and never fabricates a cancellation.
-Actual bubble notifications use SystemUI's bubble expansion service when available.
-It does not force-clear ongoing or non-auto-cancel notifications.
+LineageOS `NotificationManagerService.onNotificationClick()` performs stock
+cancellation of notifications eligible for auto-cancel; persistent, foreground
+and other non-eligible notifications remain. There is **no** direct cancellation,
+custom `FutureDismissal`, synthetic notification or bubble-dispatch code in
+this module. If SystemUI click reporting services are unavailable, this is
+logged rather than replaced with a custom clearing algorithm.
 
 Android 17 requires the `RECEIVER_NOT_EXPORTED` flag when registering
 the Home/system-dialog receiver. If that mixed-action registration is

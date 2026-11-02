@@ -7,8 +7,8 @@ android {
         applicationId 'dev.q25.bb7pulldown'
         minSdk 33
         targetSdk 28
-        versionCode 13
-        versionName '0.5.7-native-auto-dismiss-dev'
+        versionCode 14
+        versionName '0.5.8-stock-notification-click-dev'
     }
 }
 
