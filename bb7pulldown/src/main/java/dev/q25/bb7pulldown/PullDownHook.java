@@ -158,7 +158,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
                     if (event == null || event.getKeyCode() != configuredKeycode()) return;
                     // Do not steal long-press repeats or device wake/power behavior.
                     if (event.getRepeatCount() > 0) {
-                        param.setResult(-1L);
+                        param.setResult(true);
                         return;
                     }
                     if (event.getAction() == KeyEvent.ACTION_UP) {
@@ -173,7 +173,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
                             Log.e(TAG, "BlackBerry key focus broadcast failed", error);
                         }
                     }
-                    param.setResult(-1L);
+                    param.setResult(true);
                 }
             });
             Log.i(TAG, "BlackBerry key policy observer installed (inactive until keycode set)");
