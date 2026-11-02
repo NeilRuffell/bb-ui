@@ -1,5 +1,7 @@
 package dev.q25.bb7pulldown;
 
+import dev.q25.trackpad.theme.BB7Theme;
+
 import android.content.Context;
 import android.text.InputType;
 import android.view.inputmethod.EditorInfo;
@@ -88,7 +90,7 @@ final class TwoColumnPanel extends FrameLayout {
         onStatusZone = statusZone;
         setFocusable(true);
         setFocusableInTouchMode(true);
-        setBackgroundColor(Color.rgb(16, 20, 26));
+        setBackgroundColor(BB7Theme.CANVAS);
         setContentDescription("BB7 two-column pull-down");
 
         LinearLayout columns = new LinearLayout(context);
@@ -98,7 +100,7 @@ final class TwoColumnPanel extends FrameLayout {
                 LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
 
         FrameLayout left = new FrameLayout(context);
-        left.setBackgroundColor(Color.rgb(34, 42, 52));
+        left.setBackgroundColor(BB7Theme.PANE_LEFT);
         columns.addView(left, new LinearLayout.LayoutParams(
                 0, LinearLayout.LayoutParams.MATCH_PARENT, PanelRatio.LEFT_WEIGHT));
 
@@ -123,7 +125,7 @@ final class TwoColumnPanel extends FrameLayout {
                 dp(1), LayoutParams.MATCH_PARENT, Gravity.END));
 
         FrameLayout right = new FrameLayout(context);
-        right.setBackgroundColor(Color.rgb(22, 28, 36));
+        right.setBackgroundColor(BB7Theme.PANE_RIGHT);
         columns.addView(right, new LinearLayout.LayoutParams(
                 0, LinearLayout.LayoutParams.MATCH_PARENT, PanelRatio.RIGHT_WEIGHT));
 
@@ -362,7 +364,7 @@ final class TwoColumnPanel extends FrameLayout {
         card.setOrientation(LinearLayout.VERTICAL);
         card.setPadding(dp(12), dp(11), dp(12), dp(11));
         GradientDrawable background = new GradientDrawable();
-        background.setColor(Color.rgb(40, 52, 66));
+        background.setColor(BB7Theme.ROW);
         background.setCornerRadius(dp(5));
         card.setBackground(background);
 
@@ -566,7 +568,7 @@ final class TwoColumnPanel extends FrameLayout {
                 background = selectedBlueBackground();
             } else {
                 background = new GradientDrawable();
-                background.setColor(Color.rgb(40, 52, 66));
+                background.setColor(BB7Theme.ROW);
                 background.setCornerRadius(dp(5));
             }
             card.setBackground(background);
@@ -581,7 +583,7 @@ final class TwoColumnPanel extends FrameLayout {
                 background = selectedBlueBackground();
             } else {
                 background = new GradientDrawable();
-                background.setColor(Color.rgb(53, 67, 84));
+                background.setColor(BB7Theme.ACTION);
                 background.setCornerRadius(dp(4));
             }
             button.setBackground(background);
@@ -591,8 +593,8 @@ final class TwoColumnPanel extends FrameLayout {
     private GradientDrawable selectedBlueBackground() {
         GradientDrawable background = new GradientDrawable(
                 GradientDrawable.Orientation.TOP_BOTTOM,
-                new int[]{Color.rgb(91, 180, 231), Color.rgb(20, 95, 169)});
-        background.setStroke(dp(1), Color.rgb(180, 226, 251));
+                BB7Theme.gradientColors());
+        background.setStroke(dp(1), BB7Theme.BLUE_BORDER);
         background.setCornerRadius(dp(5));
         return background;
     }
