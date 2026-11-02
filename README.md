@@ -5,7 +5,7 @@
 - Short BlackBerry key press: focus or dismiss the status-bar navigation overlay
   **without changing the foreground application**.
 - Long BlackBerry key press (Android `ViewConfiguration.getLongPressTimeout()`):
-  dispatch the original native Quickstep Recents toggle, preserving the
+  trigger the native Quickstep Recents toggle at the hold threshold, preserving the
   existing 2×2 grid.
 - The former Down-from-status-bar Recents shortcut is disabled. Down does
   not enter Recents.
@@ -14,9 +14,10 @@
 
 Implementation is entirely in the existing SystemUI hook:
 `CommandQueue.preloadRecentApps()` starts the monotonic hold timer (the
-framework's APP_SWITCH key-down path) and `toggleRecentApps()` ends it on
-key release. Short presses consume the native toggle and focus the status
-bar. Long presses preserve the original native Recents command. No
+framework's APP_SWITCH key-down path) and a delayed runnable triggers native Recents once the long-press timeout
+passes. Short presses cancel the runnable and focus the status bar when
+`toggleRecentApps()` arrives. A trailing key-release toggle is consumed
+after the grid has opened, preventing it from closing the grid. No
 `system_server` hook, additional Vector scope, or APK is needed.
 When a toggle has no matching preload, it retains the existing short-press
 behavior. This approach depends on the device's native preload/toggle
