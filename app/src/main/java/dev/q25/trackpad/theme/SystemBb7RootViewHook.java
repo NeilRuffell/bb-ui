@@ -10,6 +10,7 @@ import android.graphics.drawable.LayerDrawable;
 import android.graphics.drawable.ScaleDrawable;
 import android.util.Log;
 import android.view.View;
+import android.widget.PopupWindow;
 import android.widget.CompoundButton;
 import android.widget.EditText;
 import android.widget.ImageView;
@@ -71,7 +72,28 @@ final class SystemBb7RootViewHook {
                     }
                 }
             });
-            Log.i(TAG, "Root native View background endpoint hooked");
+            XposedBridge.hookAllMethods(PopupWindow.class, "setBackgroundDrawable",
+                    new XC_MethodHook() {
+                @Override protected void beforeHookedMethod(MethodHookParam param) {
+                    if (param.args.length != 1
+                            || !(param.args[0] instanceof Drawable)
+                            || !SystemBb7VisualHook.enabled()) return;
+                    PopupWindow popup = (PopupWindow) param.thisObject;
+                    try {
+                        View content = popup.getContentView();
+                        Context context = content != null ? content.getContext() :
+                                (Context) XposedHelpers.getObjectField(popup, "mContext");
+                        if (!SystemBb7VisualHook.isOsOwnedContext(context)) return;
+                        Drawable original = (Drawable) param.args[0];
+                        if (!hasShapeBackground(original)) return;
+                        param.args[0] = squareBackground(original, 0);
+                    } catch (Throwable error) {
+                        if (ERROR_LOG.compareAndSet(false, true))
+                            Log.w(TAG, "Native popup keeps its original shape", error);
+                    }
+                }
+            });
+            Log.i(TAG, "Root native View and PopupWindow appearance endpoints hooked");
         } catch (Throwable error) {
             REGISTERED.set(false);
             Log.e(TAG, "Cannot register View background endpoint", error);
