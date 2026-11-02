@@ -141,14 +141,14 @@ public final class PullDownHook implements IXposedHookLoadPackage {
                         return;
                     }
                     nativeRecentsQueue = param.thisObject;
-                    if (focusWindow != null) dismissStatusFocus();
-                    else showStatusFocus(bar.getContext());
-                    if (focusWindow != null) {
-                        param.setResult(null); // native void command: never enter Overview
-                        Log.i(TAG, "Native Recents toggle intercepted; foreground app preserved");
-                    } else {
-                        Log.w(TAG, "Status focus unavailable; original Recents command retained");
-                    }
+                    // CommandQueue entry may be on a Binder thread. Window operations
+                    // must run on SystemUI's main thread; consume the command now.
+                    param.setResult(null); // void command: prevent Overview transition
+                    new Handler(Looper.getMainLooper()).post(() -> {
+                        if (focusWindow != null) dismissStatusFocus();
+                        else showStatusFocus(bar.getContext());
+                    });
+                    Log.i(TAG, "Native Recents command consumed; foreground app preserved");
                 }
             });
             Log.i(TAG, "Native Recents command interception registered");
