@@ -110,7 +110,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
                 @Override protected void afterHookedMethod(MethodHookParam param) {
                     if (param.thisObject instanceof View) {
                         nativeStatusBar = new WeakReference<>((View) param.thisObject);
-                        registerFocusReceiver(((View) param.thisObject).getContext());
+                        // Keep a native status-bar reference for command interception.
                     }
                 }
             });
