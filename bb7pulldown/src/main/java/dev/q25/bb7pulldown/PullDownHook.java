@@ -6,6 +6,10 @@ import android.content.BroadcastReceiver;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.graphics.PixelFormat;
+import android.os.Handler;
+import android.os.Looper;
+import android.view.KeyEvent;
+import android.widget.FrameLayout;
 import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.Drawable;
@@ -46,6 +50,12 @@ public final class PullDownHook implements IXposedHookLoadPackage {
     private static final String STATUS_BAR =
             "com.android.systemui.statusbar.phone.PhoneStatusBarView";
     private static final String ENABLE_PROP = "debug.bb7pulldown.enabled";
+    // A Q25-specific code must be established from hardware before enabling.
+    private static final String BB_KEYCODE_PROP = "debug.bb7pulldown.bb_keycode";
+    private static final String FOCUS_ACTION = "dev.q25.bb7pulldown.FOCUS_STATUS";
+    private static final String FOCUS_PERMISSION = "android.permission.STATUS_BAR_SERVICE";
+    private static final String SYSTEM_SERVER = "android";
+    private static final String INPUT_POLICY = "com.android.server.policy.PhoneWindowManager";
     // Android internal WindowManager.LayoutParams.TYPE_STATUS_BAR_SUB_PANEL
     // is hidden from public SDK stubs; framework value is FIRST_SYSTEM_WINDOW+17.
     private static final int STATUS_BAR_SUB_PANEL_WINDOW_TYPE = 2017;
@@ -59,15 +69,24 @@ public final class PullDownHook implements IXposedHookLoadPackage {
     private static Context receiverContext;
     private static WeakReference<View> nativeStatusBar = new WeakReference<>(null);
     private static Drawable focusOutline;
+    private static WindowManager focusManager;
+    private static View focusWindow;
+    private static int focusZone;
+    private static BroadcastReceiver focusReceiver;
 
     @Override
     public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lp) {
+        if (SYSTEM_SERVER.equals(lp.packageName) && SYSTEM_SERVER.equals(lp.processName)) {
+            installInputPolicy(lp.classLoader);
+            return;
+        }
         if (!PACKAGE.equals(lp.packageName) || !PACKAGE.equals(lp.processName)) return;
 
         if (!enabled()) {
             Log.i(TAG, "Disabled by " + ENABLE_PROP + "; stock status bar retained");
             return;
         }
+        installFocusReceiver();
         SystemUiNotificationObserver.install(lp.classLoader);
         NativeNotificationClicks.install(lp.classLoader);
         Class<?> viewClass = XposedHelpers.findClassIfExists(STATUS_BAR, lp.classLoader);
@@ -96,12 +115,174 @@ public final class PullDownHook implements IXposedHookLoadPackage {
                 @Override protected void afterHookedMethod(MethodHookParam param) {
                     if (param.thisObject instanceof View) {
                         nativeStatusBar = new WeakReference<>((View) param.thisObject);
+                        registerFocusReceiver(((View) param.thisObject).getContext());
                     }
                 }
             });
             Log.i(TAG, "Status-bar gesture and two-zone navigation registered");
         } catch (Throwable error) {
             Log.e(TAG, "Unable to register global status-bar gesture", error);
+        }
+    }
+
+    private static int configuredKeycode() {
+        try {
+            Class<?> props = Class.forName("android.os.SystemProperties");
+            String value = (String) XposedHelpers.callStaticMethod(
+                    props, "get", BB_KEYCODE_PROP, "");
+            int code = Integer.parseInt(value);
+            return code > 0 && code <= KeyEvent.getMaxKeyCode() ? code : -1;
+        } catch (Throwable error) {
+            return -1;
+        }
+    }
+
+    private static void installInputPolicy(ClassLoader loader) {
+        Class<?> policy = XposedHelpers.findClassIfExists(INPUT_POLICY, loader);
+        if (policy == null) {
+            Log.w(TAG, "Global BlackBerry-key hook: PhoneWindowManager unavailable");
+            return;
+        }
+        try {
+            XposedBridge.hookAllMethods(policy, "interceptKeyBeforeDispatching",
+                    new XC_MethodHook() {
+                @Override protected void beforeHookedMethod(MethodHookParam param) {
+                    if (!enabled() || configuredKeycode() < 0) return;
+                    KeyEvent event = null;
+                    for (Object arg : param.args) {
+                        if (arg instanceof KeyEvent) { event = (KeyEvent) arg; break; }
+                    }
+                    if (event == null || event.getKeyCode() != configuredKeycode()) return;
+                    // Do not steal long-press repeats or device wake/power behavior.
+                    if (event.getRepeatCount() > 0) {
+                        param.setResult(-1L);
+                        return;
+                    }
+                    if (event.getAction() == KeyEvent.ACTION_UP) {
+                        try {
+                            Context context = (Context) XposedHelpers.getObjectField(
+                                    param.thisObject, "mContext");
+                            Intent intent = new Intent(FOCUS_ACTION);
+                            intent.setPackage(PACKAGE);
+                            context.sendBroadcast(intent);
+                            Log.i(TAG, "BlackBerry key status-bar focus requested");
+                        } catch (Throwable error) {
+                            Log.e(TAG, "BlackBerry key focus broadcast failed", error);
+                        }
+                    }
+                    param.setResult(-1L);
+                }
+            });
+            Log.i(TAG, "BlackBerry key policy observer installed (inactive until keycode set)");
+        } catch (Throwable error) {
+            Log.e(TAG, "Unable to install BlackBerry key policy hook", error);
+        }
+    }
+
+    private static void installFocusReceiver() {
+        // This receiver only accepts broadcasts from callers holding the
+        // platform STATUS_BAR_SERVICE permission (system_server).
+        focusReceiver = new BroadcastReceiver() {
+            @Override public void onReceive(Context context, Intent intent) {
+                if (!FOCUS_ACTION.equals(intent.getAction()) || !enabled()
+                        || configuredKeycode() < 0 || locked(context)) return;
+                if (focusWindow != null) dismissStatusFocus();
+                else showStatusFocus(context);
+            }
+        };
+        // Registration needs a SystemUI context; PhoneStatusBarView provides it.
+    }
+
+    private static void registerFocusReceiver(Context context) {
+        if (focusReceiver == null) installFocusReceiver();
+        if (focusReceiverRegistered) return;
+        try {
+            context.registerReceiver(focusReceiver, new IntentFilter(FOCUS_ACTION),
+                    FOCUS_PERMISSION, new Handler(Looper.getMainLooper()),
+                    Context.RECEIVER_EXPORTED);
+            focusReceiverRegistered = true;
+            Log.i(TAG, "Protected BlackBerry key focus receiver registered");
+        } catch (Throwable error) {
+            Log.e(TAG, "BlackBerry key focus receiver registration failed", error);
+        }
+    }
+
+    private static boolean focusReceiverRegistered;
+
+    private static void dismissStatusFocus() {
+        updateStatusFocus(-1);
+        View root = focusWindow;
+        WindowManager wm = focusManager;
+        focusWindow = null;
+        focusManager = null;
+        if (root != null && wm != null) {
+            try { wm.removeViewImmediate(root); }
+            catch (Throwable error) { Log.w(TAG, "Status focus removal failed", error); }
+        }
+    }
+
+    private static void showStatusFocus(Context context) {
+        if (shown || openingOrClosing || focusWindow != null || locked(context)) return;
+        WindowManager wm = (WindowManager) context.getSystemService(Context.WINDOW_SERVICE);
+        if (wm == null) return;
+        FrameLayout root = new FrameLayout(context) {
+            @Override public boolean dispatchKeyEvent(KeyEvent event) {
+                int code = event.getKeyCode();
+                int mapped = configuredKeycode();
+                if (mapped > 0 && code == mapped) {
+                    if (event.getAction() == KeyEvent.ACTION_UP) dismissStatusFocus();
+                    return true;
+                }
+                if (code == KeyEvent.KEYCODE_BACK || code == KeyEvent.KEYCODE_ESCAPE) {
+                    if (event.getAction() == KeyEvent.ACTION_UP) dismissStatusFocus();
+                    return true;
+                }
+                if (code == KeyEvent.KEYCODE_DPAD_LEFT
+                        || code == KeyEvent.KEYCODE_DPAD_RIGHT) {
+                    if (event.getAction() == KeyEvent.ACTION_DOWN) {
+                        focusZone = code == KeyEvent.KEYCODE_DPAD_LEFT ? 0 : 1;
+                        updateStatusFocus(focusZone);
+                    }
+                    return true;
+                }
+                if (code == KeyEvent.KEYCODE_DPAD_UP || code == KeyEvent.KEYCODE_DPAD_DOWN) {
+                    return true;
+                }
+                if (code == KeyEvent.KEYCODE_DPAD_CENTER || code == KeyEvent.KEYCODE_ENTER
+                        || code == KeyEvent.KEYCODE_NUMPAD_ENTER || code == KeyEvent.KEYCODE_SPACE) {
+                    if (event.getAction() == KeyEvent.ACTION_UP) {
+                        int selected = focusZone;
+                        dismissStatusFocus();
+                        if (selected == 0) showPanel(getContext());
+                        else showSystemControls(getContext());
+                    }
+                    return true;
+                }
+                return super.dispatchKeyEvent(event);
+            }
+        };
+        root.setFocusable(true);
+        root.setFocusableInTouchMode(true);
+        root.setBackgroundColor(Color.TRANSPARENT);
+        WindowManager.LayoutParams params = new WindowManager.LayoutParams(
+                WindowManager.LayoutParams.MATCH_PARENT, nativeStatusBarHeight(context),
+                STATUS_BAR_SUB_PANEL_WINDOW_TYPE,
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+                        | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+                PixelFormat.TRANSLUCENT);
+        params.setTitle("BB7 status bar keyboard focus");
+        params.gravity = Gravity.TOP | Gravity.START;
+        params.setFitInsetsTypes(0);
+        try {
+            wm.addView(root, params);
+            focusManager = wm;
+            focusWindow = root;
+            focusZone = 0;
+            root.requestFocus();
+            updateStatusFocus(focusZone);
+            Log.i(TAG, "BlackBerry key entered native status-bar navigation");
+        } catch (Throwable error) {
+            Log.e(TAG, "Unable to acquire status-bar focus; native input retained", error);
         }
     }
 
@@ -268,6 +449,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
     }
 
     private static void showPanel(Context context) {
+        if (focusWindow != null) dismissStatusFocus();
         if (shown || openingOrClosing || !enabled() || locked(context)) return;
         openingOrClosing = true;
         WindowManager manager = (WindowManager)
