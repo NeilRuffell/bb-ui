@@ -1,0 +1,20 @@
+<resources>
+    <!-- Vector reads the legacy xposedscope string-array resource as a
+         RECOMMENDATION, not a forced or automatic scope selection.
+         Only visible Android/Lineage OS UI packages; never third-party apps
+         and never system_server/"android". -->
+    <string-array name="bb7_recommended_system_ui_scope">
+        <item>com.android.settings</item>
+        <item>com.android.settings.intelligence</item>
+        <item>com.android.systemui</item>
+        <item>com.android.launcher3</item>
+        <item>com.android.permissioncontroller</item>
+        <item>com.google.android.permissioncontroller</item>
+        <item>com.android.documentsui</item>
+        <item>com.android.packageinstaller</item>
+        <item>com.google.android.packageinstaller</item>
+        <item>com.android.contacts</item>
+        <item>com.android.dialer</item>
+        <item>org.lineageos.settings</item>
+    </string-array>
+</resources>

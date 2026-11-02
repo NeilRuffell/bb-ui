@@ -202,18 +202,15 @@ final class SettingsComposeMenuFocusHook {
         if (!Float.isFinite(width) || !Float.isFinite(height)
                 || width <= 0f || height <= 0f) return;
 
-        float inset = 1f;
         Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
         fill.setShader(new LinearGradient(0f, 0f, 0f, height,
                 BB7Theme.gradientColors(), null, Shader.TileMode.CLAMP));
-        canvas.drawRoundRect(inset, inset, width - inset, height - inset,
-                3f, 3f, fill);
+        canvas.drawRect(0f, 0f, width, height, fill);
         Paint border = new Paint(Paint.ANTI_ALIAS_FLAG);
         border.setColor(BB7Theme.BLUE_BORDER);
         border.setStyle(Paint.Style.STROKE);
         border.setStrokeWidth(1f);
-        canvas.drawRoundRect(inset, inset, width - inset, height - inset,
-                3f, 3f, border);
+        canvas.drawRect(0.5f, 0.5f, width - 0.5f, height - 0.5f, border);
         if (DRAW_SEEN.compareAndSet(false, true))
             Log.i(TAG, "BB7 gradient drawn behind native-focused Compose item");
     }

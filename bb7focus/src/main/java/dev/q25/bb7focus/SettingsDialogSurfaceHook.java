@@ -118,7 +118,7 @@ final class SettingsDialogSurfaceHook {
                 dark
                         ? new int[]{0xff374657, 0xff273544, 0xff192633}
                         : new int[]{0xfff9fafc, 0xffedf1f5, 0xffe5eaf0});
-        drawable.setCornerRadius(8f * density);
+        drawable.setCornerRadius(0f);
         drawable.setStroke(Math.max(1, Math.round(density)), p.divider);
         return drawable;
     }
