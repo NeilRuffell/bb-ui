@@ -7,11 +7,21 @@ android {
         applicationId 'dev.q25.trackpad'
         minSdk 33
         targetSdk 28
-        versionCode 29
-        versionName '0.8.9-native-recents-restored-dev'
+        versionCode 30
+        versionName '0.9.0-unified-vector-dev'
+    }
+    // Compile legacy feature sources into this one APK. These directories
+    // are source roots only; their former application modules are not built.
+    sourceSets {
+        main.java.srcDirs += [
+            '../bb7focus/src/main/java',
+            '../bb7pulldown/src/main/java'
+        ]
+        test.java.srcDirs += ['../bb7pulldown/src/test/java']
     }
 }
 
 dependencies {
     compileOnly 'de.robv.android.xposed:api:82'
+    testImplementation 'junit:junit:4.13.2'
 }
