@@ -199,8 +199,8 @@ public final class PullDownHook implements IXposedHookLoadPackage {
         root.setTranslationY(-height);
         try {
             manager.addView(root, params);
-            // A full-screen SystemUI sub-panel must close when the device
-            // sleeps. Don't expose notification previews over the keyguard.
+            // Match CentralSurfacesImpl: observe Android's own system-dialog
+            // close broadcast for Home, as well as screen-off for privacy.
             try {
                 registerScreenOffReceiver(context);
             } catch (Throwable registrationError) {
@@ -254,12 +254,20 @@ public final class PullDownHook implements IXposedHookLoadPackage {
         if (screenOffReceiver != null) return;
         BroadcastReceiver receiver = new BroadcastReceiver() {
             @Override public void onReceive(Context c, Intent intent) {
-                if (Intent.ACTION_SCREEN_OFF.equals(intent.getAction())) {
+                String action = intent.getAction();
+                if (Intent.ACTION_CLOSE_SYSTEM_DIALOGS.equals(action)) {
+                    Log.i(TAG, "Native close-system-dialogs event received");
+                    dismissPanelImmediately();
+                } else if (Intent.ACTION_SCREEN_OFF.equals(action)) {
+                    Log.i(TAG, "Native screen-off event received");
                     dismissPanelImmediately();
                 }
             }
         };
-        context.registerReceiver(receiver, new IntentFilter(Intent.ACTION_SCREEN_OFF));
+        IntentFilter filter = new IntentFilter();
+        filter.addAction(Intent.ACTION_CLOSE_SYSTEM_DIALOGS);
+        filter.addAction(Intent.ACTION_SCREEN_OFF);
+        context.registerReceiver(receiver, filter);
         screenOffReceiver = receiver;
         receiverContext = context;
     }
@@ -290,7 +298,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
             windowManager = null;
             shown = false;
             openingOrClosing = false;
-            Log.i(TAG, "Two-column pull-down hidden on lock/screen off");
+            Log.i(TAG, "Two-column pull-down immediately hidden");
         }
     }
 
