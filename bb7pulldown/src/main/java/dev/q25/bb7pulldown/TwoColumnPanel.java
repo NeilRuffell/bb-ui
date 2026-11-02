@@ -31,9 +31,14 @@ import java.util.Objects;
  */
 final class TwoColumnPanel extends FrameLayout {
     interface CloseListener { void onClose(); }
+    interface OpenNotificationListener { void onOpen(String notificationKey); }
 
     private static final String TAG = "BB7-PullDown";
     private final CloseListener onClose;
+    private final OpenNotificationListener onOpenNotification;
+    private final List<LinearLayout> notificationRows = new ArrayList<>();
+    private String selectedNotificationKey;
+    private boolean notificationPaneActive;
     private final LinearLayout iconList;
     private final LinearLayout notificationList;
     private final ScrollView notificationScroller;
@@ -47,9 +52,11 @@ final class TwoColumnPanel extends FrameLayout {
     private float touchStartY;
     private boolean trackingClose;
 
-    TwoColumnPanel(Context context, CloseListener close) {
+    TwoColumnPanel(Context context, CloseListener close,
+            OpenNotificationListener openNotification) {
         super(context);
         onClose = close;
+        onOpenNotification = openNotification;
         setFocusable(true);
         setFocusableInTouchMode(true);
         setBackgroundColor(Color.rgb(16, 20, 26));
@@ -140,6 +147,7 @@ final class TwoColumnPanel extends FrameLayout {
         if (renderedPackages.equals(distinct)) return;
 
         int previousIndex = renderedPackages.indexOf(selectedPackage);
+        String previousPackage = selectedPackage;
         boolean hadRowFocus = false;
         for (FrameLayout row : iconRows) {
             if (row.isFocused()) {
@@ -150,6 +158,12 @@ final class TwoColumnPanel extends FrameLayout {
         int newIndex = AppSelectionPolicy.afterUpdate(selectedPackage, previousIndex, distinct);
         renderedPackages = distinct;
         selectedPackage = newIndex < 0 ? null : distinct.get(newIndex);
+        boolean previousAppVanished = notificationPaneActive
+                && !Objects.equals(previousPackage, selectedPackage);
+        if (previousAppVanished) {
+            notificationPaneActive = false;
+            selectedNotificationKey = null;
+        }
 
         iconList.removeAllViews();
         iconRows.clear();
@@ -157,15 +171,15 @@ final class TwoColumnPanel extends FrameLayout {
         for (int i = 0; i < distinct.size(); i++) {
             final String pkg = distinct.get(i);
             FrameLayout row = new FrameLayout(getContext());
-            row.setFocusable(true);
-            row.setFocusableInTouchMode(true);
+            row.setFocusable(!notificationPaneActive);
+            row.setFocusableInTouchMode(!notificationPaneActive);
             row.setClickable(true);
             row.setOnFocusChangeListener((view, focused) -> {
-                if (focused) select(pkg);
+                if (focused && !notificationPaneActive) select(pkg);
             });
             row.setOnClickListener(view -> {
                 select(pkg);
-                view.requestFocus();
+                if (!enterNotificationPane()) view.requestFocus();
             });
             row.setOnKeyListener((view, keyCode, event) -> onIconKey(view, keyCode, event));
 
@@ -194,7 +208,7 @@ final class TwoColumnPanel extends FrameLayout {
         }
 
         updateSelectedHighlight();
-        if (hadRowFocus && !iconRows.isEmpty()) {
+        if ((hadRowFocus && !notificationPaneActive) || previousAppVanished) {
             // Removing a focused row may move focus to the root. Restore it
             // explicitly so keyboard/trackpad navigation continues smoothly.
             focusSelectedAppIcon();
@@ -229,9 +243,16 @@ final class TwoColumnPanel extends FrameLayout {
         if (Objects.equals(renderedCardPackage, selectedPackage)
                 && renderedCards.equals(selected)) return;
 
+        int oldCardIndex = NotificationFocusPolicy.indexOf(
+                renderedCards, selectedNotificationKey);
+        boolean sameApp = Objects.equals(renderedCardPackage, selectedPackage);
+        selectedNotificationKey = NotificationFocusPolicy.retainedKey(
+                selected, sameApp ? selectedNotificationKey : null,
+                sameApp ? oldCardIndex : -1);
         renderedCardPackage = selectedPackage;
         renderedCards = selected;
         notificationList.removeAllViews();
+        notificationRows.clear();
 
         if (selectedPackage == null) {
             selectedAppHeading.setText("Notifications");
@@ -250,10 +271,19 @@ final class TwoColumnPanel extends FrameLayout {
             addPlaceholder("No notifications for this app");
         } else {
             for (NotificationItem item : selected) {
-                notificationList.addView(createNotificationCard(item));
+                LinearLayout card = createNotificationCard(item);
+                notificationList.addView(card);
+                notificationRows.add(card);
             }
         }
-        notificationScroller.scrollTo(0, 0);
+        if (notificationPaneActive && notificationRows.isEmpty()) {
+            returnToAppIcons();
+        } else if (notificationPaneActive) {
+            focusSelectedNotification();
+        } else {
+            updateNotificationHighlight();
+            notificationScroller.scrollTo(0, 0);
+        }
         Log.i(TAG, "Selected app notifications displayed: count=" + selected.size());
     }
 
@@ -263,8 +293,25 @@ final class TwoColumnPanel extends FrameLayout {
         notificationList.addView(placeholder);
     }
 
-    private View createNotificationCard(NotificationItem item) {
+    private LinearLayout createNotificationCard(NotificationItem item) {
         LinearLayout card = new LinearLayout(getContext());
+        card.setFocusable(true);
+        card.setFocusableInTouchMode(true);
+        card.setClickable(true);
+        card.setOnFocusChangeListener((view, focused) -> {
+            if (focused) {
+                notificationPaneActive = true;
+                selectNotification(item.key);
+            }
+        });
+        card.setOnClickListener(view -> {
+            notificationPaneActive = true;
+            selectNotification(item.key);
+            view.requestFocus();
+            onOpenNotification.onOpen(item.key);
+        });
+        card.setOnKeyListener((view, keyCode, event) -> onNotificationKey(
+                view, keyCode, event));
         card.setOrientation(LinearLayout.VERTICAL);
         card.setPadding(dp(12), dp(11), dp(12), dp(11));
         GradientDrawable background = new GradientDrawable();
@@ -306,6 +353,102 @@ final class TwoColumnPanel extends FrameLayout {
         cardParams.bottomMargin = dp(9);
         card.setLayoutParams(cardParams);
         return card;
+    }
+
+    private void enterNotificationPaneFocus() {
+        notificationPaneActive = true;
+        for (FrameLayout icon : iconRows) {
+            icon.setFocusable(false);
+            icon.setFocusableInTouchMode(false);
+        }
+        focusSelectedNotification();
+        Log.i(TAG, "Navigation entered notification pane");
+    }
+
+    /** Trackpad click/Enter enters, directional navigation never switches panes. */
+    private boolean enterNotificationPane() {
+        if (notificationRows.isEmpty()) return false;
+        enterNotificationPaneFocus();
+        return true;
+    }
+
+    /** Back restores the previously selected app icon. */
+    private void returnToAppIcons() {
+        notificationPaneActive = false;
+        for (FrameLayout icon : iconRows) {
+            icon.setFocusable(true);
+            icon.setFocusableInTouchMode(true);
+        }
+        updateNotificationHighlight();
+        focusSelectedAppIcon();
+        Log.i(TAG, "Navigation returned to app icons");
+    }
+
+    private void focusSelectedNotification() {
+        int index = NotificationFocusPolicy.indexOf(renderedCards, selectedNotificationKey);
+        if (index < 0 || index >= notificationRows.size()) return;
+        LinearLayout target = notificationRows.get(index);
+        target.requestFocus();
+        updateNotificationHighlight();
+    }
+
+    private void selectNotification(String key) {
+        if (Objects.equals(selectedNotificationKey, key)) {
+            updateNotificationHighlight();
+            return;
+        }
+        selectedNotificationKey = key;
+        updateNotificationHighlight();
+        Log.i(TAG, "Selected notification index="
+                + NotificationFocusPolicy.indexOf(renderedCards, key)
+                + " of " + renderedCards.size());
+    }
+
+    private void updateNotificationHighlight() {
+        for (int i = 0; i < notificationRows.size(); i++) {
+            LinearLayout row = notificationRows.get(i);
+            boolean selected = notificationPaneActive
+                    && Objects.equals(renderedCards.get(i).key, selectedNotificationKey);
+            row.setSelected(selected);
+            GradientDrawable background;
+            if (selected) {
+                background = new GradientDrawable(
+                        GradientDrawable.Orientation.TOP_BOTTOM,
+                        new int[]{Color.rgb(91, 180, 231), Color.rgb(20, 95, 169)});
+                background.setStroke(dp(1), Color.rgb(180, 226, 251));
+            } else {
+                background = new GradientDrawable();
+                background.setColor(Color.rgb(40, 52, 66));
+            }
+            background.setCornerRadius(dp(5));
+            row.setBackground(background);
+        }
+    }
+
+    private boolean onNotificationKey(View view, int keyCode, KeyEvent event) {
+        switch (keyCode) {
+            case KeyEvent.KEYCODE_DPAD_UP:
+            case KeyEvent.KEYCODE_DPAD_DOWN:
+                if (event.getAction() == KeyEvent.ACTION_DOWN) {
+                    int current = NotificationFocusPolicy.indexOf(
+                            renderedCards, selectedNotificationKey);
+                    int direction = keyCode == KeyEvent.KEYCODE_DPAD_UP ? -1 : 1;
+                    int next = AppSelectionPolicy.move(current, direction, notificationRows.size());
+                    if (next >= 0) notificationRows.get(next).requestFocus();
+                }
+                return true;
+            case KeyEvent.KEYCODE_DPAD_LEFT:
+            case KeyEvent.KEYCODE_DPAD_RIGHT:
+                return true;
+            case KeyEvent.KEYCODE_DPAD_CENTER:
+            case KeyEvent.KEYCODE_ENTER:
+            case KeyEvent.KEYCODE_NUMPAD_ENTER:
+            case KeyEvent.KEYCODE_SPACE:
+                if (event.getAction() == KeyEvent.ACTION_UP) view.performClick();
+                return true;
+            default:
+                return false;
+        }
     }
 
     private TextView text(String value, float size, int color) {
@@ -381,8 +524,7 @@ final class TwoColumnPanel extends FrameLayout {
                 return true;
             case KeyEvent.KEYCODE_DPAD_LEFT:
             case KeyEvent.KEYCODE_DPAD_RIGHT:
-                // Until the right pane is implemented, keep focus in the
-                // only navigable column.
+                // Back, not Left/Right, changes navigation levels.
                 return true;
             case KeyEvent.KEYCODE_DPAD_CENTER:
             case KeyEvent.KEYCODE_ENTER:
@@ -422,7 +564,10 @@ final class TwoColumnPanel extends FrameLayout {
     @Override
     public boolean dispatchKeyEvent(KeyEvent event) {
         if (event.getKeyCode() == KeyEvent.KEYCODE_BACK) {
-            if (event.getAction() == KeyEvent.ACTION_UP) onClose.onClose();
+            if (event.getAction() == KeyEvent.ACTION_UP) {
+                if (notificationPaneActive) returnToAppIcons();
+                else onClose.onClose();
+            }
             return true;
         }
         return super.dispatchKeyEvent(event);
