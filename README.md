@@ -1,3 +1,45 @@
+## BlackBerry key: short press status, long press Recents (experimental)
+
+**Branch:** `feat/bb7-long-press-recents`, based on the merged unified BB UI module.
+
+- Short BlackBerry key press: focus or dismiss the status-bar navigation overlay
+  **without changing the foreground application**.
+- Long BlackBerry key press (Android `ViewConfiguration.getLongPressTimeout()`):
+  dispatch the original native Quickstep Recents toggle, preserving the
+  existing 2×2 grid.
+- The former Down-from-status-bar Recents shortcut is disabled. Down does
+  not enter Recents.
+- Trackpad Left/Right, Enter/click, Back and notification shade behavior are
+  unchanged.
+
+Implementation is entirely in the existing SystemUI hook:
+`CommandQueue.preloadRecentApps()` starts the monotonic hold timer (the
+framework's APP_SWITCH key-down path) and `toggleRecentApps()` ends it on
+key release. Short presses consume the native toggle and focus the status
+bar. Long presses preserve the original native Recents command. No
+`system_server` hook, additional Vector scope, or APK is needed.
+When a toggle has no matching preload, it retains the existing short-press
+behavior. This approach depends on the device's native preload/toggle
+pairing; Q25 verification is required.
+
+```sh
+cd ~/Projects/bb-ui
+git fetch origin
+git switch feat/bb7-long-press-recents
+git pull --ff-only
+./gradlew :app:assembleDebug
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+adb shell am crash com.android.systemui
+```
+
+Test from inside an app: short press must leave that app visible and
+focus the status bar; holding for longer than the platform long-press
+threshold and releasing must enter the 2×2 Recents grid. Check
+`adb logcat -d -s BB7-PullDown:I BB-UI-Recents:W '*:S'`.
+Do not merge without device validation.
+
+---
+
 # One Vector module: BB UI (migration candidate)
 
 **Branch:** `feat/unified-vector-module`, derived from the device-tested
