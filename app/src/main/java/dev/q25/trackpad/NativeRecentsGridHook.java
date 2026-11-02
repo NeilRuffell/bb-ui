@@ -707,6 +707,10 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
                                         root, "mMaxScroll"));
                     }
                     requestNativeRunningTaskScreenshot(root);
+                    if (UNIFIED_CONCEALED.containsKey(root) && root.getAlpha() != 0f) {
+                        root.setAlpha(0f);
+                        Log.w(TAG, "Unified overview: grid concealment maintained during layout");
+                    }
                 }
             });
 
@@ -729,12 +733,10 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
             UNIFIED_CONCEALED.put(root, Boolean.TRUE);
             root.setAlpha(0f);
             root.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
-            root.post(() -> {
-                if (!UNIFIED_CONCEALED.containsKey(root)) return;
-                Intent focus = new Intent(FOCUS_ACTION).setPackage(SYSTEM_UI);
-                root.getContext().sendBroadcast(focus);
-                Log.w(TAG, "Unified overview entered: grid concealed, native status focus requested");
-            });
+            Log.w(TAG, "Unified overview entered: grid concealed; requesting status focus");
+            Intent focus = new Intent(FOCUS_ACTION).setPackage(SYSTEM_UI);
+            root.getContext().sendBroadcast(focus);
+            Log.w(TAG, "Unified overview focus broadcast dispatched");
         } catch (Throwable error) {
             restoreUnifiedOverview(root);
             Log.e(TAG, "Unified overview entry failed; native Recents retained", error);
