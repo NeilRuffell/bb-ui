@@ -721,6 +721,28 @@ final class TwoColumnPanel extends FrameLayout {
 
     @Override
     public boolean dispatchKeyEvent(KeyEvent event) {
+        // Hardware Delete/Backspace dismisses the focused clearable notification,
+        // including when one of its native action controls has focus. Never
+        // intercept editing keys while an inline reply is active.
+        if ((event.getKeyCode() == KeyEvent.KEYCODE_DEL
+                || event.getKeyCode() == KeyEvent.KEYCODE_FORWARD_DEL)
+                && notificationPaneActive && activeReplyInput == null) {
+            int focusedIndex = notificationTargets.indexOf(findFocus());
+            if (focusedIndex >= 0) {
+                String key = notificationTargetKeys.get(focusedIndex);
+                if (event.getAction() == KeyEvent.ACTION_UP) {
+                    for (NotificationItem item : renderedCards) {
+                        if (item.key.equals(key) && item.clearable) {
+                            onActions.onDismiss(key);
+                            break;
+                        }
+                    }
+                }
+                // Consume both DOWN and UP; non-clearable notifications are
+                // intentionally protected from keyboard dismissal.
+                return true;
+            }
+        }
         if (event.getKeyCode() == KeyEvent.KEYCODE_BACK) {
             if (event.getAction() == KeyEvent.ACTION_UP) {
                 if (activeReplyInput != null) closeInlineReply();
