@@ -1,3 +1,28 @@
+## BB7 shade follows Android Light/Dark appearance
+
+The BB7 two-column notification panel now resolves Android's standard
+`Configuration.UI_MODE_NIGHT_MASK` when a new panel is created. It uses
+shared theme palettes for the shade background, app-icon column, notification
+column, header, cards, native action rows, text, dividers and inline reply.
+Focused notifications/actions/app icons retain the same BBOS7 blue gradient;
+selected card and action text switches to white for contrast.
+
+There is no custom preference, timer, observer or appearance service. To test
+a theme change, switch Android Light/Dark mode and **reopen the shade**.
+The current panel instance does not live-update while already displayed.
+This modifies styling only; notification handling and keyboard navigation
+are unchanged.
+
+```sh
+cd ~/Projects/bb-ui
+git pull --ff-only
+./gradlew :app:assembleDebug
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+adb shell am crash com.android.systemui
+```
+
+---
+
 ## Unified BBOS7 appearance — shared visual tokens
 
 **Branch:** `feat/unified-bb7-visual-theme`, based on merged `master`.
