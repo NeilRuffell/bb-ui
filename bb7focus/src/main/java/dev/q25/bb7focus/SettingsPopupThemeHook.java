@@ -3,6 +3,7 @@ package dev.q25.bb7focus;
 import android.content.Context;
 import android.graphics.drawable.GradientDrawable;
 import android.util.Log;
+import android.view.View;
 
 import dev.q25.trackpad.theme.BB7Theme;
 
@@ -11,12 +12,14 @@ import de.robv.android.xposed.XposedBridge;
 import de.robv.android.xposed.XposedHelpers;
 
 /**
- * Shared appearance hook at AppCompat's native contextual-menu presenter.
+ * Presentation-only hook at the native contextual-menu popup presenter.
  *
- * AppCompat StandardMenuPopup and CascadingMenuPopup use MenuPopupWindow,
- * a subclass of ListPopupWindow. ListPopupWindow.show() creates the actual
- * DropDownListView, honouring the list selector and background configured
- * here. No menu inflation, focus, keyboard or action dispatch is replaced.
+ * LineageOS SettingsBaseActivity uses android.widget.Toolbar and its native
+ * ActionMenuPresenter. The framework MenuPopupWindow inherits
+ * android.widget.ListPopupWindow.show(). Some Settings widgets may instead
+ * use AppCompat's analogous class; both routes are supported.
+ *
+ * No popup content, menu actions, focus, or keyboard dispatch is replaced.
  */
 final class SettingsPopupThemeHook {
     private static final String TAG = "BB7-PopupMenu";
@@ -25,23 +28,31 @@ final class SettingsPopupThemeHook {
     private SettingsPopupThemeHook() {}
 
     static void install(ClassLoader loader) {
-        Class<?> listPopup = XposedHelpers.findClassIfExists(
+        installPresenter(android.widget.ListPopupWindow.class,
+                XposedHelpers.findClassIfExists("android.widget.MenuPopupWindow", loader),
+                "framework");
+        Class<?> appCompatList = XposedHelpers.findClassIfExists(
                 "androidx.appcompat.widget.ListPopupWindow", loader);
-        Class<?> menuPopup = XposedHelpers.findClassIfExists(
+        Class<?> appCompatMenu = XposedHelpers.findClassIfExists(
                 "androidx.appcompat.widget.MenuPopupWindow", loader);
-        if (listPopup == null || menuPopup == null) {
-            Log.w(TAG, "AppCompat contextual menu presenter unavailable; no changes");
+        installPresenter(appCompatList, appCompatMenu, "AppCompat");
+    }
+
+    private static void installPresenter(Class<?> listClass, Class<?> menuClass,
+            String source) {
+        if (listClass == null || menuClass == null) {
+            Log.i(TAG, source + " contextual popup classes unavailable");
             return;
         }
         try {
-            XposedBridge.hookAllMethods(listPopup, "show", new XC_MethodHook() {
+            XposedBridge.hookAllMethods(listClass, "show", new XC_MethodHook() {
                 @Override protected void beforeHookedMethod(MethodHookParam param) {
-                    if (!menuPopup.isInstance(param.thisObject)) return;
+                    if (!menuClass.isInstance(param.thisObject)) return;
                     try {
                         Object anchor = XposedHelpers.callMethod(param.thisObject,
                                 "getAnchorView");
-                        if (!(anchor instanceof android.view.View)) return;
-                        Context context = ((android.view.View) anchor).getContext();
+                        if (!(anchor instanceof View)) return;
+                        Context context = ((View) anchor).getContext();
                         if (!SETTINGS.equals(context.getPackageName())) return;
                         float density = context.getResources()
                                 .getDisplayMetrics().density;
@@ -58,15 +69,15 @@ final class SettingsPopupThemeHook {
                                 "setBackgroundDrawable", background);
                         XposedHelpers.callMethod(param.thisObject,
                                 "setListSelector", BB7Theme.selected(0f, stroke));
-                        Log.i(TAG, "AppCompat native contextual menu styled");
+                        Log.i(TAG, source + " native contextual menu styled");
                     } catch (Throwable error) {
-                        Log.w(TAG, "Menu appearance unchanged; native show retained", error);
+                        Log.w(TAG, source + " menu remains native", error);
                     }
                 }
             });
-            Log.i(TAG, "AppCompat MenuPopupWindow presenter hook registered");
+            Log.i(TAG, source + " MenuPopupWindow presenter hook registered");
         } catch (Throwable error) {
-            Log.e(TAG, "Cannot register AppCompat popup presenter", error);
+            Log.e(TAG, "Cannot register " + source + " menu presenter", error);
         }
     }
 }
