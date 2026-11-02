@@ -7,8 +7,8 @@ android {
         applicationId 'dev.q25.trackpad'
         minSdk 33
         targetSdk 28
-        versionCode 48
-        versionName '0.9.18-contextual-menus-dev'
+        versionCode 49
+        versionName '0.9.19-framework-popup-menu-dev'
     }
     // Compile legacy feature sources into this one APK. These directories
     // are source roots only; their former application modules are not built.
