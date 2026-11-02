@@ -12,6 +12,8 @@ import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.util.Log;
 import android.view.View;
+import android.view.ViewGroup;
+import android.view.ViewParent;
 import android.view.Window;
 import android.widget.AbsListView;
 
@@ -47,6 +49,7 @@ final class SystemBb7NativeVisuals {
     static void install(String packageName, ClassLoader loader) {
         installRoundedResourceReplacement();
         installPreferenceListInsets(loader);
+        installPreferenceRowMargins(loader);
         installNativeListSelection();
         installMaterialShapeDefaults(loader);
         if (!"com.android.settings".equals(packageName)) {
@@ -167,6 +170,54 @@ final class SystemBb7NativeVisuals {
                     + "View padding and RecyclerView adapter attachment");
         } catch (Throwable error) {
             Log.w(TAG, "System preference side-inset hook unavailable", error);
+        }
+    }
+
+    /**
+     * PreferenceGroupAdapter row containers are the reusable layout boundary
+     * behind Settings homepage AND submenu items. Their outer XML layout
+     * margins must be cleared separately from RecyclerView padding, or even
+     * a square background cannot reach the available list width.
+     */
+    private static void installPreferenceRowMargins(ClassLoader loader) {
+        final Class<?> recyclerView = XposedHelpers.findClassIfExists(
+                "androidx.recyclerview.widget.RecyclerView", loader);
+        final Class<?> preferenceAdapter = XposedHelpers.findClassIfExists(
+                "androidx.preference.PreferenceGroupAdapter", loader);
+        if (recyclerView == null || preferenceAdapter == null) return;
+        try {
+            XposedBridge.hookAllMethods(View.class, "onAttachedToWindow",
+                    new XC_MethodHook() {
+                @Override protected void afterHookedMethod(MethodHookParam param) {
+                    if (!(param.thisObject instanceof View)) return;
+                    View row = (View) param.thisObject;
+                    ViewParent parent = row.getParent();
+                    if (!recyclerView.isInstance(parent)) return;
+                    try {
+                        Object adapter = XposedHelpers.callMethod(parent, "getAdapter");
+                        if (!preferenceAdapter.isInstance(adapter)) return;
+                        ViewGroup.LayoutParams raw = row.getLayoutParams();
+                        if (!(raw instanceof ViewGroup.MarginLayoutParams)) return;
+                        ViewGroup.MarginLayoutParams margins =
+                                (ViewGroup.MarginLayoutParams) raw;
+                        if (margins.leftMargin == 0 && margins.rightMargin == 0
+                                && margins.getMarginStart() == 0
+                                && margins.getMarginEnd() == 0) return;
+                        margins.leftMargin = 0;
+                        margins.rightMargin = 0;
+                        margins.setMarginStart(0);
+                        margins.setMarginEnd(0);
+                        row.setLayoutParams(margins);
+                        Log.i(TAG, "Shared OS preference row side margins cleared");
+                    } catch (Throwable error) {
+                        if (ERROR_LOG.compareAndSet(false, true))
+                            Log.w(TAG, "Preference row margins unchanged", error);
+                    }
+                }
+            });
+            Log.i(TAG, "Shared RecyclerView preference-row margins hooked");
+        } catch (Throwable error) {
+            Log.w(TAG, "Shared preference row layout hook unavailable", error);
         }
     }
 
