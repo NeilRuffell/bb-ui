@@ -1,6 +1,6 @@
 # BB UI
 
-## BB7 Pull-down — native notification click lifecycle (v0.5.4)
+## BB7 Pull-down — native notification click lifecycle (v0.5.5)
 
 **Branch:** `feat/bb7-native-notification-click` (from `master`). No code from the abandoned
 `feat/bb7-shade` notification/QS hooks is included.
@@ -13,6 +13,11 @@ only when Android's FLAG_AUTO_CANCEL applies, and reports the click through
 the existing NotificationClickNotifier. Notifications that Android treats as
 bubbles use the existing SystemUI bubble expansion method. It does not force-clear ongoing
 or non-auto-cancel notifications.
+
+Android 17 requires the `RECEIVER_NOT_EXPORTED` flag when registering
+the Home/system-dialog receiver. If that mixed-action registration is
+rejected, the module falls back to a screen-off-only receiver so the
+shade still opens and its lock-screen privacy guard remains active.
 
 Home uses Android's ACTION_CLOSE_SYSTEM_DIALOGS broadcast, already handled by
 LineageOS CentralSurfacesImpl for the stock shade. This module observes the
