@@ -55,6 +55,12 @@ public final class PullDownHook implements IXposedHookLoadPackage {
     private static final String STATUS_BAR =
             "com.android.systemui.statusbar.phone.PhoneStatusBarView";
     private static final String ENABLE_PROP = "debug.bb7pulldown.enabled";
+    static final String RECENTS_VISIBILITY_ACTION =
+            "dev.q25.trackpad.action.RECENTS_VISIBILITY";
+    static final String RECENTS_VISIBILITY_EXTRA = "visible";
+    private static boolean recentsVisible;
+    private static boolean nativeShadeExpanded;
+    private static BroadcastReceiver recentsVisibilityReceiver;
     // Intercept SystemUI's native Recents command before Quickstep changes activities.
     private static final String COMMAND_QUEUE = "com.android.systemui.statusbar.CommandQueue";
     private static Object nativeRecentsQueue;
@@ -87,6 +93,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
             return;
         }
         installRecentsInterception(lp.classLoader);
+        installNativeShadeState(lp.classLoader);
         SystemUiNotificationObserver.install(lp.classLoader);
         NativeNotificationClicks.install(lp.classLoader);
         Class<?> viewClass = XposedHelpers.findClassIfExists(STATUS_BAR, lp.classLoader);
@@ -114,8 +121,10 @@ public final class PullDownHook implements IXposedHookLoadPackage {
             XposedBridge.hookAllConstructors(viewClass, new XC_MethodHook() {
                 @Override protected void afterHookedMethod(MethodHookParam param) {
                     if (param.thisObject instanceof View) {
-                        nativeStatusBar = new WeakReference<>((View) param.thisObject);
-                        // Keep a native status-bar reference for command interception.
+                        View bar = (View) param.thisObject;
+                        nativeStatusBar = new WeakReference<>(bar);
+                        registerRecentsVisibilityReceiver(bar.getContext());
+                        bar.post(PullDownHook::updateStatusAppearance);
                     }
                 }
             });
@@ -183,6 +192,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
         WindowManager wm = focusManager;
         focusWindow = null;
         focusManager = null;
+        updateStatusAppearance();
         if (root != null && wm != null) {
             try { wm.removeViewImmediate(root); }
             catch (Throwable error) { Log.w(TAG, "Status focus removal failed", error); }
@@ -389,9 +399,21 @@ public final class PullDownHook implements IXposedHookLoadPackage {
         }
     }
 
+    /** Native status bar stays untouched outside the requested UI states. */
+    private static GradientDrawable graphiteBackground(Context context) {
+        GradientDrawable background = new GradientDrawable(
+                GradientDrawable.Orientation.TOP_BOTTOM,
+                new int[]{0xff40536a, 0xff2a3c52, 0xff172638});
+        background.setStroke(dp(context, 1), 0xff57758f);
+        return background;
+    }
+
     private static void updateStatusFocus(int zone) {
+        updateStatusAppearance();
+    }
+
+    private static void updateStatusAppearance() {
         View bar = nativeStatusBar.get();
-        // Restore the previous bar even if SystemUI replaced the native view.
         if (bar == null) bar = decoratedStatusBar;
         if (bar == null) return;
         final View target = bar;
@@ -401,7 +423,11 @@ public final class PullDownHook implements IXposedHookLoadPackage {
                 decoratedStatusBar = null;
                 originalStatusBackground = null;
             }
-            if (zone < 0) {
+            boolean focused = focusWindow != null || shown && panel != null
+                    && panelStatusFocused();
+            boolean decorated = focused || shown || openingOrClosing
+                    || recentsVisible || nativeShadeExpanded;
+            if (!decorated) {
                 if (decoratedStatusBar == target) {
                     target.setBackground(originalStatusBackground);
                     decoratedStatusBar = null;
@@ -409,26 +435,96 @@ public final class PullDownHook implements IXposedHookLoadPackage {
                 }
                 return;
             }
-            int width = target.getWidth();
-            int height = target.getHeight();
-            if (width <= 0 || height <= 0) return;
             if (decoratedStatusBar != target) {
                 originalStatusBackground = target.getBackground();
                 decoratedStatusBar = target;
             }
-            // Draw the same opaque, three-stop Settings highlight BEHIND
-            // native status icons. A ViewOverlay would cover those icons.
-            Drawable original = originalStatusBackground != null
-                    ? originalStatusBackground : new ColorDrawable(Color.TRANSPARENT);
-            GradientDrawable selected = BB7Theme.selected(
+            Drawable base = graphiteBackground(target.getContext());
+            int selectedZone = focusWindow != null ? focusZone
+                    : shown && panelStatusFocused() ? panelFocusedZone() : -1;
+            if (selectedZone < 0 || target.getWidth() <= 0) {
+                target.setBackground(base);
+                return;
+            }
+            GradientDrawable selection = BB7Theme.selected(
                     dp(target.getContext(), 3), dp(target.getContext(), 1));
-            LayerDrawable background = new LayerDrawable(
-                    new Drawable[] { original, selected });
-            int midpoint = width / 2;
-            background.setLayerInset(1, zone == 0 ? 0 : midpoint, 0,
-                    zone == 0 ? width - midpoint : 0, 0);
+            LayerDrawable background = new LayerDrawable(new Drawable[]{base, selection});
+            int mid = target.getWidth() / 2;
+            background.setLayerInset(1, selectedZone == 0 ? 0 : mid, 0,
+                    selectedZone == 0 ? target.getWidth() - mid : 0, 0);
             target.setBackground(background);
         });
+    }
+
+    private static boolean panelStatusFocused() {
+        return panel != null && panel.statusFocusZone() >= 0;
+    }
+
+    private static int panelFocusedZone() {
+        return panel == null ? -1 : panel.statusFocusZone();
+    }
+
+    /** Quickstep sends only the native overview visibility transition. */
+    private static void registerRecentsVisibilityReceiver(Context context) {
+        if (recentsVisibilityReceiver != null) return;
+        BroadcastReceiver receiver = new BroadcastReceiver() {
+            @Override public void onReceive(Context receiverContext, Intent intent) {
+                if (!RECENTS_VISIBILITY_ACTION.equals(intent.getAction())) return;
+                // Do not accept untrusted apps spoofing launcher state.
+                int senderUid = getSentFromUid();
+                String[] packages = receiverContext.getPackageManager()
+                        .getPackagesForUid(senderUid);
+                boolean fromLauncher = false;
+                if (packages != null) {
+                    for (String name : packages) {
+                        if ("com.android.launcher3".equals(name)) {
+                            fromLauncher = true;
+                            break;
+                        }
+                    }
+                }
+                if (!fromLauncher) {
+                    Log.w(TAG, "Ignored overview visibility from non-launcher UID");
+                    return;
+                }
+                recentsVisible = intent.getBooleanExtra(RECENTS_VISIBILITY_EXTRA, false);
+                Log.i(TAG, "Native Quickstep overview visible=" + recentsVisible);
+                updateStatusAppearance();
+            }
+        };
+        try {
+            context.registerReceiver(receiver,
+                    new IntentFilter(RECENTS_VISIBILITY_ACTION),
+                    Context.RECEIVER_EXPORTED);
+            recentsVisibilityReceiver = receiver;
+        } catch (Throwable error) {
+            Log.e(TAG, "Cannot observe native Quickstep visibility", error);
+        }
+    }
+
+    /** Native Android shade state, including Quick Settings collapse. */
+    private static void installNativeShadeState(ClassLoader loader) {
+        Class<?> type = XposedHelpers.findClassIfExists(
+                "com.android.systemui.shade.ShadeExpansionStateManager", loader);
+        if (type == null) {
+            Log.w(TAG, "Native shade state manager unavailable");
+            return;
+        }
+        try {
+            XposedBridge.hookAllMethods(type, "onPanelExpansionChanged",
+                    new XC_MethodHook() {
+                @Override protected void afterHookedMethod(MethodHookParam p) {
+                    if (p.args.length < 2 || !(p.args[1] instanceof Boolean)) return;
+                    boolean expanded = (Boolean) p.args[1];
+                    if (nativeShadeExpanded == expanded) return;
+                    nativeShadeExpanded = expanded;
+                    updateStatusAppearance();
+                }
+            });
+            Log.i(TAG, "Native shade expansion appearance listener registered");
+        } catch (Throwable error) {
+            Log.w(TAG, "Native shade expansion appearance listener unavailable", error);
+        }
     }
 
     private static int nativeStatusBarHeight(Context context) {
@@ -502,6 +598,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
             panel = root;
             windowManager = manager;
             shown = true;
+            updateStatusAppearance();
             Log.i(TAG, "Two-column window attached; fullWidth=true left=15 right=85"
                     + " heightPx=" + height);
             root.post(() -> {
@@ -538,6 +635,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
                         windowManager = null;
                         shown = false;
                         openingOrClosing = false;
+                        updateStatusAppearance();
                         Log.i(TAG, "Two-column pull-down dismissed");
                     }
                 }).start();
@@ -604,6 +702,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
             windowManager = null;
             shown = false;
             openingOrClosing = false;
+            updateStatusAppearance();
             Log.i(TAG, "Two-column pull-down immediately hidden");
         }
     }

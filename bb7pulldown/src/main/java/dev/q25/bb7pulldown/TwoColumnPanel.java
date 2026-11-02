@@ -633,6 +633,8 @@ final class TwoColumnPanel extends FrameLayout {
         onStatusZone.onZoneFocus(-1);
     }
 
+    int statusFocusZone() { return focusedStatusZone; }
+
     void clearStatusZoneFocus() {
         focusedStatusZone = -1;
         onStatusZone.onZoneFocus(-1);

@@ -2,6 +2,8 @@ package dev.q25.trackpad;
 
 import android.graphics.Rect;
 import android.content.Context;
+import android.content.Intent;
+import android.app.BroadcastOptions;
 import android.provider.Settings;
 import android.util.Log;
 import android.view.View;
@@ -674,8 +676,19 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
                 @Override protected void afterHookedMethod(MethodHookParam p) {
                     View root = (View) p.thisObject;
                     if (!active(root)) return;
-                    if (p.args.length > 0 && Boolean.FALSE.equals(p.args[0])) {
-                        OVERVIEW_ENTRY_SELECTED.remove(root);
+                    if (p.args.length > 0 && p.args[0] instanceof Boolean) {
+                        boolean visible = (Boolean) p.args[0];
+                        if (!visible) OVERVIEW_ENTRY_SELECTED.remove(root);
+                        // Let SystemUI style its own status bar based on
+                        // Quickstep's authoritative overview visibility.
+                        Intent state = new Intent(
+                                "dev.q25.trackpad.action.RECENTS_VISIBILITY");
+                        state.setPackage("com.android.systemui");
+                        state.putExtra("visible", visible);
+                        root.getContext().sendBroadcast(state, null,
+                                BroadcastOptions.makeBasic()
+                                        .setShareIdentityEnabled(true).toBundle());
+                        Log.w(TAG, "Native overview visibility notified=" + visible);
                     }
                 }
             });
