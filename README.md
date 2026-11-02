@@ -1,18 +1,26 @@
 # BB UI
 
-## BB7 Pull-down — native notification click lifecycle (v0.5.5)
+## BB7 Pull-down — native notification click lifecycle (v0.5.6)
 
 **Branch:** `feat/bb7-native-notification-click` (from `master`). No code from the abandoned
 `feat/bb7-shade` notification/QS hooks is included.
 
-The notification activation now queries SystemUI's actual NotifCollection entry
-and native row by notification key. Where no row exists, it delegates the original
-notification opening action to the native ActivityStarter, then uses the
-native OnUserInteractionCallback.registerFutureDismissal(..., REASON_CLICK)
-only when Android's FLAG_AUTO_CANCEL applies, and reports the click through
-the existing NotificationClickNotifier. Notifications that Android treats as
-bubbles use the existing SystemUI bubble expansion method. It does not force-clear ongoing
-or non-auto-cancel notifications.
+The notification activation queries SystemUI's actual NotifCollection entry
+and native row by notification key when available. Where no row exists, it
+delegates the notification's original opening action to the existing SystemUI
+ActivityStarter. An unavailable NotifCollection entry must never prevent this
+native activity-start route from being invoked.
+
+The native NotifCollection, OnUserInteractionCallbackImpl and
+NotificationClickNotifier are captured independently through their existing
+SystemUI constructors. If all are available for a notification, the module
+delegates to the native registerFutureDismissal(..., REASON_CLICK) path
+for FLAG_AUTO_CANCEL notifications and reports the click through the native
+NotificationClickNotifier. If those services are not available, activity
+launches may work but native click/auto-cancel reporting cannot be guaranteed;
+the module logs the unavailable services rather than inventing replacements.
+Actual bubble notifications use SystemUI's bubble expansion service when available.
+It does not force-clear ongoing or non-auto-cancel notifications.
 
 Android 17 requires the `RECEIVER_NOT_EXPORTED` flag when registering
 the Home/system-dialog receiver. If that mixed-action registration is
@@ -53,11 +61,11 @@ delegates to the existing native SystemUI notification-row click handler
 when a native row is available. When no stock row has been inflated, it
 delegates the notification's original opening PendingIntent to LineageOS's
 existing SystemUI ActivityStarter (which handles Android background launches).
-With no native row, the fallback uses the actual NotifCollection entry and
-the stock OnUserInteractionCallback/NotificationClickNotifier for click
-reporting and FLAG_AUTO_CANCEL, and the native BubblesManager for bubbles.
-Notifications not marked auto-cancelable remain in the shade, as on Android.
-No direct notification cancellation method is invoked. Back returns to the same app icon, then Back again
+With no native row, the fallback uses ActivityStarter even if
+the native NotifCollection entry cannot be retrieved. If the real native
+click services are captured, they handle click reporting and FLAG_AUTO_CANCEL.
+Uncaptured native services are logged explicitly; no direct cancellation method
+is used, and ongoing notifications remain untouched. Back returns to the same app icon, then Back again
 closes the pull-down. Touch can tap apps and notification cards directly.
 Left/Right never changes navigation levels. Notifications without a
 native clickable row and no original opening PendingIntent remain selectable,
