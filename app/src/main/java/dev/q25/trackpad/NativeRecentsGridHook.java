@@ -616,6 +616,11 @@ public final class NativeRecentsGridHook implements IXposedHookLoadPackage {
                     if (p.args.length > 0 && Boolean.FALSE.equals(p.args[0])) {
                         OVERVIEW_ENTRY_SELECTED.remove(root);
                         restoreUnifiedOverview(root);
+                        BroadcastReceiver receiver = UNIFIED_RECEIVERS.remove(root);
+                        if (receiver != null) {
+                            try { root.getContext().unregisterReceiver(receiver); }
+                            catch (IllegalArgumentException ignored) { }
+                        }
                     }
                 }
             });
