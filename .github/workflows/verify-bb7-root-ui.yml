@@ -47,6 +47,12 @@ jobs:
             'platforms;android-35' 'build-tools;35.0.0'
       - name: Compile and run tests
         run: gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug
+      - name: Verify Vector legacy entrypoint is packaged in APK
+        run: |
+          unzip -p app/build/outputs/apk/debug/app-debug.apk assets/xposed_init \
+            | grep -Fx 'dev.q25.trackpad.theme.SystemBb7VisualHook'
+          unzip -l app/build/outputs/apk/debug/app-debug.apk \
+            | grep -E 'classes[0-9]*[.]dex'
       - name: Save debug APK
         if: success()
         uses: actions/upload-artifact@v4
