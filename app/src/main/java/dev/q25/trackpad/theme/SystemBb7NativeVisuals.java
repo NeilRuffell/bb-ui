@@ -13,7 +13,7 @@ import android.graphics.drawable.GradientDrawable;
 import android.util.Log;
 import android.view.View;
 import android.view.Window;
-import android.widget.ListView;
+import android.widget.AbsListView;
 
 import java.lang.reflect.Method;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -150,11 +150,12 @@ final class SystemBb7NativeVisuals {
 
     private static void installNativeListSelection() {
         try {
-            XposedBridge.hookAllMethods(ListView.class, "setSelector",
+            XposedBridge.hookAllMethods(AbsListView.class, "setSelector",
                     new XC_MethodHook() {
                 @Override protected void beforeHookedMethod(MethodHookParam param) {
-                    if (param.args.length != 1 || param.args[0] == null) return;
-                    ListView list = (ListView) param.thisObject;
+                    if (param.args.length != 1
+                            || !(param.args[0] instanceof Drawable)) return;
+                    AbsListView list = (AbsListView) param.thisObject;
                     int line = Math.max(1, Math.round(
                             list.getResources().getDisplayMetrics().density));
                     param.args[0] = BB7Theme.selected(0f, line);
