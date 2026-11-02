@@ -31,16 +31,15 @@ final class NativeNotificationClicks {
             "com.android.systemui.statusbar.phone.ActivityStarterImpl";
     private static final String CLICK_NOTIFIER =
             "com.android.systemui.statusbar.NotificationClickNotifier";
-    private static final String VISIBILITY_PROVIDER =
-            "com.android.systemui.statusbar.notification.collection.provider"
-                    + ".NotificationVisibilityProviderImpl";
+    // System framework type used by LineageOS's NotificationVisibilityProviderImpl.
+    private static final String NOTIFICATION_VISIBILITY =
+            "com.android.internal.statusbar.NotificationVisibility";
 
     private static volatile WeakReference<Object> systemActivityStarter =
             new WeakReference<>(null);
     private static volatile WeakReference<Object> clickNotifier =
             new WeakReference<>(null);
-    private static volatile WeakReference<Object> visibilityProvider =
-            new WeakReference<>(null);
+    private static volatile Class<?> notificationVisibilityClass;
 
     private static final Map<String, WeakReference<View>> CLICKABLE_ROWS = new HashMap<>();
 
@@ -49,8 +48,13 @@ final class NativeNotificationClicks {
                 instance -> systemActivityStarter = new WeakReference<>(instance));
         observeConstructor(loader, CLICK_NOTIFIER, "NotificationClickNotifier",
                 instance -> clickNotifier = new WeakReference<>(instance));
-        observeConstructor(loader, VISIBILITY_PROVIDER, "NotificationVisibilityProvider",
-                instance -> visibilityProvider = new WeakReference<>(instance));
+        Class<?> type = XposedHelpers.findClassIfExists(NOTIFICATION_VISIBILITY, loader);
+        if (type != null) {
+            notificationVisibilityClass = type;
+            Log.i(TAG, "Native NotificationVisibility framework class resolved");
+        } else {
+            Log.e(TAG, "Native NotificationVisibility framework class unavailable");
+        }
 
         Class<?> clicker = XposedHelpers.findClassIfExists(CLICKER, loader);
         if (clicker == null) return;
@@ -150,17 +154,21 @@ final class NativeNotificationClicks {
 
     private static void reportNativeClick(String key) {
         Object notifier = clickNotifier.get();
-        Object provider = visibilityProvider.get();
-        if (notifier == null || provider == null) {
-            Log.e(TAG, "Native click reporting unavailable: notifier=" + (notifier != null)
-                    + " visibilityProvider=" + (provider != null));
+        Class<?> visibilityType = notificationVisibilityClass;
+        if (notifier == null || visibilityType == null) {
+            Log.e(TAG, "Stock click reporting unavailable: notifier=" + (notifier != null)
+                    + " frameworkVisibility=" + (visibilityType != null));
             return;
         }
         try {
-            // LineageOS's visibility provider obtains the actual notification
-            // metadata, or its stock missing-row representation.
-            Object visibility = XposedHelpers.callMethod(provider, "obtain", key, true);
+            // Exact framework API and missing-entry representation used by
+            // LineageOS NotificationVisibilityProviderImpl.obtain(String,...).
+            // Our replacement pane has no native rendered notification row.
+            Object visibility = XposedHelpers.callStaticMethod(
+                    visibilityType, "obtain", key, -1,
+                    SystemUiNotificationObserver.itemsSnapshot().size(), false);
             XposedHelpers.callMethod(notifier, "onNotificationClick", key, visibility);
+            // NMS applies FLAG_AUTO_CANCEL and all other platform click rules.
             Log.i(TAG, "Native notification click reported to NotificationManagerService");
         } catch (Throwable error) {
             Log.e(TAG, "Native notification click reporting failed", error);

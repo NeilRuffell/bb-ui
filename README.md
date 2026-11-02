@@ -1,14 +1,17 @@
 # BB UI
 
-## BB7 Pull-down — stock notification click path (v0.5.8)
+## BB7 Pull-down — stock notification click path (v0.5.9)
 
 **Branch:** `feat/bb7-native-notification-click` (from `master`).
 
 Notification activation uses the native SystemUI notification row click listener
 if one exists. Otherwise, it invokes SystemUI's existing `ActivityStarter` with
 the notification's real `PendingIntent`, and reports the click with SystemUI's
-`NotificationClickNotifier.onNotificationClick()` using visibility metadata
-obtained from the native `NotificationVisibilityProviderImpl`.
+`NotificationClickNotifier.onNotificationClick()`. Visibility data is created
+using Android's own `com.android.internal.statusbar.NotificationVisibility.obtain()`,
+with the same no-native-entry representation used by LineageOS's
+`NotificationVisibilityProviderImpl`. This removes the previous unnecessary
+dependency on a captured visibility-provider instance.
 
 LineageOS `NotificationManagerService.onNotificationClick()` performs stock
 cancellation of notifications eligible for auto-cancel; persistent, foreground
