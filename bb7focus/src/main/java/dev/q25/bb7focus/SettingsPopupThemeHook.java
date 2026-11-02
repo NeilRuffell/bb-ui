@@ -1,13 +1,12 @@
 package dev.q25.bb7focus;
 
-import android.app.Application;
 import android.content.Context;
+import android.graphics.drawable.GradientDrawable;
 import android.util.Log;
-import android.view.View;
-import android.view.ViewGroup;
-import android.view.WindowManager;
 
 import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import de.robv.android.xposed.XC_MethodHook;
 import de.robv.android.xposed.XposedBridge;
@@ -15,129 +14,178 @@ import de.robv.android.xposed.XposedHelpers;
 import dev.q25.trackpad.theme.BB7Theme;
 
 /**
- * Settings SPA overflow is Compose, NOT android.widget.MenuPopupWindow.
+ * Settings native + Compose menu appearance, scoped to com.android.settings.
  *
- * LineageOS 24 Settings: ManageApplicationsUtil routes the all-apps page to
- * SpaActivity when SETTINGS_ENABLE_SPA is enabled. SettingsLib's AppListPage
- * calls MoreOptionsAction, which uses Material3 DropdownMenu.
+ * LineageOS 24's Apps > All apps can route through SPA. Its menu is
+ * SettingsLib MoreOptionsAction -> Material3 DropdownMenu, not PopupWindow.
+ * Legacy Settings pages can also use the framework MenuPopupWindow.
  *
- * MenuDefaults.containerColor is the shared Material3 menu-specific theme
- * token. Change only that token in the Settings process; do not alter the
- * whole ColorScheme, window layout, menu actions, or keyboard handling.
- *
- * The subwindow trace is diagnostic only and is never modified.
+ * Styling is applied at the corresponding shared theme/presentation APIs,
+ * without menu replacement or any synthetic input processing.
  */
 final class SettingsPopupThemeHook {
     private static final String TAG = "BB7-PopupMenu";
     private static final String SETTINGS = "com.android.settings";
-    private static boolean firstColorLog;
+    private static final AtomicBoolean COMPOSE_COLOR_SEEN = new AtomicBoolean();
+    private static final AtomicBoolean COMPACT_SEEN = new AtomicBoolean();
 
     private SettingsPopupThemeHook() {}
 
     static void install(ClassLoader loader) {
-        installComposeMenuToken(loader);
-        installWindowTrace(loader);
+        installComposeMenuColor(loader);
+        SettingsComposeMenuFocusHook.install(loader);
+        installComposeMenuPadding(loader);
+        installNativeMenuAppearance(loader);
     }
 
-    private static void installComposeMenuToken(ClassLoader loader) {
+    private static void installComposeMenuColor(ClassLoader loader) {
         Class<?> defaults = XposedHelpers.findClassIfExists(
                 "androidx.compose.material3.MenuDefaults", loader);
         if (defaults == null) {
-            Log.w(TAG, "Material3 MenuDefaults class unavailable; SPA menu unchanged");
+            Log.i(TAG, "Material3 MenuDefaults absent; Compose colour unchanged");
             return;
         }
-        int installed = 0;
+        int hooked = 0;
         for (Method method : defaults.getDeclaredMethods()) {
-            // A Compose Color is represented at the JVM boundary as a
-            // packed long. Kotlin generates mangled getter names.
             if (!method.getName().startsWith("getContainerColor")
                     || method.getReturnType() != long.class) continue;
             try {
                 XposedBridge.hookMethod(method, new XC_MethodHook() {
                     @Override protected void beforeHookedMethod(MethodHookParam param) {
-                        // Xposed API 82 compile stubs do not include AndroidAppHelper.
-                        // Resolve Android's running Application through the
-                        // framework ActivityThread at runtime instead.
-                        Object runningApp = XposedHelpers.callStaticMethod(
-                                XposedHelpers.findClass("android.app.ActivityThread", loader),
-                                "currentApplication");
-                        if (!(runningApp instanceof Application)) return;
-                        Application app = (Application) runningApp;
-                        if (app == null || !SETTINGS.equals(app.getPackageName())) return;
-                        BB7Theme.Palette palette = BB7Theme.palette(app);
-                        // Compose Color for sRGB: ARGB in the high 32 bits,
-                        // with the standard sRGB colorspace discriminator.
-                        int color = palette == BB7Theme.Palette.DARK
-                                ? 0xff273544 : 0xffedf1f5;
-                        long packedColor = ((long) color & 0xffffffffL) << 32;
-                        param.setResult(packedColor);
-                        if (!firstColorLog) {
-                            firstColorLog = true;
-                            Log.i(TAG, "Compose Material3 menu background applied: "
-                                    + method.getName() + " dark="
-                                    + (palette == BB7Theme.Palette.DARK));
+                        try {
+                            Context context = settingsApplication(loader);
+                            if (context == null) return;
+                            boolean dark = BB7Theme.palette(context) == BB7Theme.Palette.DARK;
+                            // Compose's packed sRGB Color: ARGB upper 32 bits.
+                            int color = dark ? 0xff273544 : 0xffedf1f5;
+                            param.setResult((((long) color) & 0xffffffffL) << 32);
+                            if (COMPOSE_COLOR_SEEN.compareAndSet(false, true))
+                                Log.i(TAG, "Compose menu background applied: "
+                                        + method.getName() + " dark=" + dark);
+                        } catch (Throwable error) {
+                            Log.w(TAG, "Compose menu colour unchanged", error);
                         }
                     }
                 });
-                installed++;
-                Log.i(TAG, "Compose menu color getter hooked: " + method.getName());
+                hooked++;
             } catch (Throwable error) {
-                Log.e(TAG, "Compose menu getter hook failed: " + method.getName(), error);
+                Log.e(TAG, "Compose container colour registration failed", error);
             }
         }
-        if (installed == 0) {
-            Log.w(TAG, "Material3 MenuDefaults found, but no compatible "
-                    + "long-returning containerColor getter; no appearance changes");
-            for (Method method : defaults.getDeclaredMethods()) {
-                if (method.getName().contains("ContainerColor"))
-                    Log.w(TAG, "Available menu color method: " + method.getName()
-                            + " return=" + method.getReturnType().getName());
-            }
-        }
+        Log.i(TAG, "Compose menu background getters hooked=" + hooked);
     }
 
     /**
-     * AOSP SPA Compose Popup and framework menu windows both ultimately
-     * reach WindowManagerGlobal.addView. This confirms the real popup route
-     * without modifying any window, focus target or menu content.
+     * Save horizontal space on the Q25 without touching row height or keyboard
+     * behaviour. This changes Material3's menu-item padding token from its
+     * default to 10dp horizontal, 0dp vertical where available.
      */
-    private static void installWindowTrace(ClassLoader loader) {
-        Class<?> manager = XposedHelpers.findClassIfExists(
-                "android.view.WindowManagerGlobal", loader);
-        if (manager == null) {
-            Log.w(TAG, "WindowManagerGlobal unavailable for popup diagnostics");
+    private static void installComposeMenuPadding(ClassLoader loader) {
+        Class<?> defaults = XposedHelpers.findClassIfExists(
+                "androidx.compose.material3.MenuDefaults", loader);
+        Class<?> paddingKt = XposedHelpers.findClassIfExists(
+                "androidx.compose.foundation.layout.PaddingKt", loader);
+        if (defaults == null || paddingKt == null) {
+            Log.i(TAG, "Compose menu padding API unavailable; original density retained");
             return;
         }
+        Object compact = null;
+        for (Method method : paddingKt.getDeclaredMethods()) {
+            if (!method.getName().startsWith("PaddingValues")
+                    || !Modifier.isStatic(method.getModifiers())
+                    || method.getParameterTypes().length != 2
+                    || method.getParameterTypes()[0] != float.class
+                    || method.getParameterTypes()[1] != float.class) continue;
+            try {
+                method.setAccessible(true);
+                compact = method.invoke(null, 10f, 0f);
+                if (compact != null) break;
+            } catch (Throwable ignored) {
+                // Runtime Compose version may not expose this overload.
+            }
+        }
+        if (compact == null) {
+            Log.i(TAG, "Compose PaddingValues factory unavailable; original padding retained");
+            return;
+        }
+        final Object replacement = compact;
+        int hooked = 0;
+        for (Method method : defaults.getDeclaredMethods()) {
+            if (!method.getName().startsWith("getDropdownMenuItemContentPadding")
+                    && !method.getName().startsWith(
+                            "getDropdownMenuSelectableItemContentPadding")) continue;
+            if (method.getParameterTypes().length != 0
+                    || !method.getReturnType().isInstance(replacement)) continue;
+            try {
+                XposedBridge.hookMethod(method, new XC_MethodHook() {
+                    @Override protected void beforeHookedMethod(MethodHookParam param) {
+                        param.setResult(replacement);
+                        if (COMPACT_SEEN.compareAndSet(false, true))
+                            Log.i(TAG, "Compact Compose menu horizontal padding applied");
+                    }
+                });
+                hooked++;
+            } catch (Throwable error) {
+                Log.w(TAG, "Compose padding getter unavailable", error);
+            }
+        }
+        Log.i(TAG, "Compose menu padding getters hooked=" + hooked);
+    }
+
+    /** Native overflow menus on Settings screens outside SPA. */
+    private static void installNativeMenuAppearance(ClassLoader loader) {
+        installNativePresenter(
+                XposedHelpers.findClassIfExists("android.widget.MenuPopupWindow", loader),
+                "framework");
+        installNativePresenter(
+                XposedHelpers.findClassIfExists(
+                        "androidx.appcompat.widget.MenuPopupWindow", loader),
+                "AppCompat");
+    }
+
+    private static void installNativePresenter(Class<?> type, String label) {
+        if (type == null) return;
         try {
-            XposedBridge.hookAllMethods(manager, "addView", new XC_MethodHook() {
-                @Override protected void beforeHookedMethod(MethodHookParam param) {
-                    if (param.args.length < 2 || !(param.args[0] instanceof View)
-                            || !(param.args[1] instanceof WindowManager.LayoutParams))
+            XposedBridge.hookAllConstructors(type, new XC_MethodHook() {
+                @Override protected void afterHookedMethod(MethodHookParam param) {
+                    if (param.args.length == 0 || !(param.args[0] instanceof Context))
                         return;
-                    View root = (View) param.args[0];
-                    Context context = root.getContext();
-                    if (context == null || !SETTINGS.equals(context.getPackageName())) return;
-                    WindowManager.LayoutParams attributes =
-                            (WindowManager.LayoutParams) param.args[1];
-                    if (attributes.type < WindowManager.LayoutParams.FIRST_SUB_WINDOW
-                            || attributes.type > WindowManager.LayoutParams.LAST_SUB_WINDOW)
-                        return;
-                    Log.i(TAG, "Settings subwindow created: type=" + attributes.type
-                            + " root=" + root.getClass().getName()
-                            + " title=" + attributes.getTitle()
-                            + " child=" + firstChildClass(root));
+                    Context context = (Context) param.args[0];
+                    if (!SETTINGS.equals(context.getPackageName())) return;
+                    try {
+                        float density = context.getResources()
+                                .getDisplayMetrics().density;
+                        int lineWidth = Math.max(1, Math.round(density));
+                        BB7Theme.Palette palette = BB7Theme.palette(context);
+                        boolean dark = palette == BB7Theme.Palette.DARK;
+                        GradientDrawable surface = new GradientDrawable(
+                                GradientDrawable.Orientation.TOP_BOTTOM,
+                                dark ? new int[]{0xff374657, 0xff273544, 0xff192633}
+                                        : new int[]{0xfff9fafc, 0xffedf1f5, 0xffe5eaf0});
+                        surface.setCornerRadius(8f * density);
+                        surface.setStroke(lineWidth, palette.divider);
+                        XposedHelpers.callMethod(
+                                param.thisObject, "setBackgroundDrawable", surface);
+                        XposedHelpers.callMethod(param.thisObject,
+                                "setListSelector", BB7Theme.selected(0f, lineWidth));
+                        Log.i(TAG, label + " native menu styled");
+                    } catch (Throwable error) {
+                        Log.w(TAG, label + " native menu keeps original appearance", error);
+                    }
                 }
             });
-            Log.i(TAG, "Shared Settings popup-window diagnostic registered");
+            Log.i(TAG, label + " native menu constructor hook installed");
         } catch (Throwable error) {
-            Log.e(TAG, "Popup-window diagnostic registration failed", error);
+            Log.e(TAG, label + " native menu hook registration failed", error);
         }
     }
 
-    private static String firstChildClass(View root) {
-        if (!(root instanceof ViewGroup)) return "none";
-        ViewGroup parent = (ViewGroup) root;
-        if (parent.getChildCount() == 0) return "none";
-        return parent.getChildAt(0).getClass().getName();
+    private static Context settingsApplication(ClassLoader loader) {
+        Object application = XposedHelpers.callStaticMethod(
+                XposedHelpers.findClass("android.app.ActivityThread", loader),
+                "currentApplication");
+        if (!(application instanceof Context)) return null;
+        Context context = (Context) application;
+        return SETTINGS.equals(context.getPackageName()) ? context : null;
     }
 }
