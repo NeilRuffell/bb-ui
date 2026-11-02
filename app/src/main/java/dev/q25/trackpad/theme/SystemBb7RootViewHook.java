@@ -2,9 +2,12 @@ package dev.q25.trackpad.theme;
 
 import android.content.Context;
 import android.graphics.drawable.Drawable;
+import android.graphics.drawable.DrawableContainer;
+import android.graphics.drawable.ClipDrawable;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.InsetDrawable;
 import android.graphics.drawable.LayerDrawable;
+import android.graphics.drawable.ScaleDrawable;
 import android.util.Log;
 import android.view.View;
 import android.widget.CompoundButton;
@@ -54,6 +57,7 @@ final class SystemBb7RootViewHook {
                     if (!eligible(view)) return;
                     try {
                         Drawable drawable = (Drawable) param.args[0];
+                        if (!hasShapeBackground(drawable)) return;
                         Drawable squared = squareBackground(drawable, 0);
                         if (squared != null && squared != drawable)
                             param.args[0] = squared;
@@ -88,6 +92,17 @@ final class SystemBb7RootViewHook {
         return true;
     }
 
+    private static boolean hasShapeBackground(Drawable drawable) {
+        return drawable instanceof GradientDrawable
+                || drawable instanceof LayerDrawable
+                || drawable instanceof DrawableContainer
+                || drawable instanceof InsetDrawable
+                || drawable instanceof ScaleDrawable
+                || drawable instanceof ClipDrawable
+                || drawable.getClass().getName().equals(
+                        "com.google.android.material.shape.MaterialShapeDrawable");
+    }
+
     private static Drawable squareBackground(Drawable input, int depth) {
         if (input == null || depth > 6) return input;
         Drawable drawable = input.mutate();
@@ -100,8 +115,24 @@ final class SystemBb7RootViewHook {
             for (int index = 0; index < layers.getNumberOfLayers(); index++) {
                 squareBackground(layers.getDrawable(index), depth + 1);
             }
+        } else if (drawable instanceof DrawableContainer) {
+            // StateListDrawable and AnimatedStateListDrawable often contain
+            // a rounded <shape> for each focus/pressed/disabled state.
+            // Replacing only their currently selected child would leave
+            // other states displaying the original Android bubble.
+            Drawable.ConstantState state = drawable.getConstantState();
+            if (state instanceof DrawableContainer.DrawableContainerState) {
+                DrawableContainer.DrawableContainerState container =
+                        (DrawableContainer.DrawableContainerState) state;
+                for (int index = 0; index < container.getChildCount(); index++)
+                    squareBackground(container.getChild(index), depth + 1);
+            }
         } else if (drawable instanceof InsetDrawable) {
             squareBackground(((InsetDrawable) drawable).getDrawable(), depth + 1);
+        } else if (drawable instanceof ScaleDrawable) {
+            squareBackground(((ScaleDrawable) drawable).getDrawable(), depth + 1);
+        } else if (drawable instanceof ClipDrawable) {
+            squareBackground(((ClipDrawable) drawable).getDrawable(), depth + 1);
         } else if (drawable.getClass().getName().equals(
                 "com.google.android.material.shape.MaterialShapeDrawable")) {
             // Material Components is shipped by the system APK, not the
