@@ -49,6 +49,7 @@ public final class SettingsFocusThemeHook implements IXposedHookLoadPackage {
     public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lp) {
         if (!TARGET.equals(lp.packageName)) return;
         try {
+            SettingsDialogSurfaceHook.install();
             XposedBridge.hookAllMethods(Activity.class, "onResume", new XC_MethodHook() {
                 @Override
                 protected void afterHookedMethod(MethodHookParam param) {
