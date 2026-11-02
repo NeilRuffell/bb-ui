@@ -108,16 +108,11 @@ public final class SystemBb7VisualHook implements IXposedHookLoadPackage {
 
     static boolean isOsOwned(String packageName, ApplicationInfo info) {
         if (packageName == null || info == null) return false;
-        // OS package AND installed-system status: never skin Google Messages,
-        // WhatsApp, or other independently authored third-party UI, even
-        // when a vendor preinstalls them as /system applications.
-        boolean osPackage = "android".equals(packageName)
-                || packageName.startsWith("com.android.")
-                || packageName.startsWith("org.lineageos.")
-                || "com.google.android.permissioncontroller".equals(packageName)
-                || "com.google.android.packageinstaller".equals(packageName);
-        if (!osPackage) return false;
-        return (info.flags & (ApplicationInfo.FLAG_SYSTEM
-                | ApplicationInfo.FLAG_UPDATED_SYSTEM_APP)) != 0;
+        // OS package AND installed-system status: independent third-party
+        // UIs remain unaffected, even if pre-installed on /system.
+        boolean installedAsSystem = (info.flags
+                & (ApplicationInfo.FLAG_SYSTEM
+                    | ApplicationInfo.FLAG_UPDATED_SYSTEM_APP)) != 0;
+        return SystemBb7PackagePolicy.allows(packageName, installedAsSystem);
     }
 }
