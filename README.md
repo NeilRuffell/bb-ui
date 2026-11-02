@@ -1,8 +1,8 @@
 # BB UI
 
-## BB7 Pull-down — stock notification click path (v0.5.9)
+## BB7 Pull-down — inline native notification actions (v0.6.0)
 
-**Branch:** `feat/bb7-native-notification-click` (from `master`).
+**Branch:** `feat/bb7-inline-notification-actions` (from `master`).
 
 Notification activation uses the native SystemUI notification row click listener
 if one exists. Otherwise, it invokes SystemUI's existing `ActivityStarter` with
@@ -50,7 +50,7 @@ Up/Down moves the selection, trackpad click/Enter selects, and the currently
 selected row has a blue BB7-inspired gradient. The first icon is focused on
 opening. Selection persists across live notification updates when its app
 remains active. The right 85% panel now displays a vertically scrollable,
-read-only summary of that app's active notifications; live updates and removals
+summary of that app's active notifications; live updates and removals
 refresh it. This filters our presentation, not Android's notification list.
 Navigation has two explicit levels: Up/Down selects application icons;
 trackpad click/Enter enters that app's notifications. Up/Down then selects
@@ -67,8 +67,23 @@ is used, and ongoing notifications remain untouched. Back returns to the same ap
 closes the pull-down. Touch can tap apps and notification cards directly.
 Left/Right never changes navigation levels. Notifications without a
 native clickable row and no original opening PendingIntent remain selectable,
-but activating them leaves the pull-down open and logs the reason. Dismissal,
-inline reply, custom layouts and attachments are not implemented. The panel closes on screen-off to avoid exposing previews
+but activating them leaves the pull-down open and logs the reason. Native action buttons and Dismiss are integrated into the normal Up/Down focus
+sequence: notification card → app-supplied actions → Dismiss (if clearable) →
+next notification card. Enter/trackpad click activates the focused item.
+There is no long-press menu. Actions come only from Android's real
+`Notification.Action` array and dispatch the original `PendingIntent`.
+Non-activity actions use Android's native `PendingIntent.send` with the same
+background-activity-start options as LineageOS; activity actions delegate
+to native `ActivityStarter`. Action click reporting uses the existing
+SystemUI `NotificationClickNotifier`.
+
+Reply actions with free-form `RemoteInput` show an inline hardware-keyboard
+text field; Enter sends via Android's `RemoteInput.addResultsToIntent` and the
+original action PendingIntent, while Back returns to the action row.
+Data-only attachment replies and custom notification layouts remain unsupported.
+Dismiss appears only when `StatusBarNotification.isClearable()` is true and
+calls the native SystemUI `NotificationListenerService.cancelNotification(key)`;
+notification removal is owned by Android, not by this module. The panel closes on screen-off to avoid exposing previews
 on the lock screen.
 
 **Initial gesture limitation:** This prototype consumes finger touches that
@@ -82,7 +97,7 @@ only tests the global pull-down and the 15/85 layout.
 ```sh
 cd ~/Projects/bb-ui
 git fetch origin
-git switch feat/bb7-native-notification-click
+git switch feat/bb7-inline-notification-actions
 git pull --ff-only
 ./gradlew :bb7pulldown:assembleDebug
 adb install -r bb7pulldown/build/outputs/apk/debug/bb7pulldown-debug.apk
@@ -100,11 +115,9 @@ Logs:
 adb logcat -d -s BB7-PullDown:I '*:S'
 ```
 
-The module observes `NotificationClicker.register()` and uses the original
-SystemUI notification row when available. If no native row exists, it captures
-the native `ActivityStarter` when LineageOS constructs its SystemUI launcher and
-calls `startPendingIntentDismissingKeyguard()` on the notification's original
-action; it never directly calls `PendingIntent.send()`. If that launcher
+Notification card activation continues to use the validated native SystemUI row
+or ActivityStarter path and the native NotificationClickNotifier. Individual
+notification action buttons use Android's documented action PendingIntents. If that launcher
 is unavailable or the notification has no opening action, the panel stays
 open and logs why. If you don't see `Native SystemUI ActivityStarter captured via constructor`\nor `captured via notification constructor` in logcat after SystemUI restarts,\nthe launcher was not captured. An ActivityStarter callback reports attempted dispatch,
 not proof of app foregrounding.
