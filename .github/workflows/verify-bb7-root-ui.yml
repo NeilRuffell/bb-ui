@@ -28,10 +28,23 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.11.1'
-      - name: Install Android SDK API 35
-        uses: android-actions/setup-android@v3
-      - name: Install required platform/build tools
-        run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+      - name: Install Android SDK 35
+        env:
+          ANDROID_HOME: ${{ runner.temp }}/android-sdk
+          ANDROID_SDK_ROOT: ${{ runner.temp }}/android-sdk
+        run: |
+          mkdir -p "$ANDROID_HOME/cmdline-tools"
+          curl --fail --location --retry 3 \
+            https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip \
+            --output /tmp/android-cmdline-tools.zip
+          unzip -q /tmp/android-cmdline-tools.zip -d "$ANDROID_HOME/cmdline-tools"
+          mv "$ANDROID_HOME/cmdline-tools/cmdline-tools" "$ANDROID_HOME/cmdline-tools/latest"
+          echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
+          echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+            'platforms;android-35' 'build-tools;35.0.0'
       - name: Compile and run tests
         run: gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug
       - name: Save debug APK
