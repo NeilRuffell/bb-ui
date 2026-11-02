@@ -1,3 +1,58 @@
+# OS-owned BBOS7 visual layer (experimental)
+
+**Branch:** `feat/bb7-system-visual-layer` (master remains unchanged until device verification).
+
+One Vector/LSPosed APK now exposes shared BBOS7 visuals in **OS-owned,
+system-installed processes only**. This covers native Android
+`Resources.Theme.resolveAttribute` background/accent colors, native
+`AbsListView` selection, SettingsLib rounded preference backgrounds
+(`View.setBackgroundResource`), preference list side padding, Material
+Components `MaterialShapeDrawable` shapes, Material3 Compose
+`ColorScheme` and shape token getters, and native list-focus gradients.
+Existing Settings focus, SystemUI notification/shade and Quickstep
+navigation/focus hooks are preserved. No app-specific screen layouts are
+rewritten, and no key event behavior is changed.
+
+The runtime guard requires an installed Android/Lineage OS package name
+(`com.android.*`, `org.lineageos.*`, or the Android permission controller)
+**and** the system-app flag. Third-party application processes are excluded,
+even if they are manually added to Vector scope. Android framework process
+(`android`) is intentionally excluded; modifying framework resources
+globally would also change third-party apps.
+
+**Vector scope is mandatory per process.** Existing four BB UI scopes work
+unchanged; additional Android/Lineage OS packages with visible UI must be
+enabled under BB UI in Vector to receive this skin. A system/Android scope
+alone does not automatically inject into every other app process. Not every
+custom system widget follows these framework/shared APIs; this is broad
+source-level coverage, not a claim that every pixel in the ROM is skinned.
+
+```sh
+cd ~/Projects/bb-ui
+git fetch origin
+git switch feat/bb7-system-visual-layer
+git pull --ff-only
+./gradlew :app:testDebugUnitTest :app:assembleDebug &&
+adb install -r app/build/outputs/apk/debug/app-debug.apk &&
+adb shell am force-stop com.android.settings &&
+adb shell am start -a android.settings.SETTINGS
+adb logcat -d -s 'BB7-SystemSkin:V' 'BB7-Focus:V' '*:S' | tail -90
+```
+
+Rollback just the new layer, without disabling existing BB UI hooks:
+```sh
+adb shell setprop debug.bb7.systemskin.enabled false
+adb shell am force-stop com.android.settings
+adb shell am start -a android.settings.SETTINGS
+adb shell am crash com.android.systemui
+```
+Restore with the same property set to `true` and restart affected
+processes. This property is not persistent across reboot; the new layer
+defaults to enabled. The earlier failed edge-to-edge-popup branch is not
+included.
+
+---
+
 ## BB7 shade follows Android Light/Dark appearance
 
 The BB7 two-column notification panel now resolves Android's standard
