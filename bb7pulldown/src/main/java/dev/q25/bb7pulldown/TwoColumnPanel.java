@@ -34,6 +34,10 @@ import java.util.Objects;
  */
 final class TwoColumnPanel extends FrameLayout {
     interface CloseListener { void onClose(); }
+    interface StatusZoneListener {
+        void onZoneFocus(int zone); // -1 = notification content, 0 = left, 1 = right
+        void onSystemControls();
+    }
     interface OpenNotificationListener { void onOpen(String notificationKey); }
     interface NotificationActionListener {
         void onAction(String notificationKey, int actionIndex);
@@ -43,6 +47,8 @@ final class TwoColumnPanel extends FrameLayout {
 
     private static final String TAG = "BB7-PullDown";
     private final CloseListener onClose;
+    private final StatusZoneListener onStatusZone;
+    private int focusedStatusZone = -1;
     private final OpenNotificationListener onOpenNotification;
     private final NotificationActionListener onActions;
     private final List<LinearLayout> notificationRows = new ArrayList<>();
@@ -73,11 +79,13 @@ final class TwoColumnPanel extends FrameLayout {
     private boolean trackingClose;
 
     TwoColumnPanel(Context context, CloseListener close,
-            OpenNotificationListener openNotification, NotificationActionListener actions) {
+            OpenNotificationListener openNotification, NotificationActionListener actions,
+            StatusZoneListener statusZone) {
         super(context);
         onClose = close;
         onOpenNotification = openNotification;
         onActions = actions;
+        onStatusZone = statusZone;
         setFocusable(true);
         setFocusableInTouchMode(true);
         setBackgroundColor(Color.rgb(16, 20, 26));
@@ -241,6 +249,7 @@ final class TwoColumnPanel extends FrameLayout {
 
     /** Called once the pull-down entrance animation finishes. */
     void focusSelectedAppIcon() {
+        leaveStatusZone();
         int index = renderedPackages.indexOf(selectedPackage);
         if (index >= 0 && index < iconRows.size()) {
             iconRows.get(index).requestFocus();
@@ -485,6 +494,7 @@ final class TwoColumnPanel extends FrameLayout {
     }
 
     private void enterNotificationPaneFocus() {
+        leaveStatusZone();
         notificationPaneActive = true;
         for (FrameLayout icon : iconRows) {
             icon.setFocusable(false);
@@ -503,6 +513,7 @@ final class TwoColumnPanel extends FrameLayout {
 
     /** Back restores the previously selected app icon. */
     private void returnToAppIcons() {
+        leaveStatusZone();
         notificationPaneActive = false;
         for (FrameLayout icon : iconRows) {
             icon.setFocusable(true);
@@ -583,6 +594,25 @@ final class TwoColumnPanel extends FrameLayout {
         return background;
     }
 
+    private void enterStatusZone() {
+        if (activeReplyInput != null) return;
+        focusedStatusZone = 0;
+        requestFocus();
+        onStatusZone.onZoneFocus(focusedStatusZone);
+        Log.i(TAG, "Native status bar focused: notifications");
+    }
+
+    private void leaveStatusZone() {
+        if (focusedStatusZone < 0) return;
+        focusedStatusZone = -1;
+        onStatusZone.onZoneFocus(-1);
+    }
+
+    void clearStatusZoneFocus() {
+        focusedStatusZone = -1;
+        onStatusZone.onZoneFocus(-1);
+    }
+
     private boolean onNotificationKey(View view, int keyCode, KeyEvent event) {
         switch (keyCode) {
             case KeyEvent.KEYCODE_DPAD_UP:
@@ -592,7 +622,11 @@ final class TwoColumnPanel extends FrameLayout {
                     int direction = keyCode == KeyEvent.KEYCODE_DPAD_UP ? -1 : 1;
                     int next = AppSelectionPolicy.move(current, direction,
                             notificationTargets.size());
-                    if (next >= 0) notificationTargets.get(next).requestFocus();
+                    if (keyCode == KeyEvent.KEYCODE_DPAD_UP && current == 0) {
+                        enterStatusZone();
+                    } else if (next >= 0) {
+                        notificationTargets.get(next).requestFocus();
+                    }
                 }
                 return true;
             case KeyEvent.KEYCODE_DPAD_LEFT:
@@ -677,7 +711,11 @@ final class TwoColumnPanel extends FrameLayout {
                     int direction = keyCode == KeyEvent.KEYCODE_DPAD_UP ? -1 : 1;
                     int next = AppSelectionPolicy.move(selectedIndex,
                             direction, iconRows.size());
-                    if (next >= 0) iconRows.get(next).requestFocus();
+                    if (keyCode == KeyEvent.KEYCODE_DPAD_UP && selectedIndex == 0) {
+                        enterStatusZone();
+                    } else if (next >= 0) {
+                        iconRows.get(next).requestFocus();
+                    }
                 }
                 return true;
             case KeyEvent.KEYCODE_DPAD_LEFT:
@@ -721,6 +759,43 @@ final class TwoColumnPanel extends FrameLayout {
 
     @Override
     public boolean dispatchKeyEvent(KeyEvent event) {
+        if (focusedStatusZone >= 0) {
+            int code = event.getKeyCode();
+            if (code == KeyEvent.KEYCODE_DPAD_LEFT
+                    || code == KeyEvent.KEYCODE_DPAD_RIGHT) {
+                if (event.getAction() == KeyEvent.ACTION_DOWN) {
+                    focusedStatusZone = code == KeyEvent.KEYCODE_DPAD_LEFT ? 0 : 1;
+                    onStatusZone.onZoneFocus(focusedStatusZone);
+                }
+                return true;
+            }
+            if (code == KeyEvent.KEYCODE_DPAD_DOWN) {
+                if (event.getAction() == KeyEvent.ACTION_UP) {
+                    if (notificationPaneActive && !notificationTargets.isEmpty()) {
+                        leaveStatusZone();
+                        focusSelectedNotification();
+                    } else {
+                        focusSelectedAppIcon();
+                    }
+                }
+                return true;
+            }
+            if (code == KeyEvent.KEYCODE_DPAD_UP) return true;
+            if (code == KeyEvent.KEYCODE_DPAD_CENTER
+                    || code == KeyEvent.KEYCODE_ENTER
+                    || code == KeyEvent.KEYCODE_NUMPAD_ENTER
+                    || code == KeyEvent.KEYCODE_SPACE) {
+                if (event.getAction() == KeyEvent.ACTION_UP) {
+                    if (focusedStatusZone == 1) {
+                        clearStatusZoneFocus();
+                        onStatusZone.onSystemControls();
+                    } else {
+                        focusSelectedAppIcon();
+                    }
+                }
+                return true;
+            }
+        }
         // Hardware Delete/Backspace dismisses the focused clearable notification,
         // including when one of its native action controls has focus. Never
         // intercept editing keys while an inline reply is active.
@@ -746,6 +821,7 @@ final class TwoColumnPanel extends FrameLayout {
         if (event.getKeyCode() == KeyEvent.KEYCODE_BACK) {
             if (event.getAction() == KeyEvent.ACTION_UP) {
                 if (activeReplyInput != null) closeInlineReply();
+                else if (focusedStatusZone >= 0) focusSelectedAppIcon();
                 else if (notificationPaneActive) returnToAppIcons();
                 else onClose.onClose();
             }
