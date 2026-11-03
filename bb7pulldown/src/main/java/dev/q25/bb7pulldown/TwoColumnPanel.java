@@ -28,7 +28,6 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
-import android.widget.TextClock;
 
 import java.util.ArrayList;
 import java.util.Calendar;
@@ -120,32 +119,14 @@ final class TwoColumnPanel extends FrameLayout {
         setBackgroundColor(palette.canvas);
         setContentDescription("BB7 two-column pull-down");
 
-        // Fixed BBOS6-style current-date strip beneath the native status bar.
-        // TextClock updates automatically if the date or timezone changes.
+        // The same date-only header is used by the Quick Settings shade.
         LinearLayout content = new LinearLayout(context);
         content.setOrientation(LinearLayout.VERTICAL);
         addView(content, new FrameLayout.LayoutParams(
                 LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
 
-        TextClock currentDate = new TextClock(context);
-        currentDate.setFormat12Hour("EEE, MMM d, yyyy");
-        currentDate.setFormat24Hour("EEE, MMM d, yyyy");
-        currentDate.setTextColor(palette.headingText);
-        currentDate.setTextSize(14); // Match notification title size.
-        currentDate.setTypeface(null, android.graphics.Typeface.NORMAL);
-        currentDate.setGravity(Gravity.CENTER);
-        currentDate.setPadding(dp(8), 0, dp(8), 0);
-        // BBOS6-inspired beveled header: subtle vertical graphite/steel gradient.
-        boolean dark = palette == BB7Theme.Palette.DARK;
-        GradientDrawable dateBarBackground = new GradientDrawable(
-                GradientDrawable.Orientation.TOP_BOTTOM,
-                dark
-                        ? new int[] {0xff526477, 0xff3b4e60, 0xff263747}
-                        : new int[] {0xfff9fbfe, 0xffe5ecf4, 0xffc8d4e1});
-        currentDate.setBackground(dateBarBackground);
-        currentDate.setFocusable(false);
-        content.addView(currentDate, new LinearLayout.LayoutParams(
-                LayoutParams.MATCH_PARENT, dp(30)));
+        content.addView(new ShadeDateHeader(context),
+                ShadeDateHeader.layoutParams(context));
 
         // One focusable row for all native media sessions, hidden when none exist.
         mediaRow = new LinearLayout(context);
