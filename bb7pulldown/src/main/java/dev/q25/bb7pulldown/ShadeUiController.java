@@ -109,6 +109,11 @@ final class ShadeUiController {
     }
 
     boolean handleKey(KeyEvent event) {
-        return status.handleKey(event.getKeyCode(), event.getAction());
+        return handleKey(event.getKeyCode(), event.getAction());
+    }
+
+    /** Integer variant permits JVM state-machine tests without an Android runtime. */
+    boolean handleKey(int code, int action) {
+        return status.handleKey(code, action);
     }
 }
