@@ -412,11 +412,6 @@ public final class PullDownHook implements IXposedHookLoadPackage {
         return NativeNotificationActions.reply(key, index, reply, current.getContext());
     }
 
-    private static void showSystemControls(Context context) {
-        if (shadeHost == null) showShade(context, UnifiedShadeHost.QUICK_SETTINGS);
-        else switchShadePage(UnifiedShadeHost.QUICK_SETTINGS);
-    }
-
     /** Page changes keep the same WindowManager window and translation. */
     private static void switchShadePage(int next) {
         UnifiedShadeHost root = shadeHost;
