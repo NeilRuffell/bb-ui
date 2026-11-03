@@ -2,6 +2,7 @@ package dev.q25.bb7pulldown;
 
 import android.content.Context;
 import android.view.View;
+import android.view.MotionEvent;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 
@@ -17,13 +18,17 @@ final class UnifiedShadeHost extends FrameLayout {
     private final ShadeDateHeader dateHeader;
     private final TwoColumnPanel notifications;
     private final BB6ConnectionsPanel connections;
+    private final Runnable closeShade;
     private int page;
+    private float headerTouchDownY;
+    private boolean headerSwipeClosed;
 
     UnifiedShadeHost(Context context, TwoColumnPanel notifications,
-            BB6ConnectionsPanel connections, int initialPage) {
+            BB6ConnectionsPanel connections, int initialPage, Runnable closeShade) {
         super(context);
         this.notifications = notifications;
         this.connections = connections;
+        this.closeShade = closeShade;
 
         LinearLayout layout = new LinearLayout(context);
         layout.setOrientation(LinearLayout.VERTICAL);
@@ -31,6 +36,29 @@ final class UnifiedShadeHost extends FrameLayout {
                 LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
 
         dateHeader = new ShadeDateHeader(context);
+        // Previously the header lived inside each page and inherited its
+        // swipe-up dismissal. Preserve that gesture at the shared host level.
+        dateHeader.setOnTouchListener((view, event) -> {
+            switch (event.getActionMasked()) {
+                case MotionEvent.ACTION_DOWN:
+                    headerTouchDownY = event.getRawY();
+                    headerSwipeClosed = false;
+                    return true;
+                case MotionEvent.ACTION_MOVE:
+                    if (!headerSwipeClosed
+                            && headerTouchDownY - event.getRawY() >= dp(65)) {
+                        headerSwipeClosed = true;
+                        closeShade.run();
+                    }
+                    return true;
+                case MotionEvent.ACTION_UP:
+                case MotionEvent.ACTION_CANCEL:
+                    headerSwipeClosed = false;
+                    return true;
+                default:
+                    return true;
+            }
+        });
         layout.addView(dateHeader, ShadeDateHeader.layoutParams(context));
 
         FrameLayout pages = new FrameLayout(context);
@@ -78,5 +106,9 @@ final class UnifiedShadeHost extends FrameLayout {
     void clearStatusBarFocus() {
         notifications.clearStatusZoneFocus();
         connections.clearStatusZoneFocus();
+    }
+
+    private int dp(int value) {
+        return (int) (value * getResources().getDisplayMetrics().density + 0.5f);
     }
 }
