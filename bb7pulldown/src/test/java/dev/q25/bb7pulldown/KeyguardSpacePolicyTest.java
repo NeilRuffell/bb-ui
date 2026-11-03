@@ -52,6 +52,11 @@ public class KeyguardSpacePolicyTest {
                 policy.route(0, 600, 0, true, false, false, false, true));
     }
 
+    @Test public void passwordEditorReceivesSpaceEvenWithManagerPresentAndNoVisibilityMethod() {
+        assertEquals(KeyguardSpacePolicy.PASS,
+                policy.route(0, 750, 0, true, false, false, true, true));
+    }
+
     @Test public void orphanedUpDoesNotClickLockedQuickSetting() {
         assertEquals(KeyguardSpacePolicy.CONSUME,
                 policy.route(1, 700, 0, true, false, false, true, false));
