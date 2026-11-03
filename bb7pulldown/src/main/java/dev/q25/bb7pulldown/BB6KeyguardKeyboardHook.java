@@ -116,12 +116,18 @@ public final class BB6KeyguardKeyboardHook implements IXposedHookLoadPackage {
         Log.i(TAG, "Space routed to native keyguard; state=" + state
                 + ", accepted=" + nativeHandled + ", postCollapse=" + afterCollapse);
 
-        if (nativeHandled && (state != SHADE_LOCKED || afterCollapse)) return true;
-
-        // If the SystemUI handler declined (or the expanded locked shade could
-        // only collapse), ask the same native manager for credential entry.
-        // Never allow this Space UP to activate the previously focused tile.
-        if (!nativeHandled || !afterCollapse) {
+        if (state == SHADE_LOCKED && afterCollapse) {
+            // Normal native handling collapses the shade. If it declined,
+            // initiate the same stock collapse so the queued bouncer can run.
+            if (!nativeHandled) {
+                forceNativeShadeCollapse(manager);
+            }
+            return true;
+        }
+        if (!nativeHandled || state == SHADE_LOCKED) {
+            // Native keyguard did not handle this event, or collapse could
+            // not be paired with a post-collapse action. Do not allow UP to
+            // reach focused notifications or QS.
             requestNativeBouncer(manager, "BB UI: physical Space");
         }
         return true;
@@ -176,6 +182,18 @@ public final class BB6KeyguardKeyboardHook implements IXposedHookLoadPackage {
         } catch (Throwable error) {
             Log.e(TAG, "Unable to queue native bouncer after shade collapse", error);
             return false;
+        }
+    }
+
+    private static void forceNativeShadeCollapse(Object manager) {
+        try {
+            if (manager == null) return;
+            Object lazy = XposedHelpers.getObjectField(manager, "mShadeController");
+            Object controller = XposedHelpers.callMethod(lazy, "get");
+            XposedHelpers.callMethod(controller, "animateCollapseShadeForced");
+        } catch (Throwable error) {
+            Log.e(TAG, "Native locked-shade collapse failed", error);
+            requestNativeBouncer(manager, "BB UI: locked shade fallback");
         }
     }
 
