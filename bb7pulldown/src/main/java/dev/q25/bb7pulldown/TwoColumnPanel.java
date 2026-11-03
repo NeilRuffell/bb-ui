@@ -31,8 +31,10 @@ import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.Collections;
 import java.util.Date;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * Independent 15/85 notification panel. The left side is a selectable
@@ -93,6 +95,7 @@ final class TwoColumnPanel extends FrameLayout {
     private final List<FrameLayout> iconRows = new ArrayList<>();
     private List<String> renderedPackages = Collections.emptyList();
     private List<NotificationItem> notifications = Collections.emptyList();
+    private List<NotificationItem> visibleNotifications = Collections.emptyList();
     private List<NotificationItem> renderedCards = Collections.emptyList();
     private String renderedCardPackage;
     private String selectedPackage;
@@ -293,6 +296,7 @@ final class TwoColumnPanel extends FrameLayout {
             selectedMediaToken = null;
             mediaControlsOpen = false;
             mediaRow.setVisibility(View.GONE);
+            updateVisibleNotifications();
             if (hadFocus) focusSelectedAppIcon();
             return;
         }
@@ -302,6 +306,7 @@ final class TwoColumnPanel extends FrameLayout {
         selectedMediaToken = mediaSessions.get(index).token;
         mediaRow.setVisibility(View.VISIBLE);
         renderMediaSession();
+        updateVisibleNotifications();
     }
 
     private int mediaSessionIndex() {
@@ -448,7 +453,20 @@ final class TwoColumnPanel extends FrameLayout {
     void setNotifications(List<NotificationItem> items) {
         notifications = items == null ? Collections.emptyList()
                 : Collections.unmodifiableList(new ArrayList<>(items));
-        setNotificationPackages(NotificationCategoryPolicy.categoriesFor(notifications));
+        updateVisibleNotifications();
+    }
+
+    /** Hide silent media cards only when the native media bar represents them. */
+    private void updateVisibleNotifications() {
+        Set<MediaSession.Token> representedTokens = new HashSet<>();
+        for (NativeMediaSessions.Entry session : mediaSessions) {
+            representedTokens.add(session.token);
+        }
+        Set<String> representedKeys =
+                SystemUiNotificationObserver.notificationKeysForMediaTokens(representedTokens);
+        visibleNotifications = NotificationSelectionPolicy.withoutRepresentedSilentMedia(
+                notifications, representedKeys);
+        setNotificationPackages(NotificationCategoryPolicy.categoriesFor(visibleNotifications));
         renderSelectedNotifications();
     }
 
@@ -573,8 +591,8 @@ final class TwoColumnPanel extends FrameLayout {
     private void renderSelectedNotifications() {
         boolean silentCategory = NotificationCategoryPolicy.isSilent(selectedPackage);
         List<NotificationItem> selected = silentCategory
-                ? NotificationSelectionPolicy.forSilent(notifications)
-                : NotificationSelectionPolicy.forPackage(notifications, selectedPackage);
+                ? NotificationSelectionPolicy.forSilent(visibleNotifications)
+                : NotificationSelectionPolicy.forPackage(visibleNotifications, selectedPackage);
         if (Objects.equals(renderedCardPackage, selectedPackage)
                 && renderedCards.equals(selected)) return;
 
