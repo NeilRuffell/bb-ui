@@ -94,6 +94,19 @@ public class FavoritesRulesTest {
                 favorites.filter(Arrays.asList(alert, silent)));
     }
 
+    @Test public void selectedGroupChildSuppressesSummaryOnlyWithinFavorites() {
+        FavoritesRules.AppRule app = new FavoritesRules.AppRule("com.chat");
+        FavoritesRules favorites = enabledWith(app);
+        NotificationItem summary = new NotificationItem("summary", "com.chat",
+                "Group", "", 1L, true, Collections.emptyList(),
+                "group-1", true, false);
+        NotificationItem child = new NotificationItem("child", "com.chat",
+                "Message", "", 1L, true, Collections.emptyList(),
+                "group-1", false, false);
+        assertEquals(Collections.singletonList(child),
+                favorites.filter(Arrays.asList(summary, child)));
+    }
+
     @Test public void favoriteCategoryIsFirstEvenWhenEmpty() {
         List<String> categories = NotificationCategoryPolicy.categoriesFor(
                 Collections.emptyList(), true);
