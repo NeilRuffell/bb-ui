@@ -77,11 +77,10 @@ final class UnifiedShadeHost extends FrameLayout {
         if (next != NOTIFICATIONS && next != QUICK_SETTINGS) {
             throw new IllegalArgumentException("Unknown shade page");
         }
-        if (page == next && notifications.getVisibility() != connections.getVisibility()) {
-            return;
+        if (page != next) {
+            notifications.clearStatusZoneFocus();
+            connections.clearStatusZoneFocus();
         }
-        notifications.clearStatusZoneFocus();
-        connections.clearStatusZoneFocus();
         page = next;
         notifications.setVisibility(next == NOTIFICATIONS ? View.VISIBLE : View.GONE);
         connections.setVisibility(next == QUICK_SETTINGS ? View.VISIBLE : View.GONE);
