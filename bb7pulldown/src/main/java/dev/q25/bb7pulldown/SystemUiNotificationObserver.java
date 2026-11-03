@@ -2,6 +2,8 @@ package dev.q25.bb7pulldown;
 
 import android.app.Notification;
 import android.app.NotificationManager;
+import android.app.NotificationChannel;
+import android.content.pm.ShortcutInfo;
 import android.app.PendingIntent;
 import android.app.RemoteInput;
 import android.media.session.MediaSession;
@@ -352,16 +354,38 @@ final class SystemUiNotificationObserver {
         // Importance is Android's authoritative channel-level interruptiveness.
         // Missing rankings remain unclassified (displayed with alerting items).
         boolean silent = false;
+        LinkedHashSet<String> conversationIds = new LinkedHashSet<>();
+        if (notification != null && notification.getShortcutId() != null
+                && !notification.getShortcutId().isEmpty()) {
+            conversationIds.add(notification.getShortcutId());
+        }
+        String conversationTitle = plain(extras == null ? null
+                : extras.getCharSequence(Notification.EXTRA_CONVERSATION_TITLE), 140);
         if (rankings != null) {
             NotificationListenerService.Ranking ranking =
                     new NotificationListenerService.Ranking();
             if (rankings.getRanking(sbn.getKey(), ranking)) {
                 silent = ranking.getImportance() < NotificationManager.IMPORTANCE_DEFAULT;
+                NotificationChannel channel = ranking.getChannel();
+                if (channel != null && channel.getConversationId() != null
+                        && !channel.getConversationId().isEmpty()) {
+                    conversationIds.add(channel.getConversationId());
+                }
+                ShortcutInfo shortcut = ranking.getConversationShortcutInfo();
+                if (shortcut != null) {
+                    if (shortcut.getId() != null && !shortcut.getId().isEmpty()) {
+                        conversationIds.add(shortcut.getId());
+                    }
+                    if (conversationTitle.isEmpty()) {
+                        conversationTitle = plain(shortcut.getShortLabel(), 140);
+                    }
+                }
             }
         }
         return new NotificationItem(sbn.getKey(), sbn.getPackageName(),
                 plain(title, 140), plain(body, 700), sbn.getPostTime(),
-                sbn.isClearable(), buttons, sbn.getGroupKey(), summary, silent);
+                sbn.isClearable(), buttons, sbn.getGroupKey(), summary, silent,
+                new ArrayList<>(conversationIds), conversationTitle);
     }
 
     /** Drop app-supplied formatting before displaying text in the panel. */
