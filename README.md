@@ -1,61 +1,74 @@
-# BBOS6 keyguard keyboard entry (stage 1)
+# BBOS6 keyguard Space-to-unlock input (stage 1)
 
-**Q25 compatibility fix (0.9.33):** The Q25 runtime reports that `StatusBarKeyguardViewManager.primaryBouncerIsShowing()` does not exist. The hook now queries available native visibility methods without assuming that method exists; the captured manager can still request authentication even when an optional state query is absent. It preserves Space in a focused credential text editor, retains key-down/up consumption on the initial lock screen, and uses compatible native bouncer entry signatures. This needs physical-device validation before merging.
+**Branch:** `feat/bb6-keyguard-keyboard-entry` (based on `master`).
+**Version:** 0.9.34; do not merge before physical Q25 verification.
 
-Branch: `feat/bb6-keyguard-keyboard-entry`, based on `master`.
+**Desired behavior:** On the initial lock screen, one hardware Space press
+reveals Android's normal PIN/password/pattern authentication input. Space
+must never activate or focus a notification or Quick Settings tile while
+locked. Inside the credential UI, Space retains its normal input behavior.
 
-**LineageOS 24.0 integration:** `NotificationShadeWindowView` inherits
-`dispatchKeyEvent(KeyEvent)` from `WindowRootView`. This feature hooks the
-**declaring** `WindowRootView` method, before Android can forward the Space
-key to a focused notification or Quick Settings tile. The previous prototype
-hooked a non-declaring subclass, so it could miss the key entirely.
+**Why earlier prototypes failed:** The first hook intercepted a subclass
+that does not declare `dispatchKeyEvent`; a subsequent version called the
+`primaryBouncerIsShowing()` method, which the Q25 runtime does not have.
+A later direct manager request still did not reliably open the credential UI.
 
-When the keyguard is locked and Android's primary PIN/password/pattern
-challenge is not showing, Space requests the existing
-`StatusBarKeyguardViewManager.showPrimaryBouncer(true, "BB UI: physical Space on lockscreen")`.
-This uses the actual LineageOS 24.0 two-argument method signature.
-The Space DOWN and matching UP are consumed together even if the bouncer
-changes focus mid-press. During transition, Space is blocked rather than
-activated. When the native credential screen is fully visible, Space passes
-through unchanged so passwords containing spaces continue to work.
+**Current design:** The SystemUI `WindowRootView` normally runs
+`super.dispatchKeyEvent` (including focused notification/QS children)
+**before** `WindowRootViewKeyEventHandler.dispatchKeyEvent`. LineageOS's
+native `KeyguardKeyEventInteractor` already recognizes Space as a
+confirmation key and can open the existing credential interface. We move
+the **same real Space UP event** through the native handler *before*
+dispatching to child controls. The matching DOWN and UP are exclusively
+consumed in this lock-screen context, with no synthetic taps, swipes or
+custom authentication.
 
-If the native manager is unavailable, Space is **blocked while locked** rather
-than forwarded to a selected Quick Settings control. A focused text editor is
-exempt when native bouncer visibility cannot be queried, to preserve password
-typing. Swipe-up and native lock-screen authentication remain available.
-No custom credential verification, click injection or unlock bypass is added.
+While the locked Quick Settings shade is expanded (`SHADE_LOCKED`),
+Android's native handler first collapses the shade. We register a
+post-collapse callback that requests the native bouncer so one Space
+press performs both steps. Native manager methods are only a fallback
+when the keyguard handler does not accept the input. The policy keeps
+the credential editor and already-visible bouncer untouched.
 
-Build and install the unified BB UI module:
+Build and install on KDE neon, using the global Gradle and direct
+package-manager installation that worked on the Q25:
 
 ```sh
 cd ~/Projects/bb-ui
 git fetch origin
 git switch feat/bb6-keyguard-keyboard-entry
 git pull --ff-only
-gradle :app:assembleDebug :app:testDebugUnitTest
-adb install -r app/build/outputs/apk/debug/app-debug.apk
+gradle :app:assembleDebug :app:testDebugUnitTest &&
+adb push app/build/outputs/apk/debug/app-debug.apk /data/local/tmp/bb-ui.apk &&
+timeout 45s adb shell pm install -r /data/local/tmp/bb-ui.apk &&
 adb shell am crash com.android.systemui
 ```
 
-The Vector SystemUI scope must remain enabled. Lock the Q25 and focus a QS
-tile or notification, then press Space. Verify the native authentication UI
-appears **without activating the focused item**. Test Space again inside a
-password, unlocked Quick Settings, lock-screen Back, and normal swipe-up.
-Run `adb logcat -d -s BB6-Keyguard:I '*:S'` if a case fails. The log should
-report `Installed pre-focus key dispatcher` on SystemUI startup,
-`Native keyguard manager captured`, and `Space consumed; native primary bouncer requested`
-on a successful invocation. A missing-manager warning or bouncer exception
-indicates a required integration point is unavailable on that build.
+The unified BB UI Vector module needs `com.android.systemui` scope; keep
+the old separate BB7 modules disabled.
 
-Disable this feature without changing other BB UI behavior:
+Test Space from the initial lock screen and while a notification/QS tile
+is focused. Also verify a password containing a space, PIN focus/input,
+Back, swipe-up, and normal unlocked QS behavior. Runtime logging:
+
+```sh
+adb logcat -d -s 'BB6-Keyguard:V' '*:S' | tail -80
+```
+
+Look for `Pre-focus Space routing installed`, `Native keyguard manager captured`,
+and `Space routed to native keyguard`, including its state and acceptance.
+These logs show dispatch, not proof of visible authentication; the latter
+requires Q25 testing.
+
+Disable only this stage if it causes a regression:
 
 ```sh
 adb shell setprop debug.bb7keyguard.enabled false
 adb shell am crash com.android.systemui
 ```
 
-To re-enable, set the property to `true` and restart SystemUI. The feature
-defaults to enabled. **Do not merge until tested on the actual Q25.**
+Re-enable with `adb shell setprop debug.bb7keyguard.enabled true` and
+restart SystemUI. `master` remains unchanged.
 
 ---
 
