@@ -1352,8 +1352,7 @@ final class TwoColumnPanel extends FrameLayout {
                 else if (mediaControlsOpen) {
                     mediaControlsOpen = false;
                     updateMediaHighlight();
-                } else if (statusNavigation.isFocused()) focusMediaRow();
-                else if (notificationPaneActive) returnToAppIcons();
+                } else if (notificationPaneActive) returnToAppIcons();
                 else onClose.onClose();
             }
             return true;
