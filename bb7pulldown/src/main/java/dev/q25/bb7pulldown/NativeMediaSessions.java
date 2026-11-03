@@ -8,6 +8,7 @@ import android.media.session.PlaybackState;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
+import android.view.KeyEvent;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -192,14 +193,18 @@ final class NativeMediaSessions {
                     return true;
                 case PLAY_PAUSE:
                     boolean playing = isPlaying(state);
-                    if (playing) {
-                        if ((actions & (PlaybackState.ACTION_PAUSE
-                                | PlaybackState.ACTION_PLAY_PAUSE)) == 0) return false;
+                    if (playing && (actions & PlaybackState.ACTION_PAUSE) != 0) {
                         transport.pause();
-                    } else {
-                        if ((actions & (PlaybackState.ACTION_PLAY
-                                | PlaybackState.ACTION_PLAY_PAUSE)) == 0) return false;
+                    } else if (!playing && (actions & PlaybackState.ACTION_PLAY) != 0) {
                         transport.play();
+                    } else if ((actions & PlaybackState.ACTION_PLAY_PAUSE) != 0) {
+                        // Some sessions advertise only the native toggle action.
+                        controller.dispatchMediaButtonEvent(new KeyEvent(
+                                KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE));
+                        controller.dispatchMediaButtonEvent(new KeyEvent(
+                                KeyEvent.ACTION_UP, KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE));
+                    } else {
+                        return false;
                     }
                     return true;
                 case NEXT:
