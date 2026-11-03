@@ -22,7 +22,9 @@ final class ShadeDateHeader extends TextClock {
     private static final int HEIGHT_DP = 49;
     private static final float TEXT_SIZE_SP = 22f;
     private final BB7Theme.Palette palette;
-    private boolean contentFocused = true;
+    // Initially false so construction always assigns our blue gradient, even
+    // if the platform theme supplied a default TextView background.
+    private boolean contentFocused;
 
     ShadeDateHeader(Context context) {
         super(context);
