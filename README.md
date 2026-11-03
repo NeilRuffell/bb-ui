@@ -30,10 +30,11 @@ behave normally. The module never attempts to verify or bypass credentials.
   already collapsed. The earlier `animateCollapseShadeForced()` approach
   did not guarantee callback execution.
 
-Implementation: intercept a **physical Space DOWN** at the declaring
+Implementation: intercept a **physical Space DOWN and UP** at the declaring
 `WindowRootView.dispatchKeyEvent` method before a focused control can
-consume it. Directly invoke the native entry API for the active framework.
-Consume the matching Space UP, without injecting any synthetic input.
+consume either event. Request native credential entry on the matching **UP**,
+just as LineageOS handles confirm keys. This prevents the release from
+entering a newly shown password editor. No synthetic input is generated.
 Native credential editors and an already visible bouncer retain key input.
 
 The live Q25 SystemUI has already shown one API difference from the
@@ -69,7 +70,7 @@ If there is no response, capture **only** the concise integration logs:
 adb logcat -d -s 'BB6-Keyguard:I' '*:S' | tail -50
 ```
 
-Key messages: `Space DOWN`, `Entry route: scene=`,
+Key messages: `Space UP`, `Entry route: scene=`,
 `Native scene credential entry requested`,
 `Native primary credential bouncer requested`, and any errors.
 A "requested" log is **not** proof that the framework displayed a bouncer.
