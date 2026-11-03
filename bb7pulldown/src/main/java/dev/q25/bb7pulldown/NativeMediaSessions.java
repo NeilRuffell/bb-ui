@@ -1,6 +1,7 @@
 package dev.q25.bb7pulldown;
 
 import android.content.Context;
+import android.media.MediaMetadata;
 import android.media.session.MediaController;
 import android.media.session.MediaSession;
 import android.media.session.MediaSessionManager;
@@ -36,15 +37,19 @@ final class NativeMediaSessions {
     static final class Entry {
         final MediaSession.Token token;
         final String packageName;
+        final String title;
+        final String artist;
         final boolean playing;
         final boolean canPrevious;
         final boolean canPlayPause;
         final boolean canNext;
 
-        Entry(MediaSession.Token token, String packageName, boolean playing,
-                boolean canPrevious, boolean canPlayPause, boolean canNext) {
+        Entry(MediaSession.Token token, String packageName, String title, String artist,
+                boolean playing, boolean canPrevious, boolean canPlayPause, boolean canNext) {
             this.token = token;
             this.packageName = packageName;
+            this.title = title;
+            this.artist = artist;
             this.playing = playing;
             this.canPrevious = canPrevious;
             this.canPlayPause = canPlayPause;
@@ -134,6 +139,9 @@ final class NativeMediaSessions {
                 @Override public void onPlaybackStateChanged(PlaybackState state) {
                     publish();
                 }
+                @Override public void onMetadataChanged(MediaMetadata metadata) {
+                    publish();
+                }
                 @Override public void onSessionDestroyed() {
                     refresh();
                 }
@@ -162,8 +170,17 @@ final class NativeMediaSessions {
                 if (state == null) continue;
                 boolean playing = isPlaying(state);
                 long actions = state.getActions();
+                MediaMetadata metadata = controller.getMetadata();
+                String title = metadataValue(metadata, MediaMetadata.METADATA_KEY_TITLE);
+                if (title.isEmpty()) {
+                    title = metadataValue(metadata, MediaMetadata.METADATA_KEY_DISPLAY_TITLE);
+                }
+                String artist = metadataValue(metadata, MediaMetadata.METADATA_KEY_ARTIST);
+                if (artist.isEmpty()) {
+                    artist = metadataValue(metadata, MediaMetadata.METADATA_KEY_DISPLAY_SUBTITLE);
+                }
                 entries.add(new Entry(controller.getSessionToken(), controller.getPackageName(),
-                        playing,
+                        title, artist, playing,
                         (actions & PlaybackState.ACTION_SKIP_TO_PREVIOUS) != 0,
                         (actions & (PlaybackState.ACTION_PLAY_PAUSE
                                 | (playing ? PlaybackState.ACTION_PAUSE
@@ -174,6 +191,12 @@ final class NativeMediaSessions {
             }
         }
         listener.onSessionsChanged(Collections.unmodifiableList(entries));
+    }
+
+    private static String metadataValue(MediaMetadata metadata, String key) {
+        if (metadata == null) return "";
+        CharSequence value = metadata.getText(key);
+        return value == null ? "" : value.toString().trim();
     }
 
     /** Dispatch only commands that the current native PlaybackState advertises. */
