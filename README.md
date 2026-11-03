@@ -1,37 +1,47 @@
-# BBOS6 keyguard Space-to-unlock input (stage 1)
+# BBOS6 keyguard Space-to-credential entry
 
-**Branch:** `feat/bb6-keyguard-keyboard-entry` (based on `master`).
-**Version:** 0.9.34; do not merge before physical Q25 verification.
+**Branch:** `feat/bb6-keyguard-keyboard-entry` (not merged into `master`).
+**Version:** 0.9.35. Device verification required before merging.
 
-**Desired behavior:** On the initial lock screen, one hardware Space press
-reveals Android's normal PIN/password/pattern authentication input. Space
-must never activate or focus a notification or Quick Settings tile while
-locked. Inside the credential UI, Space retains its normal input behavior.
+## Requirement
 
-**Why earlier prototypes failed:** The first hook intercepted a subclass
-that does not declare `dispatchKeyEvent`; a subsequent version called the
-`primaryBouncerIsShowing()` method, which the Q25 runtime does not have.
-A later direct manager request still did not reliably open the credential UI.
+When the screen is locked, pressing **Space** must request Android's
+normal credential input (PIN, password, or pattern) and never select a
+notification or Quick Settings tile. Once that input is open, Space must
+behave normally. The module never attempts to verify or bypass credentials.
 
-**Current design:** The SystemUI `WindowRootView` normally runs
-`super.dispatchKeyEvent` (including focused notification/QS children)
-**before** `WindowRootViewKeyEventHandler.dispatchKeyEvent`. LineageOS's
-native `KeyguardKeyEventInteractor` already recognizes Space as a
-confirmation key and can open the existing credential interface. We move
-the **same real Space UP event** through the native handler *before*
-dispatching to child controls. The matching DOWN and UP are exclusively
-consumed in this lock-screen context, with no synthetic taps, swipes or
-custom authentication.
+## Verified LineageOS 24 source paths
 
-While the locked Quick Settings shade is expanded (`SHADE_LOCKED`),
-Android's native handler first collapses the shade. We register a
-post-collapse callback that requests the native bouncer so one Space
-press performs both steps. Native manager methods are only a fallback
-when the keyguard handler does not accept the input. The policy keeps
-the credential editor and already-visible bouncer untouched.
+- `WindowRootView.dispatchKeyEvent` sends keys to focusable child
+  controls **before** `WindowRootViewKeyEventHandler`.
+- `SysUIKeyEventHandler.handleAction` is true on **key UP**, which is
+  why merely invoking that handler on key DOWN cannot open authentication.
+- `KeyguardKeyEventInteractor` treats Space as a confirm key, but handles
+  `SHADE_LOCKED` by collapsing the shade rather than opening the
+  credential screen.
+- The native credential API for Scene mode is
+  `DeviceEntryInteractor.attemptDeviceEntry(reason, null, true)`;
+  the `true` argument requests the primary credential path rather than
+  the alternate biometric bouncer. In legacy mode the existing
+  `StatusBarKeyguardViewManager.showPrimaryBouncer(true, reason)`
+  initiates PIN/password/pattern entry.
+- In legacy locked-shade mode, `ShadeController.collapseShade(true)`
+  explicitly runs registered post-collapse actions even if the shade is
+  already collapsed. The earlier `animateCollapseShadeForced()` approach
+  did not guarantee callback execution.
 
-Build and install on KDE neon, using the global Gradle and direct
-package-manager installation that worked on the Q25:
+Implementation: intercept a **physical Space DOWN** at the declaring
+`WindowRootView.dispatchKeyEvent` method before a focused control can
+consume it. Directly invoke the native entry API for the active framework.
+Consume the matching Space UP, without injecting any synthetic input.
+Native credential editors and an already visible bouncer retain key input.
+
+The live Q25 SystemUI has already shown one API difference from the
+upstream LineageOS 24 source (`primaryBouncerIsShowing()` missing).
+Therefore upstream code review and successful compilation alone do not
+establish that authentication appears on this device.
+
+## Build/install on KDE neon
 
 ```sh
 cd ~/Projects/bb-ui
@@ -44,31 +54,34 @@ timeout 45s adb shell pm install -r /data/local/tmp/bb-ui.apk &&
 adb shell am crash com.android.systemui
 ```
 
-The unified BB UI Vector module needs `com.android.systemui` scope; keep
-the old separate BB7 modules disabled.
+**Vector:** Keep the unified BB UI module enabled with SystemUI scope;
+keep deprecated separate BB7 modules disabled.
 
-Test Space from the initial lock screen and while a notification/QS tile
-is focused. Also verify a password containing a space, PIN focus/input,
-Back, swipe-up, and normal unlocked QS behavior. Runtime logging:
+## Verification / troubleshooting
+
+Lock the Q25, press Space, and confirm the native PIN/password entry
+appears. Test when the highlighted control is a notification or a
+Quick Settings tile. Test Space while entering a password, then unlocked.
+
+If there is no response, capture **only** the concise integration logs:
 
 ```sh
-adb logcat -d -s 'BB6-Keyguard:V' '*:S' | tail -80
+adb logcat -d -s 'BB6-Keyguard:I' '*:S' | tail -50
 ```
 
-Look for `Pre-focus Space routing installed`, `Native keyguard manager captured`,
-and `Space routed to native keyguard`, including its state and acceptance.
-These logs show dispatch, not proof of visible authentication; the latter
-requires Q25 testing.
+Key messages: `Space DOWN`, `Entry route: scene=`,
+`Native scene credential entry requested`,
+`Native primary credential bouncer requested`, and any errors.
+A "requested" log is **not** proof that the framework displayed a bouncer.
 
-Disable only this stage if it causes a regression:
+To disable this feature without disabling other BB UI work:
 
 ```sh
 adb shell setprop debug.bb7keyguard.enabled false
 adb shell am crash com.android.systemui
 ```
 
-Re-enable with `adb shell setprop debug.bb7keyguard.enabled true` and
-restart SystemUI. `master` remains unchanged.
+To re-enable, set `debug.bb7keyguard.enabled true` and restart SystemUI.
 
 ---
 
