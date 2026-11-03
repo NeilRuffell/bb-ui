@@ -1,3 +1,5 @@
+> **Historical feature-branch notes.** This page predates the unified two-page shade and shared focus controller. For the current architecture, read [README.md](README.md) and [SHADE_NAVIGATION.md](SHADE_NAVIGATION.md). The implementation details below may no longer apply.
+
 # BBOS6 Manage Connections — first QS layout branch
 
 Branch: `feat/bbos6-quick-settings-connections`
