@@ -139,7 +139,7 @@ final class TwoColumnPanel extends FrameLayout {
                 0, LinearLayout.LayoutParams.MATCH_PARENT, PanelRatio.LEFT_WEIGHT));
 
         ScrollView iconScroller = new ScrollView(context);
-        iconScroller.setFillViewport(false);
+        iconScroller.setFillViewport(true);
         iconScroller.setVerticalScrollBarEnabled(false);
         iconScroller.setClipToPadding(false);
         iconScroller.setPadding(0, dp(10), 0, dp(10));
@@ -195,11 +195,7 @@ final class TwoColumnPanel extends FrameLayout {
     void setNotifications(List<NotificationItem> items) {
         notifications = items == null ? Collections.emptyList()
                 : Collections.unmodifiableList(new ArrayList<>(items));
-        List<String> packages = new ArrayList<>();
-        for (NotificationItem item : notifications) {
-            if (item != null) packages.add(item.packageName);
-        }
-        setNotificationPackages(packages);
+        setNotificationPackages(NotificationCategoryPolicy.categoriesFor(notifications));
         renderSelectedNotifications();
     }
 
@@ -236,6 +232,14 @@ final class TwoColumnPanel extends FrameLayout {
         PackageManager pm = getContext().getPackageManager();
         for (int i = 0; i < distinct.size(); i++) {
             final String pkg = distinct.get(i);
+            final boolean silentCategory = NotificationCategoryPolicy.isSilent(pkg);
+            if (silentCategory) {
+                // Remaining height pushes Silent to the bottom; excess app rows scroll.
+                View spacer = new View(getContext());
+                spacer.setFocusable(false);
+                iconList.addView(spacer, new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
+            }
             FrameLayout row = new FrameLayout(getContext());
             row.setFocusable(!notificationPaneActive);
             row.setFocusableInTouchMode(!notificationPaneActive);
@@ -252,15 +256,22 @@ final class TwoColumnPanel extends FrameLayout {
             ImageView icon = new ImageView(getContext());
             Drawable drawable;
             CharSequence label;
-            try {
-                drawable = pm.getApplicationIcon(pkg);
-                label = pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0));
-            } catch (PackageManager.NameNotFoundException | RuntimeException error) {
-                drawable = pm.getDefaultActivityIcon();
-                label = pkg;
+            if (silentCategory) {
+                drawable = getContext().getDrawable(android.R.drawable.ic_lock_silent_mode);
+                if (drawable == null) drawable = pm.getDefaultActivityIcon();
+                label = "Silent notifications";
+            } else {
+                try {
+                    drawable = pm.getApplicationIcon(pkg);
+                    label = pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0));
+                } catch (PackageManager.NameNotFoundException | RuntimeException error) {
+                    drawable = pm.getDefaultActivityIcon();
+                    label = pkg;
+                }
             }
             row.setContentDescription(label);
             icon.setImageDrawable(drawable);
+            if (silentCategory) icon.setColorFilter(palette.headingText);
             icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
             icon.setFocusable(false);
             icon.setClickable(false);
@@ -305,8 +316,10 @@ final class TwoColumnPanel extends FrameLayout {
     }
 
     private void renderSelectedNotifications() {
-        List<NotificationItem> selected = NotificationSelectionPolicy.forPackage(
-                notifications, selectedPackage);
+        boolean silentCategory = NotificationCategoryPolicy.isSilent(selectedPackage);
+        List<NotificationItem> selected = silentCategory
+                ? NotificationSelectionPolicy.forSilent(notifications)
+                : NotificationSelectionPolicy.forPackage(notifications, selectedPackage);
         if (Objects.equals(renderedCardPackage, selectedPackage)
                 && renderedCards.equals(selected)) return;
 
@@ -337,17 +350,18 @@ final class TwoColumnPanel extends FrameLayout {
             return;
         }
 
-        CharSequence appName = selectedPackage;
-        try {
-            PackageManager pm = getContext().getPackageManager();
-            appName = pm.getApplicationLabel(pm.getApplicationInfo(selectedPackage, 0));
-        } catch (PackageManager.NameNotFoundException | RuntimeException ignored) { }
+        CharSequence appName = silentCategory ? "Silent" : selectedPackage;
+        if (!silentCategory) {
+            try {
+                PackageManager pm = getContext().getPackageManager();
+                appName = pm.getApplicationLabel(pm.getApplicationInfo(selectedPackage, 0));
+            } catch (PackageManager.NameNotFoundException | RuntimeException ignored) { }
+        }
         selectedAppHeading.setText(appName + " (" + selected.size() + ")");
 
         if (selected.isEmpty()) {
             addPlaceholder("No notifications for this app");
         } else {
-            boolean silentHeadingAdded = false;
             Long previousDay = null;
             for (int i = 0; i < selected.size(); i++) {
                 NotificationItem item = selected.get(i);
@@ -357,15 +371,6 @@ final class TwoColumnPanel extends FrameLayout {
                 if (previousDay == null || previousDay.longValue() != day) {
                     addDateHeader(timestamp);
                     previousDay = day;
-                }
-                if (item.silent && !silentHeadingAdded) {
-                    // A purely visual section heading; never a focus target.
-                    TextView heading = text("Silent", 12, palette.muted);
-                    heading.setTypeface(null, android.graphics.Typeface.BOLD);
-                    heading.setFocusable(false);
-                    heading.setPadding(dp(8), dp(12), dp(8), dp(8));
-                    notificationList.addView(heading);
-                    silentHeadingAdded = true;
                 }
                 LinearLayout card = createNotificationCard(item);
                 notificationList.addView(card);
@@ -800,6 +805,11 @@ final class TwoColumnPanel extends FrameLayout {
                 row.setBackground(BB7Theme.selected(dp(3), dp(1)));
             } else {
                 row.setBackground(null);
+            }
+            if (NotificationCategoryPolicy.isSilent(renderedPackages.get(i))
+                    && row.getChildAt(0) instanceof ImageView) {
+                ((ImageView) row.getChildAt(0)).setColorFilter(
+                        selected ? Color.WHITE : palette.headingText);
             }
         }
     }
