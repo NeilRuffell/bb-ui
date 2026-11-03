@@ -6,26 +6,26 @@ import org.junit.Test;
 public class KeyguardSpacePolicyTest {
     private final KeyguardSpacePolicy policy = new KeyguardSpacePolicy();
 
-    @Test public void lockedSpaceRequestsNativeEntryImmediatelyOnDown() {
-        assertEquals(KeyguardSpacePolicy.REQUEST_NATIVE_ENTRY,
-                policy.route(0, 100, 0, true, false, false));
+    @Test public void lockedSpaceRequestsNativeEntryOnRelease() {
         assertEquals(KeyguardSpacePolicy.CONSUME,
+                policy.route(0, 100, 0, true, false, false));
+        assertEquals(KeyguardSpacePolicy.REQUEST_NATIVE_ENTRY,
                 policy.route(1, 100, 0, true, false, false));
     }
 
-    @Test public void repeatAndReleaseDoNotReopenBouncer() {
-        assertEquals(KeyguardSpacePolicy.REQUEST_NATIVE_ENTRY,
+    @Test public void repeatCannotRequestTwice() {
+        assertEquals(KeyguardSpacePolicy.CONSUME,
                 policy.route(0, 200, 0, true, false, false));
         assertEquals(KeyguardSpacePolicy.CONSUME,
                 policy.route(0, 200, 1, true, false, false));
-        assertEquals(KeyguardSpacePolicy.CONSUME,
+        assertEquals(KeyguardSpacePolicy.REQUEST_NATIVE_ENTRY,
                 policy.route(1, 200, 0, true, false, false));
         assertEquals(KeyguardSpacePolicy.CONSUME,
                 policy.route(1, 200, 0, true, false, false));
     }
 
-    @Test public void newlyFocusedEditorDoesNotReceivePreviouslyInterceptedUp() {
-        assertEquals(KeyguardSpacePolicy.REQUEST_NATIVE_ENTRY,
+    @Test public void bouncerAppearingDuringKeypressConsumesUpWithoutRequest() {
+        assertEquals(KeyguardSpacePolicy.CONSUME,
                 policy.route(0, 300, 0, true, false, false));
         assertEquals(KeyguardSpacePolicy.CONSUME,
                 policy.route(1, 300, 0, true, true, true));
@@ -62,8 +62,8 @@ public class KeyguardSpacePolicyTest {
                 policy.route(1, 700, 0, true, false, false));
     }
 
-    @Test public void unlockingBetweenDownAndUpCannotClickThrough() {
-        assertEquals(KeyguardSpacePolicy.REQUEST_NATIVE_ENTRY,
+    @Test public void unlockBetweenDownAndUpCannotClickThrough() {
+        assertEquals(KeyguardSpacePolicy.CONSUME,
                 policy.route(0, 800, 0, true, false, false));
         assertEquals(KeyguardSpacePolicy.CONSUME,
                 policy.route(1, 800, 0, false, false, false));
