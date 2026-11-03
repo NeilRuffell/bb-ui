@@ -31,8 +31,9 @@ final class FavoritesRules {
                 return item.conversationIds.contains(value);
             }
             if (TYPE_TITLE_CONTAINS.equals(type)) {
-                return item.title.toLowerCase(Locale.ROOT)
-                        .contains(value.toLowerCase(Locale.ROOT));
+                String expected = value.toLowerCase(Locale.ROOT);
+                return item.title.toLowerCase(Locale.ROOT).contains(expected)
+                        || item.conversationTitle.toLowerCase(Locale.ROOT).contains(expected);
             }
             return false;
         }
