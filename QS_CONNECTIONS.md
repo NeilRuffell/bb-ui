@@ -6,15 +6,28 @@ Branch: `feat/bbos6-quick-settings-connections`
 
 Only the top of the BlackBerry Curve 9300 / BBOS6 drop-down is implemented:
 
-- Fixed blue date and time header.
+- Shared blue date-only header, also used by the notification shade.
 - **Manage Connections** group directly below it.
 - **Mobile Network**, **Wi-Fi**, and **Bluetooth**, in that order.
 - Native state indicators and focus selection compatible with touch/trackpad.
 - Nothing below this group is implemented yet. The remainder of the panel is blank.
 
 The right-hand status-bar focus zone now opens this panel instead of stock QS.
-The existing left-hand notification zone and its gestures are not redesigned.
+The existing left-hand notification zone and its gestures are unchanged.
 This is a BBOS6-inspired layout, not an attempt to copy obsolete setup/options.
+
+## Shared date header
+
+Both the notification and Quick Settings shades now construct
+`ShadeDateHeader`, a single reusable `TextClock` view. It displays
+today's date in the **existing notification-shade format**
+(`EEE, MMM d, yyyy`), centered using the **former QS clock typography**
+(22sp, normal weight) and a common 49dp blue-gradient band.
+There is no second clock: the native Android status bar already shows time.
+
+The original notification-group date separators (`Today` or the
+date for older notifications) are intentionally unchanged.
+The shared `TextClock` updates when the date or timezone changes.
 
 ## Native Android behavior
 
@@ -60,9 +73,10 @@ adb -s 202512003630 install -r -d app/build/outputs/apk/debug/app-debug.apk
 adb -s 202512003630 shell am crash com.android.systemui
 ```
 
-Expected package version: `0.9.26-bbos6-connections-dev` (versionCode 56).
+Expected package version: `0.9.27-bbos6-shared-date-dev` (versionCode 57).
 
-Validate touch, trackpad, native state and action handling, media playback,
+Validate the same centered date header in **both** shades, followed by touch,
+trackpad, native state and action handling, media playback,
 incoming calls, Bluetooth/Wi-Fi disabled and enabled, no-SIM state, and
 dark/light UI mode before merging. Actual LineageOS 24.0 system images may
 differ in internal SystemUI tile host implementation; the public Android
