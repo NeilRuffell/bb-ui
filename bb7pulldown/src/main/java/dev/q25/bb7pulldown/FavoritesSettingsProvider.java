@@ -37,7 +37,20 @@ public final class FavoritesSettingsProvider extends ContentProvider {
     }
 
     static void saveLocal(Context context, FavoritesRules favorites) {
-        prefs(context).edit().putString(RULES_KEY, FavoritesJson.serialize(favorites)).apply();
+        // Drop previously observed conversation labels once their app is removed.
+        JSONArray observed = observedLocal(context);
+        JSONArray retained = new JSONArray();
+        for (int i = 0; i < observed.length(); i++) {
+            org.json.JSONObject candidate = observed.optJSONObject(i);
+            if (candidate != null
+                    && favorites.find(candidate.optString("package", "")) != null) {
+                retained.put(candidate);
+            }
+        }
+        prefs(context).edit()
+                .putString(RULES_KEY, FavoritesJson.serialize(favorites))
+                .putString(OBSERVED_KEY, retained.toString())
+                .apply();
         context.getContentResolver().notifyChange(RULES_URI, null);
     }
 
