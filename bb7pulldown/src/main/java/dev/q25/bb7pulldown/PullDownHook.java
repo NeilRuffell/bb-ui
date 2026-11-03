@@ -219,39 +219,34 @@ public final class PullDownHook implements IXposedHookLoadPackage {
                 || focusWindow != null || locked(context)) return;
         WindowManager wm = (WindowManager) context.getSystemService(Context.WINDOW_SERVICE);
         if (wm == null) return;
+        // The standalone status-bar focus window uses the same controller
+        // as Notifications and Quick Settings. Its Down destination remains
+        // native Recents; Back exits focus without opening another surface.
+        ShadeStatusNavigation statusNavigation = new ShadeStatusNavigation(
+                new ShadeStatusNavigation.Listener() {
+                    @Override public void onZoneFocus(int zone) {
+                        focusZone = zone;
+                        updateStatusFocus(zone);
+                    }
+
+                    @Override public void onReturnToContent(boolean viaBack) {
+                        dismissStatusFocus();
+                        if (!viaBack) openNativeRecents();
+                    }
+
+                    @Override public void onNotificationsSelected() {
+                        dismissStatusFocus();
+                        showPanel(context);
+                    }
+
+                    @Override public void onQuickSettingsSelected() {
+                        dismissStatusFocus();
+                        showSystemControls(context);
+                    }
+                });
         FrameLayout root = new FrameLayout(context) {
             @Override public boolean dispatchKeyEvent(KeyEvent event) {
-                int code = event.getKeyCode();
-                if (code == KeyEvent.KEYCODE_BACK || code == KeyEvent.KEYCODE_ESCAPE) {
-                    if (event.getAction() == KeyEvent.ACTION_UP) {
-                        dismissStatusFocus();
-                    }
-                    return true;
-                }
-                if (code == KeyEvent.KEYCODE_DPAD_LEFT
-                        || code == KeyEvent.KEYCODE_DPAD_RIGHT) {
-                    if (event.getAction() == KeyEvent.ACTION_DOWN) {
-                        focusZone = code == KeyEvent.KEYCODE_DPAD_LEFT ? 0 : 1;
-                        updateStatusFocus(focusZone);
-                    }
-                    return true;
-                }
-                if (code == KeyEvent.KEYCODE_DPAD_DOWN) {
-                    if (event.getAction() == KeyEvent.ACTION_UP) {
-                        dismissStatusFocus();
-                        openNativeRecents();
-                    }
-                    return true;
-                }
-                if (code == KeyEvent.KEYCODE_DPAD_UP) return true;
-                if (code == KeyEvent.KEYCODE_DPAD_CENTER || code == KeyEvent.KEYCODE_ENTER
-                        || code == KeyEvent.KEYCODE_NUMPAD_ENTER || code == KeyEvent.KEYCODE_SPACE) {
-                    if (event.getAction() == KeyEvent.ACTION_UP) {
-                        int selected = focusZone;
-                        dismissStatusFocus();
-                         if (selected == 0) showPanel(getContext());
-                        else showSystemControls(getContext());
-                    }
+                if (statusNavigation.handleKey(event.getKeyCode(), event.getAction())) {
                     return true;
                 }
                 return super.dispatchKeyEvent(event);
@@ -273,9 +268,8 @@ public final class PullDownHook implements IXposedHookLoadPackage {
             wm.addView(root, params);
             focusManager = wm;
             focusWindow = root;
-            focusZone = 0;
             root.requestFocus();
-            updateStatusFocus(focusZone);
+            statusNavigation.enter(ShadeStatusNavigation.NOTIFICATIONS);
             Log.i(TAG, "BlackBerry key entered native status-bar navigation");
         } catch (Throwable error) {
             Log.e(TAG, "Unable to acquire status-bar focus; native input retained", error);
