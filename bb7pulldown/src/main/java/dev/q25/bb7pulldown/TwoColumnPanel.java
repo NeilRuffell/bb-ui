@@ -66,7 +66,7 @@ final class TwoColumnPanel extends FrameLayout {
     private final LinearLayout mediaRow;
     private final ImageView mediaAppIcon;
     private final ImageView[] mediaButtons = new ImageView[3];
-    private final TextView mediaAppName;
+    private final TextView mediaNowPlaying;
     private final TextView mediaIndex;
     private List<NativeMediaSessions.Entry> mediaSessions = Collections.emptyList();
     private MediaSession.Token selectedMediaToken;
@@ -174,13 +174,16 @@ final class TwoColumnPanel extends FrameLayout {
         mediaAppIcon.setFocusable(false);
         mediaRow.addView(mediaAppIcon, new LinearLayout.LayoutParams(dp(29), dp(29)));
 
-        mediaAppName = text("", 12, palette.title);
-        mediaAppName.setSingleLine(true);
-        mediaAppName.setEllipsize(TextUtils.TruncateAt.END);
-        mediaAppName.setGravity(Gravity.CENTER_VERTICAL);
-        mediaAppName.setPadding(dp(7), 0, dp(3), 0);
-        mediaAppName.setFocusable(false);
-        mediaRow.addView(mediaAppName, new LinearLayout.LayoutParams(
+        mediaNowPlaying = text("", 12, palette.title);
+        mediaNowPlaying.setSingleLine(true);
+        // Android's native TextView marquee scrolls only when the track info overflows.
+        mediaNowPlaying.setEllipsize(TextUtils.TruncateAt.MARQUEE);
+        mediaNowPlaying.setMarqueeRepeatLimit(-1);
+        mediaNowPlaying.setSelected(true);
+        mediaNowPlaying.setGravity(Gravity.CENTER_VERTICAL);
+        mediaNowPlaying.setPadding(dp(7), 0, dp(3), 0);
+        mediaNowPlaying.setFocusable(false);
+        mediaRow.addView(mediaNowPlaying, new LinearLayout.LayoutParams(
                 0, LayoutParams.MATCH_PARENT, 1f));
 
         final int[] icons = {
@@ -323,14 +326,18 @@ final class TwoColumnPanel extends FrameLayout {
         if (index < 0) return;
         NativeMediaSessions.Entry entry = mediaSessions.get(index);
         PackageManager pm = getContext().getPackageManager();
-        CharSequence label = entry.packageName;
         try {
             mediaAppIcon.setImageDrawable(pm.getApplicationIcon(entry.packageName));
-            label = pm.getApplicationLabel(pm.getApplicationInfo(entry.packageName, 0));
         } catch (PackageManager.NameNotFoundException | RuntimeException error) {
             mediaAppIcon.setImageDrawable(pm.getDefaultActivityIcon());
         }
-        mediaAppName.setText(label);
+        String nowPlaying = entry.title;
+        if (!entry.artist.isEmpty()) {
+            nowPlaying = nowPlaying.isEmpty() ? entry.artist
+                    : nowPlaying + "  ·  " + entry.artist;
+        }
+        if (nowPlaying.isEmpty()) nowPlaying = "Now playing";
+        mediaNowPlaying.setText(nowPlaying);
         mediaButtons[NativeMediaSessions.PLAY_PAUSE].setImageResource(entry.playing
                 ? android.R.drawable.ic_media_pause : android.R.drawable.ic_media_play);
         mediaButtons[NativeMediaSessions.PLAY_PAUSE].setContentDescription(
@@ -338,7 +345,7 @@ final class TwoColumnPanel extends FrameLayout {
         mediaIndex.setText(mediaSessions.size() > 1
                 ? (index + 1) + "/" + mediaSessions.size() : "");
         mediaIndex.setVisibility(mediaSessions.size() > 1 ? View.VISIBLE : View.GONE);
-        mediaRow.setContentDescription("Media: " + label
+        mediaRow.setContentDescription("Now playing: " + nowPlaying
                 + (mediaSessions.size() > 1
                         ? ", " + (index + 1) + " of " + mediaSessions.size() : ""));
         updateMediaHighlight();
@@ -352,7 +359,7 @@ final class TwoColumnPanel extends FrameLayout {
                         palette == BB7Theme.Palette.DARK
                                 ? new int[] {0xff2f4053, 0xff1e2c3b}
                                 : new int[] {0xffecf1f7, 0xffd8e2ec}));
-        mediaAppName.setTextColor(focused && !mediaControlsOpen
+        mediaNowPlaying.setTextColor(focused && !mediaControlsOpen
                 ? Color.WHITE : palette.title);
         mediaIndex.setTextColor(focused && !mediaControlsOpen
                 ? Color.WHITE : palette.muted);
