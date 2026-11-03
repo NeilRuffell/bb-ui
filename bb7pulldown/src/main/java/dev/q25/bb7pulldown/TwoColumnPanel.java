@@ -111,14 +111,21 @@ final class TwoColumnPanel extends FrameLayout {
         currentDate.setFormat12Hour("EEE, MMM d, yyyy");
         currentDate.setFormat24Hour("EEE, MMM d, yyyy");
         currentDate.setTextColor(palette.headingText);
-        currentDate.setTextSize(11);
-        currentDate.setTypeface(null, android.graphics.Typeface.BOLD);
-        currentDate.setGravity(Gravity.CENTER_VERTICAL);
-        currentDate.setPadding(dp(12), 0, dp(12), 0);
-        currentDate.setBackgroundColor(palette.heading);
+        currentDate.setTextSize(14); // Match notification title size.
+        currentDate.setTypeface(null, android.graphics.Typeface.NORMAL);
+        currentDate.setGravity(Gravity.CENTER);
+        currentDate.setPadding(dp(8), 0, dp(8), 0);
+        // BBOS6-inspired beveled header: subtle vertical graphite/steel gradient.
+        boolean dark = palette == BB7Theme.Palette.DARK;
+        GradientDrawable dateBarBackground = new GradientDrawable(
+                GradientDrawable.Orientation.TOP_BOTTOM,
+                dark
+                        ? new int[] {0xff526477, 0xff3b4e60, 0xff263747}
+                        : new int[] {0xfff9fbfe, 0xffe5ecf4, 0xffc8d4e1});
+        currentDate.setBackground(dateBarBackground);
         currentDate.setFocusable(false);
         content.addView(currentDate, new LinearLayout.LayoutParams(
-                LayoutParams.MATCH_PARENT, dp(27)));
+                LayoutParams.MATCH_PARENT, dp(30)));
 
         LinearLayout columns = new LinearLayout(context);
         columns.setOrientation(LinearLayout.HORIZONTAL);
