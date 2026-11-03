@@ -10,35 +10,31 @@ import java.lang.ref.WeakReference;
 
 import de.robv.android.xposed.IXposedHookLoadPackage;
 import de.robv.android.xposed.XC_MethodHook;
-import de.robv.android.xposed.XposedBridge;
 import de.robv.android.xposed.XposedHelpers;
 import de.robv.android.xposed.callbacks.XC_LoadPackage;
 
 /**
- * Stage 1: hardware Space opens Android's existing credential bouncer.
+ * Physical Space requests Android's existing primary credential bouncer.
  *
- * No custom unlock, credential handling, notification launch or overlay.
- * Only the SystemUI keyguard window is hooked. When a required native
- * component cannot be verified, original Android key handling is retained.
+ * On LineageOS 24.0, NotificationShadeWindowView inherits dispatchKeyEvent
+ * from WindowRootView. Hook the DECLARING class, before it dispatches to
+ * focused QS tiles or notification controls.
  *
- * Rollback: adb shell setprop debug.bb7keyguard.enabled false
- *           adb shell am crash com.android.systemui
+ * No custom credential UI, authentication bypass or synthetic swipe.
+ * Disable: adb shell setprop debug.bb7keyguard.enabled false
+ *          adb shell am crash com.android.systemui
  */
 public final class BB6KeyguardKeyboardHook implements IXposedHookLoadPackage {
     private static final String TAG = "BB6-Keyguard";
     private static final String SYSTEM_UI = "com.android.systemui";
     private static final String BOUNCER_MANAGER =
             "com.android.systemui.statusbar.phone.StatusBarKeyguardViewManager";
-    private static final String[] WINDOW_CLASSES = {
-            "com.android.systemui.shade.NotificationShadeWindowView",
-            "com.android.systemui.statusbar.phone.NotificationShadeWindowView"
-    };
+    private static final String WINDOW_ROOT =
+            "com.android.systemui.scene.ui.view.WindowRootView";
     private static final String ENABLE_PROP = "debug.bb7keyguard.enabled";
+    private static final KeyguardSpacePolicy SPACE_POLICY = new KeyguardSpacePolicy();
 
     private static WeakReference<Object> keyguardViewManager = new WeakReference<>(null);
-    // Pair the consumed DOWN with its UP, even if showing the bouncer changes
-    // the focus between the two events. SystemUI dispatch runs on the UI thread.
-    private static long consumedSpaceDownTime = -1L;
 
     @Override
     public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lp) {
@@ -47,86 +43,96 @@ public final class BB6KeyguardKeyboardHook implements IXposedHookLoadPackage {
             Log.i(TAG, "Disabled by " + ENABLE_PROP);
             return;
         }
+
         Class<?> managerClass = XposedHelpers.findClassIfExists(BOUNCER_MANAGER, lp.classLoader);
         if (managerClass == null) {
-            Log.w(TAG, "Native keyguard view manager missing; stock input retained");
+            Log.w(TAG, "Native keyguard manager absent; Space will be blocked while locked");
+        } else {
+            try {
+                XposedHelpers.hookAllConstructors(managerClass, new XC_MethodHook() {
+                    @Override protected void afterHookedMethod(MethodHookParam param) {
+                        keyguardViewManager = new WeakReference<>(param.thisObject);
+                        Log.i(TAG, "Native keyguard manager captured");
+                    }
+                });
+            } catch (Throwable error) {
+                Log.e(TAG, "Unable to capture native keyguard manager", error);
+            }
+        }
+
+        Class<?> root = XposedHelpers.findClassIfExists(WINDOW_ROOT, lp.classLoader);
+        if (root == null) {
+            Log.e(TAG, "SystemUI WindowRootView absent; stock dispatch retained");
             return;
         }
         try {
-            XposedBridge.hookAllConstructors(managerClass, new XC_MethodHook() {
-                @Override protected void afterHookedMethod(MethodHookParam param) {
-                    keyguardViewManager = new WeakReference<>(param.thisObject);
+            XposedHelpers.findAndHookMethod(root, "dispatchKeyEvent", KeyEvent.class,
+                    new XC_MethodHook() {
+                @Override protected void beforeHookedMethod(MethodHookParam param) {
+                    if (!(param.thisObject instanceof View) || param.args.length != 1
+                            || !(param.args[0] instanceof KeyEvent)) return;
+                    if (handleKey((View) param.thisObject, (KeyEvent) param.args[0])) {
+                        param.setResult(true);
+                    }
                 }
             });
+            Log.i(TAG, "Installed pre-focus key dispatcher on " + WINDOW_ROOT);
         } catch (Throwable error) {
-            Log.e(TAG, "Unable to capture native keyguard manager", error);
-            return;
+            Log.e(TAG, "Failed to hook native root key dispatcher", error);
         }
-
-        boolean hooked = false;
-        for (String name : WINDOW_CLASSES) {
-            Class<?> window = XposedHelpers.findClassIfExists(name, lp.classLoader);
-            if (window == null) continue;
-            try {
-                if (!XposedBridge.hookAllMethods(window, "dispatchKeyEvent",
-                        new XC_MethodHook() {
-                    @Override protected void beforeHookedMethod(MethodHookParam param) {
-                        if (!(param.thisObject instanceof View) || param.args.length != 1
-                                || !(param.args[0] instanceof KeyEvent)) return;
-                        if (handleKey((View) param.thisObject, (KeyEvent) param.args[0])) {
-                            param.setResult(true);
-                        }
-                    }
-                }).isEmpty()) {
-                    Log.i(TAG, "Hardware Space keyguard entry hooked: " + name);
-                    hooked = true;
-                }
-            } catch (Throwable error) {
-                Log.e(TAG, "Keyguard window hook unavailable: " + name, error);
-            }
-        }
-        if (!hooked) Log.w(TAG, "No supported keyguard window; stock input retained");
     }
 
     private static boolean handleKey(View window, KeyEvent event) {
-        if (event.getKeyCode() != KeyEvent.KEYCODE_SPACE) return false;
+        if (event.getKeyCode() != KeyEvent.KEYCODE_SPACE || !enabled()) return false;
 
-        // Consume the matching UP even if the new credential view is already shown.
-        if (event.getAction() == KeyEvent.ACTION_UP
-                && consumedSpaceDownTime == event.getDownTime()) {
-            consumedSpaceDownTime = -1L;
-            return true;
-        }
-        if (event.getAction() != KeyEvent.ACTION_DOWN || !enabled()) return false;
-        if (consumedSpaceDownTime == event.getDownTime()) return true;
-        if (event.getRepeatCount() != 0) return false;
-
-        Context context = window.getContext();
         KeyguardManager guard = (KeyguardManager)
-                context.getSystemService(Context.KEYGUARD_SERVICE);
-        if (guard == null || !guard.isKeyguardLocked()) return false;
-
+                window.getContext().getSystemService(Context.KEYGUARD_SERVICE);
+        if (guard == null) {
+            Log.w(TAG, "Keyguard state unavailable; stock dispatch retained");
+            return false;
+        }
+        boolean locked = guard.isKeyguardLocked();
         Object manager = keyguardViewManager.get();
-        if (manager == null) {
-            Log.w(TAG, "Keyguard manager not ready; stock Space handling retained");
-            return false;
-        }
-        try {
-            // Never steal Space from the PIN/password field. The bouncer owns
-            // every key once displayed, including spaces within passwords.
-            Object showing = XposedHelpers.callMethod(manager, "isBouncerShowing");
-            if (!(showing instanceof Boolean) || (Boolean) showing) return false;
+        boolean managerReady = false;
+        boolean primaryBouncerShowing = false;
+        boolean bouncerInTransit = false;
 
-            // Call Android's own authentication UI, not dismissKeyguard(),
-            // an injected swipe, or a selected notification's click handler.
-            XposedHelpers.callMethod(manager, "showPrimaryBouncer", true);
-            consumedSpaceDownTime = event.getDownTime();
-            Log.i(TAG, "Space requested native primary bouncer");
-            return true;
-        } catch (Throwable error) {
-            Log.e(TAG, "Native bouncer unavailable; stock Space handling retained", error);
-            return false;
+        if (locked && manager != null) {
+            try {
+                Object shown = XposedHelpers.callMethod(manager, "primaryBouncerIsShowing");
+                Object transit = XposedHelpers.callMethod(manager, "isPrimaryBouncerInTransit");
+                if (shown instanceof Boolean && transit instanceof Boolean) {
+                    primaryBouncerShowing = (Boolean) shown;
+                    bouncerInTransit = (Boolean) transit;
+                    managerReady = true;
+                }
+            } catch (Throwable error) {
+                Log.e(TAG, "Could not determine native credential visibility", error);
+            }
         }
+
+        View focused = window.findFocus();
+        boolean editorFocused = focused != null && focused.onCheckIsTextEditor();
+
+        int decision = SPACE_POLICY.route(event.getAction(), event.getDownTime(),
+                event.getRepeatCount(), locked, primaryBouncerShowing,
+                bouncerInTransit, managerReady, editorFocused);
+        if (decision == KeyguardSpacePolicy.PASS) return false;
+
+        if (decision == KeyguardSpacePolicy.REQUEST_BOUNCER) {
+            try {
+                // LineageOS 24.0 signature: (boolean scrimmed, String reason).
+                XposedHelpers.callMethod(manager, "showPrimaryBouncer",
+                        true, "BB UI: physical Space on lockscreen");
+                Log.i(TAG, "Space consumed; native primary bouncer requested");
+            } catch (Throwable error) {
+                // This key must NEVER fall through to a focused QS tile.
+                Log.e(TAG, "Bouncer request failed; lockscreen Space still consumed", error);
+            }
+        } else if (event.getAction() == KeyEvent.ACTION_DOWN && !managerReady && locked) {
+            Log.w(TAG, "Space consumed on lockscreen; keyguard manager unavailable");
+        }
+        return true;
     }
 
     private static boolean enabled() {
@@ -135,8 +141,7 @@ public final class BB6KeyguardKeyboardHook implements IXposedHookLoadPackage {
             return !"false".equals(XposedHelpers.callStaticMethod(
                     properties, "get", ENABLE_PROP, "true"));
         } catch (Throwable error) {
-            // A property lookup failure must not disable the phone's original input.
-            Log.w(TAG, "Unable to read enable property; stock input retained", error);
+            Log.w(TAG, "Cannot read enable property; stock handling retained", error);
             return false;
         }
     }
