@@ -94,8 +94,48 @@ public final class PullDownHook implements IXposedHookLoadPackage {
     private static View decoratedStatusBar;
     private static WindowManager focusManager;
     private static View focusWindow;
-    private static int focusZone;
     private static BroadcastReceiver focusReceiver;
+
+    /**
+     * One navigation/session owner for the native status bar and both shade
+     * pages. These callbacks are the current LSPosed integration adapter;
+     * ShadeUiController, the host, and the pages depend on no Xposed types.
+     */
+    private static final ShadeUiController NAVIGATION = new ShadeUiController(
+            new ShadeUiController.Listener() {
+                @Override public void onStatusFocusChanged(int zone) {
+                    updateStatusAppearance();
+                }
+
+                @Override public void onShowPage(int page) {
+                    UnifiedShadeHost current = shadeHost;
+                    if (current != null) {
+                        switchShadePage(page);
+                        return;
+                    }
+                    View anchor = focusWindow;
+                    if (anchor == null) anchor = nativeStatusBar.get();
+                    if (anchor == null) return;
+                    Context context = anchor.getContext();
+                    if (focusWindow != null) dismissStatusFocus();
+                    showShade(context, page);
+                }
+
+                @Override public void onFocusShadeContent() {
+                    UnifiedShadeHost current = shadeHost;
+                    if (current != null) current.focusContent();
+                }
+
+                @Override public void onExit() {
+                    if (shadeHost != null) dismissShade();
+                    else dismissStatusFocus();
+                }
+
+                @Override public void onNativeRecents() {
+                    dismissStatusFocus();
+                    openNativeRecents();
+                }
+            });
 
     @Override
     public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lp) {
@@ -201,7 +241,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
     }
 
     private static void dismissStatusFocus() {
-        updateStatusFocus(-1);
+        NAVIGATION.leaveStandaloneStatusBar();
         View root = focusWindow;
         WindowManager wm = focusManager;
         focusWindow = null;
@@ -218,36 +258,11 @@ public final class PullDownHook implements IXposedHookLoadPackage {
                 || focusWindow != null || locked(context)) return;
         WindowManager wm = (WindowManager) context.getSystemService(Context.WINDOW_SERVICE);
         if (wm == null) return;
-        // The standalone status-bar focus window uses the same controller
-        // as Notifications and Quick Settings. Its Down destination remains
-        // native Recents; Back exits focus without opening another surface.
-        ShadeStatusNavigation statusNavigation = new ShadeStatusNavigation(
-                new ShadeStatusNavigation.Listener() {
-                    @Override public void onZoneFocus(int zone) {
-                        focusZone = zone;
-                        updateStatusFocus(zone);
-                    }
-
-                    @Override public void onReturnToContent(boolean viaBack) {
-                        dismissStatusFocus();
-                        if (!viaBack) openNativeRecents();
-                    }
-
-                    @Override public void onNotificationsSelected() {
-                        dismissStatusFocus();
-                        showPanel(context);
-                    }
-
-                    @Override public void onQuickSettingsSelected() {
-                        dismissStatusFocus();
-                        showSystemControls(context);
-                    }
-                });
+        // Standalone focus is only an input surface. It uses the exact same
+        // navigation state as the fully opened shade; it owns no controller.
         FrameLayout root = new FrameLayout(context) {
             @Override public boolean dispatchKeyEvent(KeyEvent event) {
-                if (statusNavigation.handleKey(event.getKeyCode(), event.getAction())) {
-                    return true;
-                }
+                if (NAVIGATION.handleKey(event)) return true;
                 return super.dispatchKeyEvent(event);
             }
         };
@@ -268,7 +283,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
             focusManager = wm;
             focusWindow = root;
             root.requestFocus();
-            statusNavigation.enter(ShadeStatusNavigation.NOTIFICATIONS);
+            NAVIGATION.enterStandaloneStatusBar();
             Log.i(TAG, "BlackBerry key entered native status-bar navigation");
         } catch (Throwable error) {
             Log.e(TAG, "Unable to acquire status-bar focus; native input retained", error);
