@@ -45,10 +45,6 @@ import java.util.Set;
  */
 final class TwoColumnPanel extends FrameLayout {
     interface CloseListener { void onClose(); }
-    interface StatusZoneListener {
-        void onZoneFocus(int zone); // -1 = notification content, 0 = left, 1 = right
-        void onSystemControls();
-    }
     interface OpenNotificationListener { void onOpen(String notificationKey); }
     interface MediaControlListener {
         boolean onControl(MediaSession.Token token, int action);
@@ -62,8 +58,7 @@ final class TwoColumnPanel extends FrameLayout {
     private static final String TAG = "BB7-PullDown";
     private final BB7Theme.Palette palette;
     private final CloseListener onClose;
-    private final StatusZoneListener onStatusZone;
-    private final ShadeStatusNavigation statusNavigation;
+    private final ShadeUiController navigation;
     private final OpenNotificationListener onOpenNotification;
     private final NotificationActionListener onActions;
     private final MediaControlListener onMediaControl;
@@ -105,41 +100,15 @@ final class TwoColumnPanel extends FrameLayout {
 
     TwoColumnPanel(Context context, CloseListener close,
             OpenNotificationListener openNotification, NotificationActionListener actions,
-            StatusZoneListener statusZone, MediaControlListener mediaControl) {
+            ShadeUiController navigation, MediaControlListener mediaControl) {
         super(context);
         palette = BB7Theme.palette(context);
         Log.i(TAG, "BB7 shade palette: " + (palette == BB7Theme.Palette.DARK ? "dark" : "light"));
         onClose = close;
         onOpenNotification = openNotification;
         onActions = actions;
-        onStatusZone = statusZone;
+        this.navigation = navigation;
         onMediaControl = mediaControl;
-        statusNavigation = new ShadeStatusNavigation(new ShadeStatusNavigation.Listener() {
-            @Override public void onZoneFocus(int zone) {
-                onStatusZone.onZoneFocus(zone);
-            }
-
-            @Override public void onReturnToContent(boolean viaBack) {
-                if (viaBack) {
-                    // Preserve existing notification-shade Back navigation.
-                    focusMediaRow();
-                } else if (notificationPaneActive && !notificationTargets.isEmpty()) {
-                    focusSelectedNotification();
-                } else if (mediaRow.getVisibility() == View.VISIBLE) {
-                    focusMediaRow();
-                } else {
-                    focusSelectedAppIcon();
-                }
-            }
-
-            @Override public void onNotificationsSelected() {
-                focusSelectedAppIcon();
-            }
-
-            @Override public void onQuickSettingsSelected() {
-                onStatusZone.onSystemControls();
-            }
-        });
         setFocusable(true);
         setFocusableInTouchMode(true);
         setBackgroundColor(palette.canvas);
@@ -685,7 +654,7 @@ final class TwoColumnPanel extends FrameLayout {
         }
         if (notificationPaneActive && notificationRows.isEmpty()) {
             returnToAppIcons();
-        } else if (statusNavigation.isFocused()) {
+        } else if (navigation.isStatusBarFocused()) {
             // A live notification refresh must not steal focus from the status bar.
             updateNotificationHighlight();
         } else if (notificationPaneActive) {
@@ -1155,20 +1124,12 @@ final class TwoColumnPanel extends FrameLayout {
     private void enterStatusZone() {
         if (activeReplyInput != null) return;
         requestFocus();
-        statusNavigation.enter(ShadeStatusNavigation.NOTIFICATIONS);
+        navigation.focusStatusBarFromPage(ShadeStatusNavigation.NOTIFICATIONS);
         Log.i(TAG, "Native status bar focused: notifications");
     }
 
     private void leaveStatusZone() {
-        statusNavigation.leave();
-    }
-
-    int statusFocusZone() {
-        return statusNavigation.zone();
-    }
-
-    void clearStatusZoneFocus() {
-        statusNavigation.leave();
+        navigation.focusContent();
     }
 
     private boolean onNotificationKey(View view, int keyCode, KeyEvent event) {
@@ -1320,7 +1281,7 @@ final class TwoColumnPanel extends FrameLayout {
 
     @Override
     public boolean dispatchKeyEvent(KeyEvent event) {
-        if (statusNavigation.handleKey(event.getKeyCode(), event.getAction())) {
+        if (navigation.handleKey(event)) {
             return true;
         }
         // Hardware Delete/Backspace dismisses the focused clearable notification,

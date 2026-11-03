@@ -8,6 +8,9 @@ import android.view.KeyEvent;
  * The native Android status bar remains the visual target. Each panel keeps
  * its own content focus, while this controller owns the two focus zones and
  * identical Up / Down / Left / Right / Enter / Back behavior.
+ *
+ * Down and Back are separate callbacks. The owning ShadeUiController decides
+ * their session-level consequences; individual pages cannot redefine them.
  */
 final class ShadeStatusNavigation {
     static final int NONE = -1;
@@ -16,7 +19,8 @@ final class ShadeStatusNavigation {
 
     interface Listener {
         void onZoneFocus(int zone);
-        void onReturnToContent(boolean viaBack);
+        void onDown();
+        void onBack();
         void onNotificationsSelected();
         void onQuickSettingsSelected();
     }
@@ -68,14 +72,14 @@ final class ShadeStatusNavigation {
             case KeyEvent.KEYCODE_DPAD_DOWN:
                 if (action == KeyEvent.ACTION_UP) {
                     leave();
-                    listener.onReturnToContent(false);
+                    listener.onDown();
                 }
                 return true;
             case KeyEvent.KEYCODE_BACK:
             case KeyEvent.KEYCODE_ESCAPE:
                 if (action == KeyEvent.ACTION_UP) {
                     leave();
-                    listener.onReturnToContent(true);
+                    listener.onBack();
                 }
                 return true;
             case KeyEvent.KEYCODE_DPAD_CENTER:

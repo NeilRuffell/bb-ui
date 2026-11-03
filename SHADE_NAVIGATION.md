@@ -1,119 +1,112 @@
-# Shared notification / Quick Settings trackpad navigation
+# BB UI — unified status-bar and shade navigation
 
-Development branch: `feat/shared-shade-status-navigation`
+Development branch: `refactor/systemui-shade-focus-controller`
+Expected test APK: `0.9.30-shared-systemui-focus-dev` (versionCode 60).
 
-Both shade pages and the standalone native status-bar focus window reuse
-`ShadeStatusNavigation`, one class responsible for status-zone state,
-Left/Right movement, Up bounds, Down return, Enter activation, and Back.
+## Ownership (this refactor)
 
-## Unified shade architecture
+`ShadeUiController` is instantiated **once** for the SystemUI process.
+It owns the active shade page (or no shade) and the currently selected native
+status-bar zone. It delegates keyboard semantics to one
+`ShadeStatusNavigation` instance. Neither page nor the standalone
+status-bar input surface constructs another navigation controller.
 
-The original implementation created **two separate WindowManager overlays**:
-one notification panel and one Quick Settings panel. Switching removed
-one overlay, opened another and repeated the 220ms drag-down animation.
+`PullDownHook` provides the current **LSPosed integration adapter**:
+it connects the shared controller's requests to Android's status-bar
+hooks, WindowManager window lifecycle, the native Recents command,
+notification services, and native connectivity actions.
 
-It now uses **one `UnifiedShadeHost` window** with two retained child pages:
-`TwoColumnPanel` and `BB6ConnectionsPanel`. The host owns exactly one
-`ShadeDateHeader`, above the page container. The content pages no longer
-create their own date header.
+`UnifiedShadeHost` is the retained, single-window view owner. It hosts
+one `ShadeDateHeader` and two child content pages:
+`TwoColumnPanel` (Notifications) and `BB6ConnectionsPanel` (QS).
+Those Android View classes and the navigation controller contain **no
+LSPosed API references**. Page transitions change visibility; they do not
+create a new SystemUI overlay or repeat the entrance animation.
 
-Only the initial open animates the unified window down; only an actual
-close animates it up. Switching pages changes `View.VISIBLE/GONE` within
-the existing window, with **no drag-down animation, WindowManager attach,
-or layout reconstruction**. Native QS tile execution still closes the
-entire shade before opening Android's own controls. Favorites rules,
-live notifications and media sessions still use their native callbacks.
+There is no separate `shown`/`quickShown` state. The integration
+derives the active page from the single controller plus the attached
+unified window.
 
-The date strip has a focus-dependent gradient:
-- **Blue** when notifications or Quick Settings content has focus.
-- **Gray/steel** when focus is on the native status bar in either page.
+## Hardware navigation contract
 
-The original date format `EEE, MMM d, yyyy`, 22sp typography, 49dp
-height and date/timezone updates remain unchanged. Swipe-up from the
-shared header continues to close the shade.
+| Location | Back / Escape | Down | Left / Right | Enter / trackpad click |
+|---|---|---|---|---|
+| Standalone status bar | Release status-bar focus | Native Recents | Select bar zone | Open selected shade page |
+| Status bar with shade open | Close **entire** shade and release focus | Return to active page content | Select bar zone | Select the page, instantly |
+| Notification app-icon column | Existing Back behavior: close shade | Next icon | Bounded within column | Enter selected app's notifications |
+| Notification card/action pane | Existing Back behavior: return to app icons | Next target | Bounded within pane | Native notification/action |
+| Quick Settings content | Close shade | Next connection row | Bounded within row | Native connectivity control |
 
-## From the notification shade
+From the first notification icon (or the media row if present), Up moves to
+the native status bar's Notifications zone. From the first QS radio row,
+Up moves to the Quick Settings zone.
 
-1. On the left app-icon column, move **Up** from the first icon. If a native
-   media session bar is present, Up from that row reaches the status bar.
-2. **Left** selects the notification status-bar zone; **Right** selects
-   Quick Settings.
-3. On the right-hand zone, press **Enter** / trackpad click to open the
-   BBOS6 Manage Connections shade.
-4. **Down** returns to the notification content; **Back** retains the
-   previously implemented return behavior.
+The status-bar navigation controller has **separate `onBack()` and
+`onDown()` events**. This deliberately prevents the old discrepancy
+where every Back was treated as a return to shade content.
 
-Notification card/action navigation, inline reply, and Backspace/Delete
-dismissal retain their existing handlers.
+The shared header remains gray while native status bar focus is active
+and blue while content has focus. The original date, media, notification
+actions/replies, scroll behavior, one-window animations, and current
+Android connectivity controls remain in place.
 
-## From the Quick Settings shade
+## Future native ROM integration
 
-1. Select **Mobile Network**, the first connection row.
-2. Press **Up** to focus the right-hand side of the native status bar.
-3. Press **Left** to select Notifications.
-4. Press **Enter** / trackpad click to switch to the notification shade.
-5. Press **Down** (or **Back**) while on the status bar to return to the
-   first Quick Settings row.
-6. Press **Enter** on the right status zone to return to Quick Settings
-   content without reopening the panel.
+The **reusable** boundary is the shared `ShadeUiController`,
+`ShadeStatusNavigation`, `UnifiedShadeHost`, both content pages,
+their theme/layout classes, and associated policy classes.
 
-Up/Down within the three QS rows uses the same **key-down** navigation
-convention as the notification icon column. Left/Right within a row
-remain bounded: only the status-bar zone changes sections.
+The **current platform adapter** is `PullDownHook`, which uses LSPosed
+to intercept status-bar gestures, acquire its focus input surface,
+provide a SystemUI overlay window, and invoke native services.
 
-## From the standalone status bar
+For a later ROM integration, replace this adapter with a native
+LineageOS SystemUI integration that owns the status-bar keyboard focus
+and directly attaches the BB UI shade. Native service hookups must be
+implemented and tested against that ROM's SystemUI version and build.
+This branch **does not** replace the stock status-bar implementation or
+ship a standalone SystemUI APK. It makes the existing view/controller
+layer suitable for reuse when that work begins.
 
-The status-bar focus window also uses `ShadeStatusNavigation`.
-Left/Right and Enter select the two shades; Down still opens native
-Recents, and Back still dismisses status-bar focus.
-
-## Status-bar highlighting
-
-The native status-bar highlight now follows the active zone in **both**
-shades. When content has focus, neither status-bar half is highlighted.
-The Android native status-bar remains the visual target and is never
-replaced with a duplicate focus overlay.
-
-## Build and test
+## Build and install
 
 ```sh
 cd ~/Projects/bb-ui
 git fetch origin
-git switch feat/shared-shade-status-navigation || \
-git switch --track origin/feat/shared-shade-status-navigation
+git switch refactor/systemui-shade-focus-controller || \
+  git switch --track origin/refactor/systemui-shade-focus-controller
 git pull --ff-only
-
 ./gradlew :app:testDebugUnitTest :app:assembleDebug
 adb -s 202512003630 install -r -d app/build/outputs/apk/debug/app-debug.apk
 adb -s 202512003630 shell am crash com.android.systemui
 ```
 
-Expected version: `0.9.29-unified-shade-pages-dev`, versionCode 59.
+## Device acceptance checks
 
-Device acceptance:
+1. Open **standalone status-bar focus** via the existing keyboard shortcut;
+   Back releases focus and never opens a shade.
+2. Focus status bar, Enter Notifications, Up to status bar, **Back**:
+   the complete shade closes and status-bar focus is released.
+3. Repeat 2 with QS selected. Back must **not** focus Mobile Network.
+4. Enter either shade; Up to status bar; Down restores the existing page's
+   content without closing the shade.
+5. In standalone status-bar focus, Down still opens native Recents.
+6. Notifications -> status bar -> QS -> status bar -> Notifications:
+   selection/highlighting is correct, with **no re-animation**.
+7. Verify gray/blue date-header focus indication, media row and
+   notification-card Back hierarchy, Enter, keyboard Backspace/Delete,
+   native reply/actions, and native radio controls.
+8. Close via Home, screen-off, Back, or swipe-up. No lingering shade
+   overlays, status-bar highlights, focus windows, or receivers.
+9. Confirm data refresh, Favorites changes, and radio-state changes
+   remain live across page switching.
 
-- Notifications -> status bar -> QS -> status bar -> Notifications, repeated
-  several times with no lost focus or duplicate windows.
-- First shade open animates; switching pages **does not animate**; final
-  shade close animates. The shared header does not blink or duplicate.
-- Header is blue on both content pages; gray on either status bar focus,
-  and blue again on Down/Back returning to content.
-- Swipe-up starting on the shared header closes the current shade.
-- Settings changed while QS is open are applied on return to Favorites.
-- Native QS controls still dismiss the unified window and launch correctly.
-- QS: Up from Mobile Network focuses the right-hand status zone; other
-  rows move Up to their previous connection row.
-- Both status zones: Left/Right change the active highlight; Down returns
-  to content, and Enter opens the selected section.
-- QS: Back when status focused returns to the first radio row, while Back
-  from a radio row closes QS.
-- Notifications: existing media focus, app icon/notification pane rules,
-  native reply/action, Backspace dismissal, swipe dismissal.
-- Original standalone status-bar focus: Down still opens native Recents;
-  Back exits, Left/Right/Enter open the intended shade.
-- Lock screen, native home, and system-dialog dismissal clean up both
-  panels without lingering focus.
+JUnit tests for the extracted coordinator:
+`ShadeUiControllerTest` and `ShadeStatusNavigationTest`.
+Source changes are not a substitute for compilation and Q25 runtime testing.
 
-The new shared state machine has JVM unit tests in
-`ShadeStatusNavigationTest`; actual device testing is still required
-before merging.
+Rollback:
+```sh
+adb -s 202512003630 shell setprop debug.bb7pulldown.enabled false
+adb -s 202512003630 shell am crash com.android.systemui
+```

@@ -26,13 +26,11 @@ final class BB6ConnectionsPanel extends FrameLayout {
     interface Listener {
         void onClose();
         void onActivate(int kind);
-        void onStatusZoneFocus(int zone);
-        void onShowNotifications();
     }
 
     private final BB7Theme.Palette palette;
     private final Listener listener;
-    private final ShadeStatusNavigation statusNavigation;
+    private final ShadeUiController navigation;
     private final LinearLayout[] rows = new LinearLayout[ConnectionControlPolicy.COUNT];
     private final TextView[] labels = new TextView[ConnectionControlPolicy.COUNT];
     private final TextView[] statuses = new TextView[ConnectionControlPolicy.COUNT];
@@ -41,26 +39,11 @@ final class BB6ConnectionsPanel extends FrameLayout {
     private float downX;
     private boolean closeStarted;
 
-    BB6ConnectionsPanel(Context context, Listener listener) {
+    BB6ConnectionsPanel(Context context, Listener listener,
+            ShadeUiController navigation) {
         super(context);
         this.listener = listener;
-        statusNavigation = new ShadeStatusNavigation(new ShadeStatusNavigation.Listener() {
-            @Override public void onZoneFocus(int zone) {
-                listener.onStatusZoneFocus(zone);
-            }
-
-            @Override public void onReturnToContent(boolean viaBack) {
-                focusFirst();
-            }
-
-            @Override public void onNotificationsSelected() {
-                listener.onShowNotifications();
-            }
-
-            @Override public void onQuickSettingsSelected() {
-                focusFirst();
-            }
-        });
+        this.navigation = navigation;
         palette = BB7Theme.palette(context);
         setBackgroundColor(palette.canvas);
         setFocusable(true);
@@ -111,7 +94,7 @@ final class BB6ConnectionsPanel extends FrameLayout {
             row.setClickable(true);
             row.setOnClickListener(view -> listener.onActivate(index));
             row.setOnFocusChangeListener((view, focused) -> {
-                if (focused) statusNavigation.leave();
+                if (focused) navigation.focusContent();
                 updateSelection();
             });
             row.setOnKeyListener((view, code, event) -> onRowKey(index, code, event));
@@ -158,21 +141,13 @@ final class BB6ConnectionsPanel extends FrameLayout {
     }
 
     void focusFirst() {
-        statusNavigation.leave();
+        navigation.focusContent();
         rows[0].requestFocus();
-    }
-
-    int statusFocusZone() {
-        return statusNavigation.zone();
-    }
-
-    void clearStatusZoneFocus() {
-        statusNavigation.leave();
     }
 
     private void enterStatusZone() {
         requestFocus();
-        statusNavigation.enter(ShadeStatusNavigation.QUICK_SETTINGS);
+        navigation.focusStatusBarFromPage(ShadeStatusNavigation.QUICK_SETTINGS);
     }
 
     void refresh(NativeConnectionControls.Status snapshot) {
@@ -233,7 +208,7 @@ final class BB6ConnectionsPanel extends FrameLayout {
     }
 
     @Override public boolean dispatchKeyEvent(KeyEvent event) {
-        if (statusNavigation.handleKey(event.getKeyCode(), event.getAction())) {
+        if (navigation.handleKey(event)) {
             return true;
         }
         if (event.getKeyCode() == KeyEvent.KEYCODE_BACK
