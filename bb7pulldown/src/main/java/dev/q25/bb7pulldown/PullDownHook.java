@@ -8,6 +8,9 @@ import android.content.BroadcastReceiver;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.graphics.PixelFormat;
+import android.bluetooth.BluetoothAdapter;
+import android.net.wifi.WifiManager;
+import android.telephony.TelephonyManager;
 import android.os.Handler;
 import android.os.Looper;
 import android.database.ContentObserver;
@@ -75,6 +78,12 @@ public final class PullDownHook implements IXposedHookLoadPackage {
     private static WindowManager windowManager;
     private static TwoColumnPanel panel;
     private static NativeMediaSessions mediaSessions;
+    private static boolean quickShown;
+    private static boolean quickOpeningOrClosing;
+    private static WindowManager quickWindowManager;
+    private static BB6ConnectionsPanel quickPanel;
+    private static BroadcastReceiver quickStateReceiver;
+    private static Context quickReceiverContext;
     private static FavoritesRules activeFavorites = new FavoritesRules();
     private static ContentObserver favoritesObserver;
     private static Context favoritesObserverContext;
@@ -100,6 +109,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
         installRecentsInterception(lp.classLoader);
         installNativeShadeState(lp.classLoader);
         SystemUiNotificationObserver.install(lp.classLoader);
+        NativeQuickSettingsTiles.install(lp.classLoader);
         NativeNotificationClicks.install(lp.classLoader);
         Class<?> viewClass = XposedHelpers.findClassIfExists(STATUS_BAR, lp.classLoader);
         if (viewClass == null) {
@@ -205,7 +215,8 @@ public final class PullDownHook implements IXposedHookLoadPackage {
     }
 
     private static void showStatusFocus(Context context) {
-        if (shown || openingOrClosing || focusWindow != null || locked(context)) return;
+        if (shown || openingOrClosing || quickShown || quickOpeningOrClosing
+                || focusWindow != null || locked(context)) return;
         WindowManager wm = (WindowManager) context.getSystemService(Context.WINDOW_SERVICE);
         if (wm == null) return;
         FrameLayout root = new FrameLayout(context) {
@@ -396,15 +407,161 @@ public final class PullDownHook implements IXposedHookLoadPackage {
     }
 
     private static void showSystemControls(Context context) {
-        // Stock SystemUI owns Quick Settings; do not fabricate toggle states.
+        // Right-hand native status-zone now opens the BBOS6 Manage Connections UI.
         dismissPanelImmediately();
+        showQuickConnections(context);
+    }
+
+    private static void showQuickConnections(Context context) {
+        if (quickShown || quickOpeningOrClosing || shown || openingOrClosing
+                || locked(context)) return;
+        if (focusWindow != null) dismissStatusFocus();
+        quickOpeningOrClosing = true;
+        WindowManager manager = (WindowManager)
+                context.getSystemService(Context.WINDOW_SERVICE);
+        if (manager == null) {
+            quickOpeningOrClosing = false;
+            return;
+        }
+        BB6ConnectionsPanel root = new BB6ConnectionsPanel(context,
+                new BB6ConnectionsPanel.Listener() {
+                    @Override public void onClose() {
+                        dismissQuickConnections();
+                    }
+                    @Override public void onActivate(int kind) {
+                        activateQuickConnection(kind);
+                    }
+                });
+        WindowManager.LayoutParams params = new WindowManager.LayoutParams(
+                WindowManager.LayoutParams.MATCH_PARENT,
+                Math.max(1, context.getResources().getDisplayMetrics().heightPixels
+                        - nativeStatusBarHeight(context)),
+                STATUS_BAR_SUB_PANEL_WINDOW_TYPE,
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                PixelFormat.OPAQUE);
+        params.setTitle("BB6 Manage Connections");
+        params.gravity = Gravity.TOP | Gravity.START;
+        params.y = nativeStatusBarHeight(context);
+        params.setFitInsetsTypes(0);
+        params.layoutInDisplayCutoutMode =
+                WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS;
+        root.setTranslationY(-params.height);
         try {
-            Object service = context.getSystemService("statusbar");
-            if (service == null) throw new IllegalStateException("statusbar service absent");
-            XposedHelpers.callMethod(service, "expandSettingsPanel");
-            Log.i(TAG, "Native Quick Settings requested from status-bar system zone");
+            manager.addView(root, params);
+            quickPanel = root;
+            quickWindowManager = manager;
+            quickShown = true;
+            registerScreenOffReceiver(context);
+            registerQuickConnectionStateReceiver(context);
+            updateStatusAppearance();
+            root.post(() -> {
+                if (quickPanel != root || !quickShown) return;
+                root.animate().translationY(0f).setDuration(220).withEndAction(() -> {
+                    if (quickPanel == root && quickShown) {
+                        quickOpeningOrClosing = false;
+                        root.focusFirst();
+                    }
+                }).start();
+            });
+            Log.i(TAG, "BBOS6 Manage Connections opened: mobile, Wi-Fi, Bluetooth");
         } catch (Throwable error) {
-            Log.e(TAG, "Unable to expand stock Quick Settings", error);
+            Log.e(TAG, "Unable to attach BBOS6 Quick Settings panel", error);
+            if (quickPanel == root && quickWindowManager != null) {
+                try { quickWindowManager.removeViewImmediate(root); }
+                catch (Throwable removeError) {
+                    Log.w(TAG, "Quick Settings rollback removal failed", removeError);
+                }
+            }
+            stopQuickConnectionStateReceiver();
+            unregisterScreenOffReceiver();
+            quickPanel = null;
+            quickWindowManager = null;
+            quickShown = false;
+            quickOpeningOrClosing = false;
+            updateStatusAppearance();
+        }
+    }
+
+    private static void activateQuickConnection(int kind) {
+        BB6ConnectionsPanel root = quickPanel;
+        if (root == null || !quickShown || quickOpeningOrClosing) return;
+        Context context = root.getContext();
+        if (locked(context)) {
+            dismissQuickConnectionsImmediately();
+            return;
+        }
+        // Remove our overlay before native SystemUI displays its Internet/BT UI.
+        dismissQuickConnectionsImmediately();
+        if (!NativeQuickSettingsTiles.activate(kind)) {
+            NativeConnectionControls.openNativeSettings(context, kind);
+        }
+    }
+
+    private static void registerQuickConnectionStateReceiver(Context context) {
+        stopQuickConnectionStateReceiver();
+        IntentFilter filter = new IntentFilter();
+        filter.addAction(WifiManager.WIFI_STATE_CHANGED_ACTION);
+        filter.addAction(BluetoothAdapter.ACTION_STATE_CHANGED);
+        filter.addAction(Intent.ACTION_AIRPLANE_MODE_CHANGED);
+        filter.addAction(TelephonyManager.ACTION_DEFAULT_DATA_SUBSCRIPTION_CHANGED);
+        BroadcastReceiver receiver = new BroadcastReceiver() {
+            @Override public void onReceive(Context caller, Intent intent) {
+                BB6ConnectionsPanel root = quickPanel;
+                if (root != null && quickShown) {
+                    root.refresh(NativeConnectionControls.read(root.getContext()));
+                }
+            }
+        };
+        try {
+            // Source extras are not trusted; every refresh re-reads system managers.
+            context.registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED);
+            quickStateReceiver = receiver;
+            quickReceiverContext = context;
+        } catch (RuntimeException error) {
+            Log.w(TAG, "Quick Settings state listener unavailable", error);
+        }
+    }
+
+    private static void stopQuickConnectionStateReceiver() {
+        BroadcastReceiver receiver = quickStateReceiver;
+        Context context = quickReceiverContext;
+        quickStateReceiver = null;
+        quickReceiverContext = null;
+        if (receiver != null && context != null) {
+            try { context.unregisterReceiver(receiver); }
+            catch (IllegalArgumentException ignored) { }
+        }
+    }
+
+    private static void dismissQuickConnections() {
+        BB6ConnectionsPanel root = quickPanel;
+        if (root == null || !quickShown || quickOpeningOrClosing) return;
+        quickOpeningOrClosing = true;
+        int height = root.getHeight();
+        if (height <= 0) height = root.getResources().getDisplayMetrics().heightPixels;
+        root.animate().translationY(-height).setDuration(180)
+                .withEndAction(() -> {
+                    if (quickPanel == root) dismissQuickConnectionsImmediately();
+                }).start();
+    }
+
+    private static void dismissQuickConnectionsImmediately() {
+        BB6ConnectionsPanel root = quickPanel;
+        if (root == null) return;
+        quickPanel = null;
+        quickShown = false;
+        try {
+            root.animate().cancel();
+            if (quickWindowManager != null) quickWindowManager.removeViewImmediate(root);
+        } catch (Throwable error) {
+            Log.w(TAG, "Unable to hide BBOS6 Quick Settings panel", error);
+        } finally {
+            stopQuickConnectionStateReceiver();
+            unregisterScreenOffReceiver();
+            quickWindowManager = null;
+            quickOpeningOrClosing = false;
+            updateStatusAppearance();
+            Log.i(TAG, "BBOS6 Manage Connections closed");
         }
     }
 
@@ -435,6 +592,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
             boolean focused = focusWindow != null || shown && panel != null
                     && panelStatusFocused();
             boolean decorated = focused || shown || openingOrClosing
+                    || quickShown || quickOpeningOrClosing
                     || recentsVisible || nativeShadeExpanded;
             if (!decorated) {
                 if (decoratedStatusBar == target) {
@@ -450,6 +608,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
             }
             Drawable base = graphiteBackground(target.getContext());
             int selectedZone = focusWindow != null ? focusZone
+                    : quickShown ? 1
                     : shown && panelStatusFocused() ? panelFocusedZone() : -1;
             if (selectedZone < 0 || target.getWidth() <= 0) {
                 target.setBackground(base);
@@ -546,7 +705,8 @@ public final class PullDownHook implements IXposedHookLoadPackage {
 
     private static void showPanel(Context context) {
         if (focusWindow != null) dismissStatusFocus();
-        if (shown || openingOrClosing || !enabled() || locked(context)) return;
+        if (shown || openingOrClosing || quickShown || quickOpeningOrClosing
+                || !enabled() || locked(context)) return;
         openingOrClosing = true;
         WindowManager manager = (WindowManager)
                 context.getSystemService(Context.WINDOW_SERVICE);
@@ -671,9 +831,11 @@ public final class PullDownHook implements IXposedHookLoadPackage {
                 if (Intent.ACTION_CLOSE_SYSTEM_DIALOGS.equals(action)) {
                     Log.i(TAG, "Native close-system-dialogs event received");
                     dismissPanelImmediately();
+                    dismissQuickConnectionsImmediately();
                 } else if (Intent.ACTION_SCREEN_OFF.equals(action)) {
                     Log.i(TAG, "Native screen-off event received");
                     dismissPanelImmediately();
+                    dismissQuickConnectionsImmediately();
                 }
             }
         };
