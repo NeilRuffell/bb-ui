@@ -439,8 +439,8 @@ public final class PullDownHook implements IXposedHookLoadPackage {
         } else if (quickPanel != null) {
             quickPanel.refresh(NativeConnectionControls.read(context));
         }
-        root.setPage(next);
         NAVIGATION.onPageChanged(next);
+        root.setPage(next);
         updateStatusAppearance();
         root.focusContent();
         Log.i(TAG, "Unified shade switched page=" + next + " without animation");
