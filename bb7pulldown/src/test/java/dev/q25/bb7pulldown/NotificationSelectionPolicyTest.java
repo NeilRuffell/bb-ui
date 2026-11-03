@@ -78,7 +78,7 @@ public class NotificationSelectionPolicyTest {
                 NotificationSelectionPolicy.forSilent(visible));
         assertEquals(Collections.singletonList(alerting),
                 NotificationSelectionPolicy.forPackage(visible, "player"));
-        assertEquals(Collections.singletonList(media),
+        assertEquals(Arrays.asList(media, unrelated),
                 NotificationSelectionPolicy.forSilent(original));
         assertEquals(Arrays.asList("player", NotificationCategoryPolicy.SILENT_ID),
                 NotificationCategoryPolicy.categoriesFor(visible));
