@@ -74,12 +74,10 @@ public final class PullDownHook implements IXposedHookLoadPackage {
     private static final int STATUS_BAR_SUB_PANEL_WINDOW_TYPE = 2017;
     private static final Map<View, SwipeState> SWIPES =
             Collections.synchronizedMap(new WeakHashMap<>());
-    private static boolean shown;
     private static WindowManager windowManager;
     private static UnifiedShadeHost shadeHost;
     private static TwoColumnPanel panel;
     private static NativeMediaSessions mediaSessions;
-    private static boolean quickShown;
     private static BB6ConnectionsPanel quickPanel;
     private static BroadcastReceiver quickStateReceiver;
     private static Context quickReceiverContext;
@@ -254,7 +252,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
     }
 
     private static void showStatusFocus(Context context) {
-        if (shown || openingOrClosing || quickShown
+        if (shadeHost != null || openingOrClosing
                 || focusWindow != null || locked(context)) return;
         WindowManager wm = (WindowManager) context.getSystemService(Context.WINDOW_SERVICE);
         if (wm == null) return;
@@ -349,9 +347,9 @@ public final class PullDownHook implements IXposedHookLoadPackage {
 
     static void onNotificationItemsUpdated() {
         TwoColumnPanel current = panel;
-        if (current == null || !shown) return;
+        if (current == null || !notificationPageActive()) return;
         current.post(() -> {
-            if (current == panel && shown) {
+            if (current == panel && notificationPageActive()) {
                 if (locked(current.getContext())) {
                     dismissPanelImmediately();
                 } else {
@@ -367,7 +365,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
 
     private static void openNotification(String key) {
         TwoColumnPanel current = panel;
-        if (current == null || !shown || openingOrClosing) return;
+        if (current == null || !notificationPageActive() || openingOrClosing) return;
         if (locked(current.getContext())) {
             dismissPanelImmediately();
             return;
@@ -376,27 +374,27 @@ public final class PullDownHook implements IXposedHookLoadPackage {
         // ActivityStarter when there is no native row. This callback is async
         // for ActivityStarter; only close the same panel after dispatch.
         NativeNotificationClicks.open(key, () -> current.post(() -> {
-            if (panel == current && shown) dismissPanelImmediately();
+            if (panel == current && notificationPageActive()) dismissPanelImmediately();
         }));
     }
 
     /** Native notification actions; keep the existing card-open route untouched. */
     private static void activateNotificationAction(String key, int index) {
         TwoColumnPanel current = panel;
-        if (current == null || !shown || openingOrClosing) return;
+        if (current == null || !notificationPageActive() || openingOrClosing) return;
         if (locked(current.getContext())) {
             dismissPanelImmediately();
             return;
         }
         NativeNotificationActions.activate(key, index, current.getContext(),
                 () -> current.post(() -> {
-                    if (panel == current && shown) dismissPanelImmediately();
+                    if (panel == current && notificationPageActive()) dismissPanelImmediately();
                 }));
     }
 
     private static void dismissNotification(String key) {
         TwoColumnPanel current = panel;
-        if (current == null || !shown || openingOrClosing) return;
+        if (current == null || !notificationPageActive() || openingOrClosing) return;
         if (locked(current.getContext())) {
             dismissPanelImmediately();
             return;
@@ -406,7 +404,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
 
     private static boolean sendNotificationReply(String key, int index, String reply) {
         TwoColumnPanel current = panel;
-        if (current == null || !shown || openingOrClosing) return false;
+        if (current == null || !notificationPageActive() || openingOrClosing) return false;
         if (locked(current.getContext())) {
             dismissPanelImmediately();
             return false;
@@ -447,8 +445,6 @@ public final class PullDownHook implements IXposedHookLoadPackage {
             quickPanel.refresh(NativeConnectionControls.read(context));
         }
         root.setPage(next);
-        shown = next == UnifiedShadeHost.NOTIFICATIONS;
-        quickShown = next == UnifiedShadeHost.QUICK_SETTINGS;
         NAVIGATION.onPageChanged(next);
         updateStatusAppearance();
         root.focusContent();
@@ -457,7 +453,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
 
     private static void activateQuickConnection(int kind) {
         BB6ConnectionsPanel root = quickPanel;
-        if (root == null || !quickShown) return;
+        if (root == null || !quickSettingsPageActive()) return;
         Context context = root.getContext();
         if (locked(context)) {
             dismissShadeImmediately();
@@ -489,7 +485,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
         BroadcastReceiver receiver = new BroadcastReceiver() {
             @Override public void onReceive(Context caller, Intent intent) {
                 BB6ConnectionsPanel root = quickPanel;
-                if (root != null && quickShown) {
+                if (root != null && quickSettingsPageActive()) {
                     root.refresh(NativeConnectionControls.read(root.getContext()));
                 }
             }
@@ -540,8 +536,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
                 originalStatusBackground = null;
             }
             boolean focused = NAVIGATION.isStatusBarFocused();
-            boolean decorated = focused || shown || openingOrClosing
-                    || quickShown
+            boolean decorated = focused || shadeHost != null || openingOrClosing
                     || recentsVisible || nativeShadeExpanded;
             if (!decorated) {
                 if (decoratedStatusBar == target) {
@@ -642,6 +637,18 @@ public final class PullDownHook implements IXposedHookLoadPackage {
         return dp(context, 24);
     }
 
+    // Visibility is derived from the single navigation session and window.
+    // No independent per-page flags can drift out of sync with focus.
+    private static boolean notificationPageActive() {
+        return shadeHost != null
+                && NAVIGATION.activePage() == ShadeStatusNavigation.NOTIFICATIONS;
+    }
+
+    private static boolean quickSettingsPageActive() {
+        return shadeHost != null
+                && NAVIGATION.activePage() == ShadeStatusNavigation.QUICK_SETTINGS;
+    }
+
     private static void showPanel(Context context) {
         if (shadeHost != null) {
             switchShadePage(UnifiedShadeHost.NOTIFICATIONS);
@@ -727,8 +734,6 @@ public final class PullDownHook implements IXposedHookLoadPackage {
             windowManager = manager;
             panel = notifications;
             quickPanel = connections;
-            shown = initialPage == UnifiedShadeHost.NOTIFICATIONS;
-            quickShown = initialPage == UnifiedShadeHost.QUICK_SETTINGS;
             NAVIGATION.onShadeOpened(initialPage);
             registerScreenOffReceiver(context);
             registerQuickConnectionStateReceiver(context);
@@ -840,8 +845,6 @@ public final class PullDownHook implements IXposedHookLoadPackage {
         UnifiedShadeHost current = shadeHost;
         if (current == null) return;
         shadeHost = null;
-        shown = false;
-        quickShown = false;
         NAVIGATION.onShadeClosed();
         try {
             current.clearStatusBarFocus();
@@ -872,7 +875,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
                 // is visible, so returning to notifications uses fresh rules.
                 if (panel != root || shadeHost == null) return;
                 activeFavorites = FavoritesClient.read(context);
-                if (shown) {
+                if (notificationPageActive()) {
                     root.setFavorites(activeFavorites);
                 }
                 FavoritesClient.reportObserved(context, activeFavorites,
