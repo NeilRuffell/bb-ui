@@ -492,8 +492,17 @@ public final class PullDownHook implements IXposedHookLoadPackage {
         }
         // Remove our overlay before native SystemUI displays its Internet/BT UI.
         dismissQuickConnectionsImmediately();
-        if (!NativeQuickSettingsTiles.activate(kind)) {
-            NativeConnectionControls.openNativeSettings(context, kind);
+        if (!NativeQuickSettingsTiles.activate(kind)
+                && !NativeConnectionControls.openNativeSettings(context, kind)) {
+            // Final compatibility path: never strand the user without working QS.
+            try {
+                Object statusbar = context.getSystemService("statusbar");
+                if (statusbar != null) {
+                    XposedHelpers.callMethod(statusbar, "expandSettingsPanel");
+                }
+            } catch (Throwable error) {
+                Log.e(TAG, "Unable to open any native connectivity controls", error);
+            }
         }
     }
 
