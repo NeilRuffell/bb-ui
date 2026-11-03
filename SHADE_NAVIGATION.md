@@ -2,9 +2,35 @@
 
 Development branch: `feat/shared-shade-status-navigation`
 
-Both shades and the standalone native status-bar focus window now reuse
+Both shade pages and the standalone native status-bar focus window reuse
 `ShadeStatusNavigation`, one class responsible for status-zone state,
 Left/Right movement, Up bounds, Down return, Enter activation, and Back.
+
+## Unified shade architecture
+
+The original implementation created **two separate WindowManager overlays**:
+one notification panel and one Quick Settings panel. Switching removed
+one overlay, opened another and repeated the 220ms drag-down animation.
+
+It now uses **one `UnifiedShadeHost` window** with two retained child pages:
+`TwoColumnPanel` and `BB6ConnectionsPanel`. The host owns exactly one
+`ShadeDateHeader`, above the page container. The content pages no longer
+create their own date header.
+
+Only the initial open animates the unified window down; only an actual
+close animates it up. Switching pages changes `View.VISIBLE/GONE` within
+the existing window, with **no drag-down animation, WindowManager attach,
+or layout reconstruction**. Native QS tile execution still closes the
+entire shade before opening Android's own controls. Favorites rules,
+live notifications and media sessions still use their native callbacks.
+
+The date strip has a focus-dependent gradient:
+- **Blue** when notifications or Quick Settings content has focus.
+- **Gray/steel** when focus is on the native status bar in either page.
+
+The original date format `EEE, MMM d, yyyy`, 22sp typography, 49dp
+height and date/timezone updates remain unchanged. Swipe-up from the
+shared header continues to close the shade.
 
 ## From the notification shade
 
@@ -62,12 +88,19 @@ adb -s 202512003630 install -r -d app/build/outputs/apk/debug/app-debug.apk
 adb -s 202512003630 shell am crash com.android.systemui
 ```
 
-Expected version: `0.9.28-shared-shade-navigation-dev`, versionCode 58.
+Expected version: `0.9.29-unified-shade-pages-dev`, versionCode 59.
 
 Device acceptance:
 
 - Notifications -> status bar -> QS -> status bar -> Notifications, repeated
   several times with no lost focus or duplicate windows.
+- First shade open animates; switching pages **does not animate**; final
+  shade close animates. The shared header does not blink or duplicate.
+- Header is blue on both content pages; gray on either status bar focus,
+  and blue again on Down/Back returning to content.
+- Swipe-up starting on the shared header closes the current shade.
+- Settings changed while QS is open are applied on return to Favorites.
+- Native QS controls still dismiss the unified window and launch correctly.
 - QS: Up from Mobile Network focuses the right-hand status zone; other
   rows move Up to their previous connection row.
 - Both status zones: Left/Right change the active highlight; Down returns
