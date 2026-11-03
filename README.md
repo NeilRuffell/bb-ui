@@ -30,7 +30,7 @@ cd ~/Projects/bb-ui
 git fetch origin
 git switch feat/bb6-keyguard-keyboard-entry
 git pull --ff-only
-./gradlew :app:assembleDebug :app:testDebugUnitTest
+gradle :app:assembleDebug :app:testDebugUnitTest
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 adb shell am crash com.android.systemui
 ```
