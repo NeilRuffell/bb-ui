@@ -55,6 +55,15 @@ public class FavoritesRulesTest {
                 "Family room", "id-1", false)));
     }
 
+    @Test public void titleFilterAlsoMatchesNativeConversationTitle() {
+        FavoritesRules.AppRule app = new FavoritesRules.AppRule("com.chat");
+        app.onlyMatching = true;
+        app.rules.add(new FavoritesRules.Rule(
+                FavoritesRules.TYPE_TITLE_CONTAINS, "renamed CHAT"));
+        FavoritesRules favorites = enabledWith(app);
+        assertTrue(favorites.matches(item("1", "com.chat", "Sender name", "id-1", false)));
+    }
+
     @Test public void anyAndAllRulesAreSupported() {
         FavoritesRules.AppRule app = new FavoritesRules.AppRule("com.chat");
         app.onlyMatching = true;
