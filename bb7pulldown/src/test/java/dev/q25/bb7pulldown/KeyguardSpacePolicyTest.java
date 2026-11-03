@@ -1,64 +1,74 @@
 package dev.q25.bb7pulldown;
 
 import static org.junit.Assert.assertEquals;
+
 import org.junit.Test;
 
+/** Keyboard events must never leak to a previously focused locked QS tile. */
 public class KeyguardSpacePolicyTest {
     private final KeyguardSpacePolicy policy = new KeyguardSpacePolicy();
 
-    @Test public void lockedSpaceOpensBouncerAndConsumesBothEvents() {
+    @Test public void oneLockedPressRequestsNativeBouncerOnRelease() {
+        assertEquals(KeyguardSpacePolicy.CONSUME,
+                policy.route(0, 100, true, false, false));
         assertEquals(KeyguardSpacePolicy.REQUEST_BOUNCER,
-                policy.route(0, 100, 0, true, false, false, true, false));
-        // Focus and bouncer visibility can change before the hardware UP.
-        assertEquals(KeyguardSpacePolicy.CONSUME,
-                policy.route(1, 100, 0, true, true, false, true, true));
-        // Subsequent Space is handled by the real credential editor.
-        assertEquals(KeyguardSpacePolicy.PASS,
-                policy.route(0, 200, 0, true, true, false, true, true));
+                policy.route(1, 100, true, false, false));
     }
 
-    @Test public void lockedSpaceNeverReachesFocusedQsDuringUnavailableManager() {
+    @Test public void keyRepeatCannotRequestBouncerRepeatedly() {
         assertEquals(KeyguardSpacePolicy.CONSUME,
-                policy.route(0, 200, 0, true, false, false, false, false));
+                policy.route(0, 200, true, false, false));
         assertEquals(KeyguardSpacePolicy.CONSUME,
-                policy.route(1, 200, 0, true, false, false, false, false));
-    }
-
-    @Test public void bouncerTransitionConsumesSpaceWithoutRepeatingRequest() {
-        assertEquals(KeyguardSpacePolicy.CONSUME,
-                policy.route(0, 300, 0, true, false, true, true, false));
-        assertEquals(KeyguardSpacePolicy.CONSUME,
-                policy.route(1, 300, 0, true, false, true, true, false));
-    }
-
-    @Test public void repeatedPressCannotRequestBouncerTwice() {
+                policy.route(0, 200, true, false, false));
         assertEquals(KeyguardSpacePolicy.REQUEST_BOUNCER,
-                policy.route(0, 400, 0, true, false, false, true, false));
+                policy.route(1, 200, true, false, false));
         assertEquals(KeyguardSpacePolicy.CONSUME,
-                policy.route(0, 400, 1, true, false, false, true, false));
+                policy.route(1, 200, true, false, false));
+    }
+
+    @Test public void postFocusChangeUpCannotActivateNotification() {
         assertEquals(KeyguardSpacePolicy.CONSUME,
-                policy.route(1, 400, 0, true, false, false, true, false));
-    }
-
-    @Test public void unlockedSpacePreservesOriginalDispatch() {
-        assertEquals(KeyguardSpacePolicy.PASS,
-                policy.route(0, 500, 0, false, false, false, true, false));
-        assertEquals(KeyguardSpacePolicy.PASS,
-                policy.route(1, 500, 0, false, false, false, true, false));
-    }
-
-    @Test public void knownPasswordEditorPreservedIfManagerUnavailable() {
-        assertEquals(KeyguardSpacePolicy.PASS,
-                policy.route(0, 600, 0, true, false, false, false, true));
-    }
-
-    @Test public void passwordEditorReceivesSpaceEvenWithManagerPresentAndNoVisibilityMethod() {
-        assertEquals(KeyguardSpacePolicy.PASS,
-                policy.route(0, 750, 0, true, false, false, true, true));
-    }
-
-    @Test public void orphanedUpDoesNotClickLockedQuickSetting() {
+                policy.route(0, 300, true, false, false));
+        // Bouncer appears between DOWN and UP. Matching UP stays consumed.
         assertEquals(KeyguardSpacePolicy.CONSUME,
-                policy.route(1, 700, 0, true, false, false, true, false));
+                policy.route(1, 300, true, true, true));
+    }
+
+    @Test public void passwordSpaceIsNotIntercepted() {
+        assertEquals(KeyguardSpacePolicy.PASS,
+                policy.route(0, 400, true, true, true));
+        assertEquals(KeyguardSpacePolicy.PASS,
+                policy.route(1, 400, true, true, true));
+    }
+
+    @Test public void passwordEditorProtectsSpaceEvenIfVisibilityApiUnavailable() {
+        assertEquals(KeyguardSpacePolicy.PASS,
+                policy.route(0, 450, true, false, true));
+    }
+
+    @Test public void pinBouncerRetainsKeyboardNavigation() {
+        assertEquals(KeyguardSpacePolicy.PASS,
+                policy.route(0, 500, true, true, false));
+        assertEquals(KeyguardSpacePolicy.PASS,
+                policy.route(1, 500, true, true, false));
+    }
+
+    @Test public void unlockedKeyboardRetainsNativeBehavior() {
+        assertEquals(KeyguardSpacePolicy.PASS,
+                policy.route(0, 600, false, false, false));
+        assertEquals(KeyguardSpacePolicy.PASS,
+                policy.route(1, 600, false, false, false));
+    }
+
+    @Test public void lockedOrphanUpMustNotClickQs() {
+        assertEquals(KeyguardSpacePolicy.CONSUME,
+                policy.route(1, 700, true, false, false));
+    }
+
+    @Test public void unlockBetweenDownAndUpPreventsClickThrough() {
+        assertEquals(KeyguardSpacePolicy.CONSUME,
+                policy.route(0, 800, true, false, false));
+        assertEquals(KeyguardSpacePolicy.CONSUME,
+                policy.route(1, 800, false, false, false));
     }
 }
