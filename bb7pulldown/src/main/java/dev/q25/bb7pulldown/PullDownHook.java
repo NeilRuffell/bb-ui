@@ -894,7 +894,9 @@ public final class PullDownHook implements IXposedHookLoadPackage {
         stopFavoritesObserver();
         ContentObserver observer = new ContentObserver(new Handler(Looper.getMainLooper())) {
             @Override public void onChange(boolean selfChange) {
-                if (panel != root || !shown) return;
+                // Settings remain synchronized even when the retained QS page
+                // is visible, so returning to notifications uses fresh rules.
+                if (panel != root || shadeHost == null) return;
                 activeFavorites = FavoritesClient.read(context);
                 root.setFavorites(activeFavorites);
                 FavoritesClient.reportObserved(context, activeFavorites,
