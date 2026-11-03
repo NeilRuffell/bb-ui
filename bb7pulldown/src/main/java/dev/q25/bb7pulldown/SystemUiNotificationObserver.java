@@ -17,6 +17,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import de.robv.android.xposed.XC_MethodHook;
 import de.robv.android.xposed.XposedBridge;
@@ -187,6 +188,31 @@ final class SystemUiNotificationObserver {
                 }
             }
             return Collections.unmodifiableList(new ArrayList<>(tokens));
+        }
+    }
+
+    /**
+     * Notification keys already represented by visible native media sessions.
+     * Only those notifications may be hidden from the redundant Silent list.
+     */
+    static Set<String> notificationKeysForMediaTokens(Set<MediaSession.Token> mediaTokens) {
+        if (mediaTokens == null || mediaTokens.isEmpty()) return Collections.emptySet();
+        synchronized (LOCK) {
+            Set<String> keys = new LinkedHashSet<>();
+            for (Map.Entry<String, StatusBarNotification> entry : ACTIVE_SBNS.entrySet()) {
+                Notification notification = entry.getValue().getNotification();
+                if (notification == null || notification.extras == null) continue;
+                try {
+                    MediaSession.Token token = notification.extras.getParcelable(
+                            Notification.EXTRA_MEDIA_SESSION, MediaSession.Token.class);
+                    if (token != null && mediaTokens.contains(token)) {
+                        keys.add(entry.getKey());
+                    }
+                } catch (RuntimeException error) {
+                    Log.w(TAG, "Unable to inspect media notification token", error);
+                }
+            }
+            return Collections.unmodifiableSet(keys);
         }
     }
 
