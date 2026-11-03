@@ -10,7 +10,7 @@ import android.content.IntentFilter;
 import android.graphics.PixelFormat;
 import android.bluetooth.BluetoothAdapter;
 import android.net.wifi.WifiManager;
-import android.telephony.TelephonyManager;
+import android.telephony.SubscriptionManager;
 import android.os.Handler;
 import android.os.Looper;
 import android.database.ContentObserver;
@@ -503,7 +503,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
         filter.addAction(WifiManager.WIFI_STATE_CHANGED_ACTION);
         filter.addAction(BluetoothAdapter.ACTION_STATE_CHANGED);
         filter.addAction(Intent.ACTION_AIRPLANE_MODE_CHANGED);
-        filter.addAction(TelephonyManager.ACTION_DEFAULT_DATA_SUBSCRIPTION_CHANGED);
+        filter.addAction(SubscriptionManager.ACTION_DEFAULT_SUBSCRIPTION_CHANGED);
         BroadcastReceiver receiver = new BroadcastReceiver() {
             @Override public void onReceive(Context caller, Intent intent) {
                 BB6ConnectionsPanel root = quickPanel;
