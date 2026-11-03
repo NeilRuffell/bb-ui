@@ -2,50 +2,58 @@
 
 Branch: `feat/bb6-keyguard-keyboard-entry`, based on `master`.
 
-This adds a SystemUI-only physical Space shortcut on the **initial locked
-screen**. It invokes Android's existing `StatusBarKeyguardViewManager.showPrimaryBouncer(true)`
-from the native notification-shade window's key dispatcher. The Space DOWN and
-matching UP are consumed together, so neither reaches a selected notification
-or Quick Settings button. Once the native PIN/password/pattern screen is shown,
-Space goes to Android unchanged (including spaces in passwords).
+**LineageOS 24.0 integration:** `NotificationShadeWindowView` inherits
+`dispatchKeyEvent(KeyEvent)` from `WindowRootView`. This feature hooks the
+**declaring** `WindowRootView` method, before Android can forward the Space
+key to a focused notification or Quick Settings tile. The previous prototype
+hooked a non-declaring subclass, so it could miss the key entirely.
 
-This first stage deliberately **does not** change the lock-screen appearance,
-notification access, Quick Settings, credential verification or security policy.
-There is no synthetic swipe, independent password dialog, or unlock bypass.
-If the native manager, its bouncer methods, or the supported key-dispatch
-window are unavailable, original Android behavior remains.
+When the keyguard is locked and Android's primary PIN/password/pattern
+challenge is not showing, Space requests the existing
+`StatusBarKeyguardViewManager.showPrimaryBouncer(true, "BB UI: physical Space on lockscreen")`.
+This uses the actual LineageOS 24.0 two-argument method signature.
+The Space DOWN and matching UP are consumed together even if the bouncer
+changes focus mid-press. During transition, Space is blocked rather than
+activated. When the native credential screen is fully visible, Space passes
+through unchanged so passwords containing spaces continue to work.
 
-Build and install the same unified module already used by BB UI:
+If the native manager is unavailable, Space is **blocked while locked** rather
+than forwarded to a selected Quick Settings control. A focused text editor is
+exempt when native bouncer visibility cannot be queried, to preserve password
+typing. Swipe-up and native lock-screen authentication remain available.
+No custom credential verification, click injection or unlock bypass is added.
+
+Build and install the unified BB UI module:
 
 ```sh
 cd ~/Projects/bb-ui
 git fetch origin
 git switch feat/bb6-keyguard-keyboard-entry
 git pull --ff-only
-./gradlew :app:assembleDebug
+./gradlew :app:assembleDebug :app:testDebugUnitTest
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 adb shell am crash com.android.systemui
 ```
 
-The normal BB UI Vector SystemUI scope must remain enabled. With a secure
-screen lock configured, lock the device, focus a notification or QS item,
-then press Space. Verify that only Android's credential challenge appears and
-the focused item does not activate. Type a password containing a Space and
-verify the second Space is entered normally. Also verify swipe-up, Back,
-unlocking, and unlocked shade/Recents behavior are unchanged.
+The Vector SystemUI scope must remain enabled. Lock the Q25 and focus a QS
+tile or notification, then press Space. Verify the native authentication UI
+appears **without activating the focused item**. Test Space again inside a
+password, unlocked Quick Settings, lock-screen Back, and normal swipe-up.
+Run `adb logcat -d -s BB6-Keyguard:I '*:S'` if a case fails. The log should
+report `Installed pre-focus key dispatcher` on SystemUI startup,
+`Native keyguard manager captured`, and `Space consumed; native primary bouncer requested`
+on a successful invocation. A missing-manager warning or bouncer exception
+indicates a required integration point is unavailable on that build.
 
-Debug logs: `adb logcat -d -s BB6-Keyguard:I '*:S'`
-
-Disable only this stage without disabling other BB UI features:
+Disable this feature without changing other BB UI behavior:
 
 ```sh
 adb shell setprop debug.bb7keyguard.enabled false
 adb shell am crash com.android.systemui
 ```
 
-Re-enable: set the property to `true` and restart SystemUI. The flag
-defaults to enabled when no property is set. Actual LineageOS 24/Q25 device
-validation and build verification are pending; do not merge before testing.
+To re-enable, set the property to `true` and restart SystemUI. The feature
+defaults to enabled. **Do not merge until tested on the actual Q25.**
 
 ---
 
