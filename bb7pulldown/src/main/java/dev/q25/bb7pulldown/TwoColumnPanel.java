@@ -12,18 +12,22 @@ import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.text.TextUtils;
 import android.text.format.DateFormat;
+import android.text.format.DateUtils;
 import android.util.Log;
 import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
+import android.view.ViewGroup;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
+import android.widget.TextClock;
 
 import java.util.ArrayList;
+import java.util.Calendar;
 import java.util.Collections;
 import java.util.Date;
 import java.util.List;
@@ -96,11 +100,38 @@ final class TwoColumnPanel extends FrameLayout {
         setBackgroundColor(palette.canvas);
         setContentDescription("BB7 two-column pull-down");
 
+        // Fixed BBOS6-style current-date strip beneath the native status bar.
+        // TextClock updates automatically if the date or timezone changes.
+        LinearLayout content = new LinearLayout(context);
+        content.setOrientation(LinearLayout.VERTICAL);
+        addView(content, new FrameLayout.LayoutParams(
+                LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
+
+        TextClock currentDate = new TextClock(context);
+        currentDate.setFormat12Hour("EEE, MMM d, yyyy");
+        currentDate.setFormat24Hour("EEE, MMM d, yyyy");
+        currentDate.setTextColor(palette.headingText);
+        currentDate.setTextSize(14); // Match notification title size.
+        currentDate.setTypeface(null, android.graphics.Typeface.NORMAL);
+        currentDate.setGravity(Gravity.CENTER);
+        currentDate.setPadding(dp(8), 0, dp(8), 0);
+        // BBOS6-inspired beveled header: subtle vertical graphite/steel gradient.
+        boolean dark = palette == BB7Theme.Palette.DARK;
+        GradientDrawable dateBarBackground = new GradientDrawable(
+                GradientDrawable.Orientation.TOP_BOTTOM,
+                dark
+                        ? new int[] {0xff526477, 0xff3b4e60, 0xff263747}
+                        : new int[] {0xfff9fbfe, 0xffe5ecf4, 0xffc8d4e1});
+        currentDate.setBackground(dateBarBackground);
+        currentDate.setFocusable(false);
+        content.addView(currentDate, new LinearLayout.LayoutParams(
+                LayoutParams.MATCH_PARENT, dp(30)));
+
         LinearLayout columns = new LinearLayout(context);
         columns.setOrientation(LinearLayout.HORIZONTAL);
         columns.setWeightSum(PanelRatio.TOTAL_WEIGHT);
-        addView(columns, new FrameLayout.LayoutParams(
-                LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
+        content.addView(columns, new LinearLayout.LayoutParams(
+                LayoutParams.MATCH_PARENT, 0, 1f));
 
         FrameLayout left = new FrameLayout(context);
         left.setBackgroundColor(palette.left);
@@ -317,8 +348,16 @@ final class TwoColumnPanel extends FrameLayout {
             addPlaceholder("No notifications for this app");
         } else {
             boolean silentHeadingAdded = false;
+            Long previousDay = null;
             for (int i = 0; i < selected.size(); i++) {
                 NotificationItem item = selected.get(i);
+                long timestamp = item.postedAt > 0
+                        ? item.postedAt : System.currentTimeMillis();
+                long day = localDayKey(timestamp);
+                if (previousDay == null || previousDay.longValue() != day) {
+                    addDateHeader(timestamp);
+                    previousDay = day;
+                }
                 if (item.silent && !silentHeadingAdded) {
                     // A purely visual section heading; never a focus target.
                     TextView heading = text("Silent", 12, palette.muted);
@@ -355,6 +394,26 @@ final class TwoColumnPanel extends FrameLayout {
         Log.i(TAG, "Selected app notifications displayed: count=" + selected.size());
     }
 
+    /** BBOS6-style date strip above each run of notification entries. */
+    private void addDateHeader(long timestamp) {
+        String label = DateUtils.isToday(timestamp) ? "Today"
+                : DateFormat.getMediumDateFormat(getContext()).format(new Date(timestamp));
+        TextView heading = text(label, 11, palette.headingText);
+        heading.setTypeface(null, android.graphics.Typeface.BOLD);
+        heading.setGravity(Gravity.CENTER_VERTICAL);
+        heading.setFocusable(false);
+        heading.setPadding(dp(12), 0, dp(12), 0);
+        heading.setBackgroundColor(palette.heading);
+        notificationList.addView(heading, new LinearLayout.LayoutParams(
+                LayoutParams.MATCH_PARENT, dp(27)));
+    }
+
+    private static long localDayKey(long timestamp) {
+        Calendar calendar = Calendar.getInstance();
+        calendar.setTimeInMillis(timestamp);
+        return calendar.get(Calendar.YEAR) * 1000L + calendar.get(Calendar.DAY_OF_YEAR);
+    }
+
     private void addPlaceholder(String message) {
         TextView placeholder = text(message, 13, palette.muted);
         placeholder.setPadding(dp(8), dp(20), dp(8), dp(16));
@@ -389,13 +448,29 @@ final class TwoColumnPanel extends FrameLayout {
         background.setColor(palette.card);
         card.setBackground(background);
 
+        LinearLayout titleLine = new LinearLayout(getContext());
+        titleLine.setOrientation(LinearLayout.HORIZONTAL);
+        titleLine.setGravity(Gravity.TOP);
         TextView title = text(item.title.isEmpty() ? "Notification" : item.title,
                 14, palette.title);
         title.setTag(Integer.valueOf(palette.title));
         title.setTypeface(null, android.graphics.Typeface.BOLD);
         title.setMaxLines(2);
         title.setEllipsize(TextUtils.TruncateAt.END);
-        card.addView(title);
+        titleLine.addView(title, new LinearLayout.LayoutParams(
+                0, LayoutParams.WRAP_CONTENT, 1f));
+        if (item.postedAt > 0) {
+            TextView time = text(DateFormat.getTimeFormat(getContext())
+                    .format(new Date(item.postedAt)), 10, palette.muted);
+            time.setTag(Integer.valueOf(palette.muted));
+            time.setSingleLine(true);
+            time.setGravity(Gravity.END);
+            LinearLayout.LayoutParams timeParams = new LinearLayout.LayoutParams(
+                    LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT);
+            timeParams.leftMargin = dp(8);
+            titleLine.addView(time, timeParams);
+        }
+        card.addView(titleLine);
 
         if (!item.text.isEmpty()) {
             TextView body = text(item.text, 12, palette.body);
@@ -406,17 +481,6 @@ final class TwoColumnPanel extends FrameLayout {
                     LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT);
             bodyParams.topMargin = dp(5);
             card.addView(body, bodyParams);
-        }
-
-        if (item.postedAt > 0) {
-            TextView time = text(DateFormat.getTimeFormat(getContext())
-                    .format(new Date(item.postedAt)),
-                    10, palette.muted);
-            time.setTag(Integer.valueOf(palette.muted));
-            LinearLayout.LayoutParams timeParams = new LinearLayout.LayoutParams(
-                    LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT);
-            timeParams.topMargin = dp(6);
-            card.addView(time, timeParams);
         }
 
         for (NotificationItem.ActionItem action : item.actions) {
@@ -596,11 +660,7 @@ final class TwoColumnPanel extends FrameLayout {
             }
             card.setBackground(background);
             for (int child = 0; child < card.getChildCount(); child++) {
-                View content = card.getChildAt(child);
-                if (content instanceof TextView && content.getTag() instanceof Integer) {
-                    int regularColor = (Integer) content.getTag();
-                    ((TextView) content).setTextColor(selected ? Color.WHITE : regularColor);
-                }
+                updateTaggedTextColor(card.getChildAt(child), selected);
             }
         }
         for (TextView button : actionButtons) {
@@ -618,6 +678,19 @@ final class TwoColumnPanel extends FrameLayout {
             }
             button.setBackground(background);
             button.setTextColor(selected ? Color.WHITE : palette.actionText);
+        }
+    }
+
+    /** Preserve high-contrast text when the title and timestamp share a row. */
+    private static void updateTaggedTextColor(View view, boolean selected) {
+        if (view instanceof TextView && view.getTag() instanceof Integer) {
+            int regularColor = (Integer) view.getTag();
+            ((TextView) view).setTextColor(selected ? Color.WHITE : regularColor);
+        } else if (view instanceof ViewGroup) {
+            ViewGroup group = (ViewGroup) view;
+            for (int i = 0; i < group.getChildCount(); i++) {
+                updateTaggedTextColor(group.getChildAt(i), selected);
+            }
         }
     }
 
