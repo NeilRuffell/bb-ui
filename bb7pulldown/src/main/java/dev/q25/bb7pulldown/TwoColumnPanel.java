@@ -20,6 +20,7 @@ import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.ViewConfiguration;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
@@ -75,14 +76,12 @@ final class TwoColumnPanel extends FrameLayout {
     private boolean mediaControlsOpen;
     private int selectedMediaButton = NativeMediaSessions.PLAY_PAUSE;
     private final List<LinearLayout> notificationRows = new ArrayList<>();
-    // Focus sequence includes each notification, then its native actions,
-    // then its dismiss control, before the next notification.
+    // Focus sequence includes each notification followed by its native actions.
     private final List<View> notificationTargets = new ArrayList<>();
     private final List<String> notificationTargetKeys = new ArrayList<>();
     private final List<Integer> notificationTargetActions = new ArrayList<>();
     private final List<TextView> actionButtons = new ArrayList<>();
     private static final int FOCUS_CARD = -1;
-    private static final int FOCUS_DISMISS = -2;
     private String selectedNotificationKey;
     private int selectedActionIndex = FOCUS_CARD;
     private EditText activeReplyInput;
@@ -699,7 +698,8 @@ final class TwoColumnPanel extends FrameLayout {
     }
 
     private LinearLayout createNotificationCard(NotificationItem item) {
-        LinearLayout card = new LinearLayout(getContext());
+        LinearLayout card = new SwipeDismissCard(getContext(), item.clearable,
+                () -> onActions.onDismiss(item.key));
         card.setFocusable(true);
         card.setFocusableInTouchMode(true);
         card.setClickable(true);
@@ -765,16 +765,115 @@ final class TwoColumnPanel extends FrameLayout {
             addNotificationAction(card, item.key, action.index, action.title,
                     action.freeFormReply);
         }
-        if (item.clearable) {
-            addNotificationAction(card, item.key, FOCUS_DISMISS, "Dismiss", false);
-        }
-
         card.setContentDescription((item.title.isEmpty() ? "Notification" : item.title)
                 + (item.text.isEmpty() ? "" : ", " + item.text));
         LinearLayout.LayoutParams cardParams = new LinearLayout.LayoutParams(
                 LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT);
         card.setLayoutParams(cardParams);
         return card;
+    }
+
+    /**
+     * Horizontal card gestures dismiss through the existing native NLS callback.
+     * Vertical motion is left to ScrollView; taps and native action buttons
+     * retain their normal framework event dispatch.
+     */
+    private static final class SwipeDismissCard extends LinearLayout {
+        private final boolean clearable;
+        private final Runnable onDismiss;
+        private final int touchSlop;
+        private float downX;
+        private float downY;
+        private boolean swiping;
+
+        SwipeDismissCard(Context context, boolean clearable, Runnable onDismiss) {
+            super(context);
+            this.clearable = clearable;
+            this.onDismiss = onDismiss;
+            touchSlop = ViewConfiguration.get(context).getScaledTouchSlop();
+        }
+
+        @Override public boolean onInterceptTouchEvent(MotionEvent event) {
+            if (!clearable) return super.onInterceptTouchEvent(event);
+            switch (event.getActionMasked()) {
+                case MotionEvent.ACTION_DOWN:
+                    downX = event.getRawX();
+                    downY = event.getRawY();
+                    swiping = false;
+                    break;
+                case MotionEvent.ACTION_MOVE:
+                    if (!swiping && event.getPointerCount() == 1
+                            && NotificationSwipePolicy.isHorizontal(
+                                    event.getRawX() - downX, event.getRawY() - downY,
+                                    touchSlop)) {
+                        swiping = true;
+                        if (getParent() != null) getParent().requestDisallowInterceptTouchEvent(true);
+                        return true;
+                    }
+                    break;
+                default:
+                    break;
+            }
+            return super.onInterceptTouchEvent(event);
+        }
+
+        @Override public boolean onTouchEvent(MotionEvent event) {
+            if (!clearable) return super.onTouchEvent(event);
+            switch (event.getActionMasked()) {
+                case MotionEvent.ACTION_DOWN:
+                    downX = event.getRawX();
+                    downY = event.getRawY();
+                    swiping = false;
+                    return super.onTouchEvent(event);
+                case MotionEvent.ACTION_MOVE:
+                    if (event.getPointerCount() != 1) {
+                        if (swiping) resetSwipe();
+                        return true;
+                    }
+                    float dx = event.getRawX() - downX;
+                    if (!swiping) {
+                        if (!NotificationSwipePolicy.isHorizontal(
+                                dx, event.getRawY() - downY, touchSlop)) {
+                            return super.onTouchEvent(event);
+                        }
+                        swiping = true;
+                        if (getParent() != null) getParent().requestDisallowInterceptTouchEvent(true);
+                    }
+                    setTranslationX(dx);
+                    setAlpha(1f - Math.min(0.5f, Math.abs(dx) / Math.max(1, getWidth())));
+                    return true;
+                case MotionEvent.ACTION_UP:
+                    if (!swiping) return super.onTouchEvent(event);
+                    float distance = event.getRawX() - downX;
+                    swiping = false;
+                    if (NotificationSwipePolicy.shouldDismiss(distance, getWidth(), touchSlop)) {
+                        animate().translationX(Math.signum(distance) * getWidth())
+                                .alpha(0f).setDuration(150).withEndAction(() -> {
+                                    onDismiss.run();
+                                    // If Android retains this view (failed dismissal),
+                                    // return it to its original position.
+                                    postDelayed(() -> {
+                                        if (getParent() != null) resetSwipe();
+                                    }, 350);
+                                }).start();
+                    } else {
+                        resetSwipe();
+                    }
+                    return true;
+                case MotionEvent.ACTION_CANCEL:
+                case MotionEvent.ACTION_POINTER_DOWN:
+                    if (!swiping) return super.onTouchEvent(event);
+                    resetSwipe();
+                    return true;
+                default:
+                    return super.onTouchEvent(event);
+            }
+        }
+
+        private void resetSwipe() {
+            swiping = false;
+            animate().translationX(0f).alpha(1f).setDuration(130).start();
+        }
     }
 
     /** Compact OS 7-style action rows: no secondary menu or long-press. */
@@ -810,9 +909,7 @@ final class TwoColumnPanel extends FrameLayout {
             notificationPaneActive = true;
             selectNotification(key, actionIndex);
             view.requestFocus();
-            if (actionIndex == FOCUS_DISMISS) {
-                onActions.onDismiss(key);
-            } else if (reply) {
+            if (reply) {
                 openInlineReply(card, button, key, actionIndex);
             } else {
                 onActions.onAction(key, actionIndex);
