@@ -405,10 +405,6 @@ public final class PullDownHook implements IXposedHookLoadPackage {
     }
 
     /** Page changes keep the same WindowManager window and translation. */
-    private static void switchQuickConnectionsToNotifications() {
-        switchShadePage(UnifiedShadeHost.NOTIFICATIONS);
-    }
-
     private static void switchShadePage(int next) {
         UnifiedShadeHost root = shadeHost;
         if (root == null || openingOrClosing) return;
@@ -448,11 +444,11 @@ public final class PullDownHook implements IXposedHookLoadPackage {
         if (root == null || !quickShown) return;
         Context context = root.getContext();
         if (locked(context)) {
-            dismissQuickConnectionsImmediately();
+            dismissShadeImmediately();
             return;
         }
         // Remove our overlay before native SystemUI displays its Internet/BT UI.
-        dismissQuickConnectionsImmediately();
+        dismissShadeImmediately();
         if (!NativeQuickSettingsTiles.activate(kind)
                 && !NativeConnectionControls.openNativeSettings(context, kind)) {
             // Final compatibility path: never strand the user without working QS.
@@ -501,14 +497,6 @@ public final class PullDownHook implements IXposedHookLoadPackage {
             try { context.unregisterReceiver(receiver); }
             catch (IllegalArgumentException ignored) { }
         }
-    }
-
-    private static void dismissQuickConnections() {
-        dismissShade();
-    }
-
-    private static void dismissQuickConnectionsImmediately() {
-        dismissShadeImmediately();
     }
 
     /** Native status bar stays untouched outside the requested UI states. */
@@ -687,6 +675,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
             return;
         }
 
+        try {
         SystemUiNotificationObserver.refreshBeforeOpen();
         activeFavorites = FavoritesClient.read(context);
         FavoritesClient.reportObserved(context, activeFavorites,
@@ -719,7 +708,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
         BB6ConnectionsPanel connections = new BB6ConnectionsPanel(context,
                 new BB6ConnectionsPanel.Listener() {
                     @Override public void onClose() {
-                        dismissQuickConnections();
+                        dismissShade();
                     }
                     @Override public void onActivate(int kind) {
                         activateQuickConnection(kind);
@@ -728,7 +717,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
                         updateStatusFocus(zone);
                     }
                     @Override public void onShowNotifications() {
-                        switchQuickConnectionsToNotifications();
+                        switchShadePage(UnifiedShadeHost.NOTIFICATIONS);
                     }
                 });
         notifications.setFavorites(activeFavorites);
@@ -792,6 +781,10 @@ public final class PullDownHook implements IXposedHookLoadPackage {
             } else {
                 openingOrClosing = false;
             }
+        }
+        } catch (Throwable initializationError) {
+            openingOrClosing = false;
+            Log.e(TAG, "Unable to initialize unified shade pages", initializationError);
         }
     }
 
