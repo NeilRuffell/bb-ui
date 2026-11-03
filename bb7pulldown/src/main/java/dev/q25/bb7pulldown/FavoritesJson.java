@@ -40,7 +40,7 @@ final class FavoritesJson {
                 }
                 favorites.apps.add(app);
             }
-        } catch (JSONException | RuntimeException ignored) {
+        } catch (Exception ignored) {
             return new FavoritesRules();
         }
         return favorites;
