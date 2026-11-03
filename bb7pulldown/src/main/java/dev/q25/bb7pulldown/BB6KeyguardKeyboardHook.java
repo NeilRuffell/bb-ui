@@ -108,10 +108,11 @@ public final class BB6KeyguardKeyboardHook implements IXposedHookLoadPackage {
         if (decision == KeyguardSpacePolicy.PASS) return false;
         if (decision == KeyguardSpacePolicy.CONSUME) return true;
 
-        // Request on DOWN, not UP: the requested bouncer can transfer focus and
-        // input ownership before the physical key is released.
+        // LineageOS handles confirm-key actions on UP. Invoke native entry
+        // only after the physical key is released so that its release cannot
+        // become typed text in the newly focused password editor.
         String focusName = focused == null ? "none" : focused.getClass().getSimpleName();
-        Log.i(TAG, "Space DOWN: locked=" + locked + " focus=" + focusName
+        Log.i(TAG, "Space UP: locked=" + locked + " focus=" + focusName
                 + " manager=" + (targets.manager != null)
                 + " keyguardInteractor=" + (targets.keyguardInteractor != null));
         requestDeviceEntry(window, targets, keyguard);
