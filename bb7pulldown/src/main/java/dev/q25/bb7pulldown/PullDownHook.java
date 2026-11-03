@@ -664,28 +664,39 @@ public final class PullDownHook implements IXposedHookLoadPackage {
     }
 
     private static void showPanel(Context context) {
+        if (shadeHost != null) {
+            switchShadePage(UnifiedShadeHost.NOTIFICATIONS);
+        } else {
+            showShade(context, UnifiedShadeHost.NOTIFICATIONS);
+        }
+    }
+
+    /**
+     * One window per shade session. Both pages remain attached until the shade
+     * really closes; internal page changes only toggle view visibility.
+     */
+    private static void showShade(Context context, int initialPage) {
         if (focusWindow != null) dismissStatusFocus();
-        if (shown || openingOrClosing || quickShown
-                || !enabled() || locked(context)) return;
+        if (shadeHost != null || openingOrClosing || !enabled() || locked(context)) return;
         openingOrClosing = true;
         WindowManager manager = (WindowManager)
                 context.getSystemService(Context.WINDOW_SERVICE);
         if (manager == null) {
             openingOrClosing = false;
-            Log.w(TAG, "WindowManager unavailable");
+            Log.w(TAG, "Shade WindowManager unavailable");
             return;
         }
-        // Query the live, system-owned notification listener before drawing.
-        // The gesture and 15/85 geometry are unchanged.
+
         SystemUiNotificationObserver.refreshBeforeOpen();
         activeFavorites = FavoritesClient.read(context);
         FavoritesClient.reportObserved(context, activeFavorites,
                 SystemUiNotificationObserver.itemsSnapshot());
+
         NativeMediaSessions nativeMedia = new NativeMediaSessions(context, entries -> {
-            TwoColumnPanel visiblePanel = panel;
-            if (visiblePanel != null && shown) visiblePanel.setMediaSessions(entries);
+            TwoColumnPanel current = panel;
+            if (shadeHost != null && current != null) current.setMediaSessions(entries);
         });
-        TwoColumnPanel root = new TwoColumnPanel(
+        TwoColumnPanel notifications = new TwoColumnPanel(
                 context, PullDownHook::dismissPanel, PullDownHook::openNotification,
                 new TwoColumnPanel.NotificationActionListener() {
                     @Override public void onAction(String key, int index) {
@@ -705,8 +716,26 @@ public final class PullDownHook implements IXposedHookLoadPackage {
                         showSystemControls(context);
                     }
                 }, nativeMedia::send);
-        root.setFavorites(activeFavorites);
-        root.setNotifications(SystemUiNotificationObserver.itemsSnapshot());
+        BB6ConnectionsPanel connections = new BB6ConnectionsPanel(context,
+                new BB6ConnectionsPanel.Listener() {
+                    @Override public void onClose() {
+                        dismissQuickConnections();
+                    }
+                    @Override public void onActivate(int kind) {
+                        activateQuickConnection(kind);
+                    }
+                    @Override public void onStatusZoneFocus(int zone) {
+                        updateStatusFocus(zone);
+                    }
+                    @Override public void onShowNotifications() {
+                        switchQuickConnectionsToNotifications();
+                    }
+                });
+        notifications.setFavorites(activeFavorites);
+        notifications.setNotifications(SystemUiNotificationObserver.itemsSnapshot());
+
+        UnifiedShadeHost root = new UnifiedShadeHost(
+                context, notifications, connections, initialPage);
         WindowManager.LayoutParams params = new WindowManager.LayoutParams(
                 WindowManager.LayoutParams.MATCH_PARENT,
                 Math.max(1, context.getResources().getDisplayMetrics().heightPixels
@@ -714,7 +743,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
                 STATUS_BAR_SUB_PANEL_WINDOW_TYPE,
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
                 PixelFormat.OPAQUE);
-        params.setTitle("BB7 Pull-down");
+        params.setTitle("BB UI Unified Shade");
         params.gravity = Gravity.TOP | Gravity.START;
         params.y = nativeStatusBarHeight(context);
         params.setFitInsetsTypes(0);
@@ -722,64 +751,64 @@ public final class PullDownHook implements IXposedHookLoadPackage {
                 WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS;
         int height = params.height;
         root.setTranslationY(-height);
+        boolean attached = false;
         try {
             manager.addView(root, params);
-            // Match CentralSurfacesImpl: observe Android's own system-dialog
-            // close broadcast for Home, as well as screen-off for privacy.
-            try {
-                registerScreenOffReceiver(context);
-            } catch (Throwable registrationError) {
-                manager.removeViewImmediate(root);
-                throw registrationError;
-            }
-            panel = root;
+            attached = true;
+            shadeHost = root;
             windowManager = manager;
-            shown = true;
+            panel = notifications;
+            quickPanel = connections;
+            shown = initialPage == UnifiedShadeHost.NOTIFICATIONS;
+            quickShown = initialPage == UnifiedShadeHost.QUICK_SETTINGS;
+            registerScreenOffReceiver(context);
+            registerQuickConnectionStateReceiver(context);
             mediaSessions = nativeMedia;
             nativeMedia.start();
-            registerFavoritesObserver(context, root);
+            registerFavoritesObserver(context, notifications);
             updateStatusAppearance();
-            Log.i(TAG, "Two-column window attached; fullWidth=true left=15 right=85"
+
+            Log.i(TAG, "Unified shade window attached: initialPage=" + initialPage
                     + " heightPx=" + height);
             root.post(() -> {
+                if (shadeHost != root) return;
                 root.animate().translationY(0f).setDuration(220).withEndAction(() -> {
-                    openingOrClosing = false;
-                    root.focusSelectedAppIcon();
+                    if (shadeHost == root) {
+                        openingOrClosing = false;
+                        root.focusContent();
+                    }
                 }).start();
             });
         } catch (Throwable error) {
-            openingOrClosing = false;
-            shown = false;
-            panel = null;
-            windowManager = null;
-            Log.e(TAG, "Unable to display full-width pull-down; stock system unaffected", error);
+            Log.e(TAG, "Unable to attach unified shade; rolling back", error);
+            if (shadeHost == root) {
+                dismissShadeImmediately();
+            } else if (attached) {
+                try { manager.removeViewImmediate(root); }
+                catch (Throwable rollbackError) {
+                    Log.w(TAG, "Unable to remove failed unified shade window", rollbackError);
+                }
+                openingOrClosing = false;
+            } else {
+                openingOrClosing = false;
+            }
         }
     }
 
     private static void dismissPanel() {
-        if (!shown || openingOrClosing || panel == null) return;
+        dismissShade();
+    }
+
+    private static void dismissShade() {
+        UnifiedShadeHost root = shadeHost;
+        if (root == null || openingOrClosing) return;
         openingOrClosing = true;
-        TwoColumnPanel root = panel;
         int height = root.getHeight();
         if (height <= 0) height = root.getResources().getDisplayMetrics().heightPixels;
-        root.clearStatusZoneFocus();
+        root.clearStatusBarFocus();
         root.animate().translationY(-height).setDuration(180)
                 .withEndAction(() -> {
-                    try {
-                        if (windowManager != null) windowManager.removeViewImmediate(root);
-                    } catch (Throwable e) {
-                        Log.w(TAG, "Unable to remove pull-down cleanly", e);
-                    } finally {
-                        stopFavoritesObserver();
-                        stopMediaSessions();
-                        unregisterScreenOffReceiver();
-                        panel = null;
-                        windowManager = null;
-                        shown = false;
-                        openingOrClosing = false;
-                        updateStatusAppearance();
-                        Log.i(TAG, "Two-column pull-down dismissed");
-                    }
+                    if (shadeHost == root) dismissShadeImmediately();
                 }).start();
     }
 
@@ -790,12 +819,10 @@ public final class PullDownHook implements IXposedHookLoadPackage {
                 String action = intent.getAction();
                 if (Intent.ACTION_CLOSE_SYSTEM_DIALOGS.equals(action)) {
                     Log.i(TAG, "Native close-system-dialogs event received");
-                    dismissPanelImmediately();
-                    dismissQuickConnectionsImmediately();
+                    dismissShadeImmediately();
                 } else if (Intent.ACTION_SCREEN_OFF.equals(action)) {
                     Log.i(TAG, "Native screen-off event received");
-                    dismissPanelImmediately();
-                    dismissQuickConnectionsImmediately();
+                    dismissShadeImmediately();
                 }
             }
         };
@@ -832,24 +859,33 @@ public final class PullDownHook implements IXposedHookLoadPackage {
     }
 
     private static void dismissPanelImmediately() {
-        TwoColumnPanel current = panel;
+        dismissShadeImmediately();
+    }
+
+    /** One cleanup path for QS, notifications, Home, and screen-off. */
+    private static void dismissShadeImmediately() {
+        UnifiedShadeHost current = shadeHost;
         if (current == null) return;
+        shadeHost = null;
+        shown = false;
+        quickShown = false;
         try {
-            current.clearStatusZoneFocus();
+            current.clearStatusBarFocus();
             current.animate().cancel();
             if (windowManager != null) windowManager.removeViewImmediate(current);
         } catch (Throwable error) {
-            Log.w(TAG, "Unable to immediately hide notification panel", error);
+            Log.w(TAG, "Unable to remove unified shade window", error);
         } finally {
             stopFavoritesObserver();
+            stopQuickConnectionStateReceiver();
             stopMediaSessions();
             unregisterScreenOffReceiver();
             panel = null;
+            quickPanel = null;
             windowManager = null;
-            shown = false;
             openingOrClosing = false;
             updateStatusAppearance();
-            Log.i(TAG, "Two-column pull-down immediately hidden");
+            Log.i(TAG, "Unified shade window removed");
         }
     }
 
