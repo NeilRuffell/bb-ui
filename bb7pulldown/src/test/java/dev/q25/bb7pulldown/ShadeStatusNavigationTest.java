@@ -11,8 +11,8 @@ public class ShadeStatusNavigationTest {
     private static final class Callbacks implements ShadeStatusNavigation.Listener {
         int focused = ShadeStatusNavigation.NONE;
         int changes;
-        int toContent;
-        int toContentBack;
+        int downs;
+        int backs;
         int notifications;
         int quick;
 
@@ -20,10 +20,8 @@ public class ShadeStatusNavigationTest {
             focused = zone;
             changes++;
         }
-        @Override public void onReturnToContent(boolean viaBack) {
-            toContent++;
-            if (viaBack) toContentBack++;
-        }
+        @Override public void onDown() { downs++; }
+        @Override public void onBack() { backs++; }
         @Override public void onNotificationsSelected() { notifications++; }
         @Override public void onQuickSettingsSelected() { quick++; }
     }
@@ -63,18 +61,18 @@ public class ShadeStatusNavigationTest {
         assertFalse(nav.isFocused());
     }
 
-    @Test public void downAndBackReturnToContentButDifferInReason() {
+    @Test public void downAndBackAreDistinctActions() {
         Callbacks callbacks = new Callbacks();
         ShadeStatusNavigation nav = new ShadeStatusNavigation(callbacks);
         nav.enter(ShadeStatusNavigation.QUICK_SETTINGS);
         nav.handleKey(KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.ACTION_UP);
-        assertEquals(1, callbacks.toContent);
-        assertEquals(0, callbacks.toContentBack);
+        assertEquals(1, callbacks.downs);
+        assertEquals(0, callbacks.backs);
         assertEquals(ShadeStatusNavigation.NONE, callbacks.focused);
         nav.enter(ShadeStatusNavigation.QUICK_SETTINGS);
         nav.handleKey(KeyEvent.KEYCODE_BACK, KeyEvent.ACTION_UP);
-        assertEquals(2, callbacks.toContent);
-        assertEquals(1, callbacks.toContentBack);
+        assertEquals(1, callbacks.downs);
+        assertEquals(1, callbacks.backs);
     }
 
     @Test public void upIsBoundedOnStatusBarAndRepeatedDirectionsDoNotSpam() {
