@@ -29,9 +29,9 @@ final class KeyguardSpacePolicy {
 
         if (!locked || primaryBouncerShowing) return PASS;
 
-        // If we cannot query bouncer state, never swallow keys typed into a
-        // known text editor. The stock authentication UI stays usable.
-        if (!managerReady && textEditorFocused) return PASS;
+        // A focused text editor owns Space, including passwords. A QS tile
+        // or notification action is not a text editor.
+        if (textEditorFocused) return PASS;
 
         // All other Space keys on the initial lockscreen are blocked from
         // reaching focusable notifications, QS tiles, or their click handlers.
