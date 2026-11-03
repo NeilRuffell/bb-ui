@@ -1,3 +1,54 @@
+# BBOS6 keyguard keyboard entry (stage 1)
+
+Branch: `feat/bb6-keyguard-keyboard-entry`, based on `master`.
+
+This adds a SystemUI-only physical Space shortcut on the **initial locked
+screen**. It invokes Android's existing `StatusBarKeyguardViewManager.showPrimaryBouncer(true)`
+from the native notification-shade window's key dispatcher. The Space DOWN and
+matching UP are consumed together, so neither reaches a selected notification
+or Quick Settings button. Once the native PIN/password/pattern screen is shown,
+Space goes to Android unchanged (including spaces in passwords).
+
+This first stage deliberately **does not** change the lock-screen appearance,
+notification access, Quick Settings, credential verification or security policy.
+There is no synthetic swipe, independent password dialog, or unlock bypass.
+If the native manager, its bouncer methods, or the supported key-dispatch
+window are unavailable, original Android behavior remains.
+
+Build and install the same unified module already used by BB UI:
+
+```sh
+cd ~/Projects/bb-ui
+git fetch origin
+git switch feat/bb6-keyguard-keyboard-entry
+git pull --ff-only
+./gradlew :app:assembleDebug
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+adb shell am crash com.android.systemui
+```
+
+The normal BB UI Vector SystemUI scope must remain enabled. With a secure
+screen lock configured, lock the device, focus a notification or QS item,
+then press Space. Verify that only Android's credential challenge appears and
+the focused item does not activate. Type a password containing a Space and
+verify the second Space is entered normally. Also verify swipe-up, Back,
+unlocking, and unlocked shade/Recents behavior are unchanged.
+
+Debug logs: `adb logcat -d -s BB6-Keyguard:I '*:S'`
+
+Disable only this stage without disabling other BB UI features:
+
+```sh
+adb shell setprop debug.bb7keyguard.enabled false
+adb shell am crash com.android.systemui
+```
+
+Re-enable: set the property to `true` and restart SystemUI. The flag
+defaults to enabled when no property is set. Actual LineageOS 24/Q25 device
+validation and build verification are pending; do not merge before testing.
+
+---
+
 ## BB7 shade follows Android Light/Dark appearance
 
 The BB7 two-column notification panel now resolves Android's standard
