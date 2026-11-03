@@ -4,6 +4,7 @@ import android.app.Notification;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.RemoteInput;
+import android.media.session.MediaSession;
 import android.os.Bundle;
 import android.service.notification.NotificationListenerService;
 import android.service.notification.StatusBarNotification;
@@ -13,6 +14,7 @@ import java.lang.ref.WeakReference;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 
@@ -163,6 +165,28 @@ final class SystemUiNotificationObserver {
                 refreshErrorLogged = true;
                 Log.w(TAG, "Cannot read active notifications from SystemUI", error);
             }
+        }
+    }
+
+    /**
+     * Tokens advertised by real native media notifications. Reuse Android's
+     * EXTRA_MEDIA_SESSION rather than interpreting action titles or icons.
+     */
+    static List<MediaSession.Token> mediaSessionTokensSnapshot() {
+        synchronized (LOCK) {
+            LinkedHashSet<MediaSession.Token> tokens = new LinkedHashSet<>();
+            for (StatusBarNotification sbn : ACTIVE_SBNS.values()) {
+                Notification notification = sbn.getNotification();
+                if (notification == null || notification.extras == null) continue;
+                try {
+                    MediaSession.Token token = notification.extras.getParcelable(
+                            Notification.EXTRA_MEDIA_SESSION, MediaSession.Token.class);
+                    if (token != null) tokens.add(token);
+                } catch (RuntimeException error) {
+                    Log.w(TAG, "Unable to extract native media notification token", error);
+                }
+            }
+            return Collections.unmodifiableList(new ArrayList<>(tokens));
         }
     }
 
