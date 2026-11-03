@@ -259,6 +259,22 @@ public final class BB6KeyguardKeyboardHook implements IXposedHookLoadPackage {
                 break;
             }
         }
+        // Source of SceneContainerFlag.isEnabled is
+        // Flags.sceneContainer() && SceneContainerFlag.isEnabledOnVariant.
+        // Read that directly when a vendor build changes the Kotlin getter.
+        try {
+            Class<?> flags = XposedHelpers.findClass(
+                    "com.android.systemui.Flags", systemUiLoader);
+            Object configured = XposedHelpers.callStaticMethod(
+                    flags, "sceneContainer");
+            boolean variant = XposedHelpers.getStaticBooleanField(
+                    scene, "isEnabledOnVariant");
+            if (configured instanceof Boolean) {
+                return ((Boolean) configured) && variant;
+            }
+        } catch (Throwable error) {
+            Log.w(TAG, "Scene framework mode could not be determined", error);
+        }
         return null;
     }
 
