@@ -16,55 +16,59 @@ import de.robv.android.xposed.XposedHelpers;
 import de.robv.android.xposed.callbacks.XC_LoadPackage;
 
 /**
- * Locked Space = reveal Android's native credential entry.
+ * Hardware Space on lockscreen: invoke Android's normal credential-entry UI.
  *
- * The LineageOS WindowRootView normally dispatches to its children BEFORE
- * WindowRootViewKeyEventHandler, so a focused QS tile can consume Space first.
- * Our hook calls that SAME native handler before any children see the key.
+ * In LineageOS 24, WindowRootView.dispatchKeyEvent calls
+ * super.dispatchKeyEvent first, allowing focused notifications/QS to consume
+ * Space before the normal KeyguardKeyEventInteractor sees it. Intercept at
+ * the declaring WindowRootView before its children instead.
  *
- * This is deliberately not a click, swipe, second overlay, or custom unlock.
+ * Scene mode uses DeviceEntryInteractor.attemptDeviceEntry, the same native
+ * method used by keyguard. Legacy mode uses StatusBarKeyguardViewManager.
+ * Credentials are never collected or verified by this module.
  */
 public final class BB6KeyguardKeyboardHook implements IXposedHookLoadPackage {
     private static final String TAG = "BB6-Keyguard";
     private static final String SYSTEM_UI = "com.android.systemui";
-    private static final String MANAGER_CLASS =
-            "com.android.systemui.statusbar.phone.StatusBarKeyguardViewManager";
-    private static final String ROOT_CLASS =
+    private static final String WINDOW_ROOT =
             "com.android.systemui.scene.ui.view.WindowRootView";
+    private static final String NATIVE_MANAGER =
+            "com.android.systemui.statusbar.phone.StatusBarKeyguardViewManager";
+    private static final String SCENE_FLAG =
+            "com.android.systemui.scene.shared.flag.SceneContainerFlag";
     private static final String ENABLE_PROP = "debug.bb7keyguard.enabled";
-    // LineageOS StatusBarState.SHADE_LOCKED.
     private static final int SHADE_LOCKED = 2;
 
-    private static final KeyguardSpacePolicy SPACE = new KeyguardSpacePolicy();
-    private static WeakReference<Object> keyguardManager = new WeakReference<>(null);
+    private static final KeyguardSpacePolicy SPACE_POLICY = new KeyguardSpacePolicy();
+    private static WeakReference<Object> nativeManager = new WeakReference<>(null);
+    private static ClassLoader systemUiLoader;
 
     @Override
     public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lp) {
         if (!SYSTEM_UI.equals(lp.packageName) || !SYSTEM_UI.equals(lp.processName)) return;
         if (!enabled()) {
-            Log.i(TAG, "Disabled by " + ENABLE_PROP);
+            Log.i(TAG, "Feature disabled by " + ENABLE_PROP);
             return;
         }
+        systemUiLoader = lp.classLoader;
 
-        Class<?> manager = XposedHelpers.findClassIfExists(MANAGER_CLASS, lp.classLoader);
+        Class<?> manager = XposedHelpers.findClassIfExists(NATIVE_MANAGER, lp.classLoader);
         if (manager != null) {
             try {
                 XposedBridge.hookAllConstructors(manager, new XC_MethodHook() {
                     @Override protected void afterHookedMethod(MethodHookParam param) {
-                        keyguardManager = new WeakReference<>(param.thisObject);
+                        nativeManager = new WeakReference<>(param.thisObject);
                         Log.i(TAG, "Native keyguard manager captured");
                     }
                 });
             } catch (Throwable error) {
-                Log.e(TAG, "Native keyguard manager hook failed", error);
+                Log.e(TAG, "Could not register manager constructor hook", error);
             }
-        } else {
-            Log.w(TAG, "Native keyguard manager class absent");
         }
 
-        Class<?> root = XposedHelpers.findClassIfExists(ROOT_CLASS, lp.classLoader);
+        Class<?> root = XposedHelpers.findClassIfExists(WINDOW_ROOT, lp.classLoader);
         if (root == null) {
-            Log.e(TAG, "Native SystemUI key dispatch root absent; stock dispatch retained");
+            Log.e(TAG, "SystemUI window root absent, cannot intercept Space");
             return;
         }
         try {
@@ -72,199 +76,232 @@ public final class BB6KeyguardKeyboardHook implements IXposedHookLoadPackage {
                     new XC_MethodHook() {
                 @Override protected void beforeHookedMethod(MethodHookParam param) {
                     if (!(param.thisObject instanceof View)
-                            || param.args.length != 1
                             || !(param.args[0] instanceof KeyEvent)) return;
-                    if (handleSpace((View) param.thisObject, (KeyEvent) param.args[0])) {
+                    if (interceptSpace((View) param.thisObject, (KeyEvent) param.args[0])) {
                         param.setResult(true);
                     }
                 }
             });
-            Log.i(TAG, "Pre-focus Space routing installed on " + ROOT_CLASS);
+            Log.i(TAG, "Native-first locked Space interception installed");
         } catch (Throwable error) {
-            Log.e(TAG, "Failed to install SystemUI root key hook", error);
+            Log.e(TAG, "Could not hook WindowRootView.dispatchKeyEvent", error);
         }
     }
 
-    private static boolean handleSpace(View root, KeyEvent event) {
-        if (!enabled() || event.getKeyCode() != KeyEvent.KEYCODE_SPACE) return false;
+    private static boolean interceptSpace(View window, KeyEvent event) {
+        if (event.getKeyCode() != KeyEvent.KEYCODE_SPACE || !enabled()) return false;
 
-        KeyguardManager guard = (KeyguardManager)
-                root.getContext().getSystemService(Context.KEYGUARD_SERVICE);
-        if (guard == null) {
-            Log.e(TAG, "Keyguard state service unavailable");
+        KeyguardManager keyguard = (KeyguardManager)
+                window.getContext().getSystemService(Context.KEYGUARD_SERVICE);
+        if (keyguard == null) {
+            Log.e(TAG, "Keyguard service unavailable; stock handling retained");
             return false;
         }
+        boolean locked = keyguard.isKeyguardLocked();
+        View focused = window.findFocus();
+        boolean editing = focused != null && focused.onCheckIsTextEditor();
+        NativeTargets targets = getNativeTargets(window);
+        boolean visible = locked && isBouncerShowing(targets.manager);
+        int decision = SPACE_POLICY.route(event.getAction(), event.getDownTime(),
+                event.getRepeatCount(), locked, visible, editing);
 
-        final boolean showing = guard.isKeyguardLocked();
-        final Object manager = keyguardManager.get();
-        final View focused = root.findFocus();
-        final boolean editing = focused != null && focused.onCheckIsTextEditor();
-        final boolean bouncerShowing = showing && isBouncerVisible(manager);
-
-        final int decision = SPACE.route(event.getAction(), event.getDownTime(),
-                showing, bouncerShowing, editing);
         if (decision == KeyguardSpacePolicy.PASS) return false;
         if (decision == KeyguardSpacePolicy.CONSUME) return true;
 
-        // Space UP: invoke Android's own keyguard-confirm handling, which normally
-        // runs *after* all focusable children in WindowRootView.dispatchKeyEvent.
-        // We provide the real, unchanged KeyEvent; no synthetic input is created.
-        int state = readStatusBarState(manager);
-        boolean afterCollapse = state == SHADE_LOCKED && schedulePostCollapse(manager, root);
-
-        boolean nativeHandled = dispatchToNativeKeyguard(root, event);
-        Log.i(TAG, "Space routed to native keyguard; state=" + state
-                + ", accepted=" + nativeHandled + ", postCollapse=" + afterCollapse);
-
-        if (state == SHADE_LOCKED && afterCollapse) {
-            // Normal native handling collapses the shade. If it declined,
-            // initiate the same stock collapse so the queued bouncer can run.
-            if (!nativeHandled) {
-                forceNativeShadeCollapse(manager);
-            }
-            return true;
-        }
-        if (!nativeHandled || state == SHADE_LOCKED) {
-            // Native keyguard did not handle this event, or collapse could
-            // not be paired with a post-collapse action. Do not allow UP to
-            // reach focused notifications or QS.
-            requestNativeBouncer(manager, "BB UI: physical Space");
-        }
+        // Request on DOWN, not UP: the requested bouncer can transfer focus and
+        // input ownership before the physical key is released.
+        String focusName = focused == null ? "none" : focused.getClass().getSimpleName();
+        Log.i(TAG, "Space DOWN: locked=" + locked + " focus=" + focusName
+                + " manager=" + (targets.manager != null)
+                + " keyguardInteractor=" + (targets.keyguardInteractor != null));
+        requestDeviceEntry(window, targets, keyguard);
         return true;
     }
 
-    private static boolean dispatchToNativeKeyguard(View root, KeyEvent event) {
-        try {
-            Object handler = XposedHelpers.getObjectField(root, "windowRootViewKeyEventHandler");
-            if (handler == null) {
-                Log.w(TAG, "Native WindowRootView key handler not initialized");
-                return false;
-            }
-            Object result = XposedHelpers.callMethod(handler, "dispatchKeyEvent", event);
-            return Boolean.TRUE.equals(result);
-        } catch (Throwable error) {
-            Log.e(TAG, "Could not route Space through native keyguard handler", error);
-            return false;
-        }
+    private static final class NativeTargets {
+        Object manager;
+        Object keyguardInteractor;
     }
 
-    private static int readStatusBarState(Object manager) {
-        try {
-            if (manager == null) return -1;
-            Object controller = XposedHelpers.getObjectField(
-                    manager, "mStatusBarStateController");
-            Object value = XposedHelpers.callMethod(controller, "getState");
-            return value instanceof Integer ? (Integer) value : -1;
-        } catch (Throwable error) {
-            Log.w(TAG, "Unable to read lockscreen shade state", error);
-            return -1;
-        }
-    }
-
-    /** Android's locked shade consumes confirm keys by collapsing its shade.
-     * Queue credential entry AFTER that collapse, so one Space press is enough.
+    /** Recover native objects from the same dependency graph as SystemUI's
+     * keyboard dispatcher; the constructor capture is a fallback.
      */
-    private static boolean schedulePostCollapse(Object manager, View root) {
+    private static NativeTargets getNativeTargets(View root) {
+        NativeTargets targets = new NativeTargets();
+        targets.manager = nativeManager.get();
         try {
-            if (manager == null) return false;
-            Object lazy = XposedHelpers.getObjectField(manager, "mShadeController");
-            Object shadeController = XposedHelpers.callMethod(lazy, "get");
-            Runnable showAfterCollapse = () -> {
-                KeyguardManager guard = (KeyguardManager) root.getContext()
-                        .getSystemService(Context.KEYGUARD_SERVICE);
-                if (guard == null || !guard.isKeyguardLocked()) return;
-                if (isBouncerVisible(manager)) return;
-                requestNativeBouncer(manager, "BB UI: locked shade collapsed");
-            };
-            XposedHelpers.callMethod(shadeController, "addPostCollapseAction",
-                    showAfterCollapse);
-            return true;
-        } catch (Throwable error) {
-            Log.e(TAG, "Unable to queue native bouncer after shade collapse", error);
-            return false;
-        }
-    }
-
-    private static void forceNativeShadeCollapse(Object manager) {
-        try {
-            if (manager == null) return;
-            Object lazy = XposedHelpers.getObjectField(manager, "mShadeController");
-            Object controller = XposedHelpers.callMethod(lazy, "get");
-            XposedHelpers.callMethod(controller, "animateCollapseShadeForced");
-        } catch (Throwable error) {
-            Log.e(TAG, "Native locked-shade collapse failed", error);
-            requestNativeBouncer(manager, "BB UI: locked shade fallback");
-        }
-    }
-
-    private static boolean isBouncerVisible(Object manager) {
-        if (manager == null) return false;
-        for (String name : new String[] {
-                "isBouncerShowing", "primaryBouncerIsOrWillBeShowing",
-                "primaryBouncerIsShowing"
-        }) {
-            Boolean value = queryBoolean(manager, name);
-            if (value != null) return value;
-        }
-        // Vendor framework may omit manager convenience methods.
-        try {
-            Object interactor = XposedHelpers.getObjectField(
-                    manager, "mPrimaryBouncerInteractor");
-            for (String name : new String[] {
-                    "isBouncerShowing", "isFullyShowing", "isInTransit"
-            }) {
-                Boolean value = queryBoolean(interactor, name);
-                if (Boolean.TRUE.equals(value)) return true;
+            Object handler = XposedHelpers.getObjectField(root,
+                    "windowRootViewKeyEventHandler");
+            Object lazy = XposedHelpers.getObjectField(handler,
+                    "sysUIKeyEventHandlerLazy");
+            Object dispatcher = XposedHelpers.callMethod(lazy, "get");
+            targets.keyguardInteractor = XposedHelpers.getObjectField(dispatcher,
+                    "keyguardKeyEventInteractor");
+            if (targets.manager == null) {
+                targets.manager = XposedHelpers.getObjectField(
+                        targets.keyguardInteractor, "statusBarKeyguardViewManager");
+                nativeManager = new WeakReference<>(targets.manager);
             }
-        } catch (Throwable ignored) {
-            // The focused password editor remains a separate exemption.
+        } catch (Throwable error) {
+            // A vendor build may have different internal fields. We can still
+            // use the captured native manager, if available.
+            if (targets.manager == null) {
+                Log.e(TAG, "Cannot locate native keyguard dependencies", error);
+            }
         }
-        return false;
+        return targets;
     }
 
-    private static Boolean queryBoolean(Object instance, String name) {
-        if (instance == null) return null;
-        for (Method method : instance.getClass().getMethods()) {
-            if (method.getName().equals(name)
-                    && method.getParameterTypes().length == 0) {
-                try {
-                    Object value = XposedHelpers.callMethod(instance, name);
-                    return value instanceof Boolean ? (Boolean) value : null;
-                } catch (Throwable error) {
-                    Log.w(TAG, "Native bouncer visibility query failed: " + name, error);
-                    return null;
+    private static void requestDeviceEntry(View root, NativeTargets targets,
+            KeyguardManager keyguard) {
+        Boolean scene = isSceneEnabled();
+        Log.i(TAG, "Entry route: scene=" + scene
+                + " manager=" + (targets.manager != null));
+        String reason = "BB UI physical Space";
+
+        if (Boolean.TRUE.equals(scene)) {
+            Object deviceEntry = null;
+            try {
+                if (targets.keyguardInteractor != null) {
+                    deviceEntry = XposedHelpers.getObjectField(
+                            targets.keyguardInteractor, "deviceEntryInteractor");
+                } else if (targets.manager != null) {
+                    Object lazy = XposedHelpers.getObjectField(
+                            targets.manager, "mDeviceEntryInteractorLazy");
+                    deviceEntry = XposedHelpers.callMethod(lazy, "get");
                 }
+                if (deviceEntry != null) {
+                    // Kotlin @JvmOverloads in LineageOS 24 exposes the
+                    // (String, IKeyguardDismissCallback, boolean) overload.
+                    // true forces the PRIMARY credential challenge, not
+                    // alternate fingerprint bouncer.
+                    try {
+                        XposedHelpers.callMethod(deviceEntry,
+                                "attemptDeviceEntry", reason, null, true);
+                    } catch (NoSuchMethodError missingOverload) {
+                        XposedHelpers.callMethod(deviceEntry,
+                                "attemptDeviceEntry", reason);
+                    }
+                    Log.i(TAG, "Native scene credential entry requested");
+                    return;
+                }
+                Log.e(TAG, "Scene enabled but DeviceEntryInteractor unavailable");
+            } catch (Throwable error) {
+                Log.e(TAG, "Native scene credential entry failed", error);
+            }
+            // The native manager is the compatibility fallback.
+        }
+
+        if (targets.manager == null) {
+            Log.e(TAG, "No native credential entry component available");
+            return;
+        }
+
+        int state = readNativeStatusBarState(targets);
+        // Legacy locked shade needs to finish collapsing before showing
+        // the bouncer. ShadeController.collapseShade(true) runs pending
+        // actions even if no collapse is necessary.
+        if (state == SHADE_LOCKED && !Boolean.TRUE.equals(scene)) {
+            try {
+                Object shadeController = targets.keyguardInteractor != null
+                        ? XposedHelpers.getObjectField(
+                            targets.keyguardInteractor, "shadeController")
+                        : XposedHelpers.callMethod(XposedHelpers.getObjectField(
+                            targets.manager, "mShadeController"), "get");
+                Object manager = targets.manager;
+                Runnable displayCredentials = () -> {
+                    if (keyguard.isKeyguardLocked()
+                            && !isBouncerShowing(manager)) {
+                        showLegacyPrimaryBouncer(manager, "BB UI Space after shade collapse");
+                    }
+                };
+                XposedHelpers.callMethod(shadeController, "addPostCollapseAction",
+                        displayCredentials);
+                XposedHelpers.callMethod(shadeController, "collapseShade", true);
+                Log.i(TAG, "Legacy locked shade collapse + native bouncer queued");
+                return;
+            } catch (Throwable error) {
+                Log.e(TAG, "Legacy locked shade collapse failed", error);
+            }
+        }
+
+        showLegacyPrimaryBouncer(targets.manager, reason);
+    }
+
+    private static void showLegacyPrimaryBouncer(Object manager, String reason) {
+        try {
+            XposedHelpers.callMethod(manager, "showPrimaryBouncer", true, reason);
+            Log.i(TAG, "Native primary credential bouncer requested");
+        } catch (Throwable primaryError) {
+            Log.w(TAG, "Primary bouncer entry unavailable; trying native showBouncer",
+                    primaryError);
+            try {
+                XposedHelpers.callMethod(manager, "showBouncer", true, reason);
+                Log.i(TAG, "Native bouncer requested");
+            } catch (Throwable error) {
+                Log.e(TAG, "Unable to request native bouncer", error);
+            }
+        }
+    }
+
+    private static Boolean isSceneEnabled() {
+        Class<?> scene = XposedHelpers.findClassIfExists(SCENE_FLAG, systemUiLoader);
+        if (scene == null) return null;
+        for (String method : new String[] {"isEnabled", "getIsEnabled"}) {
+            try {
+                Object value = XposedHelpers.callStaticMethod(scene, method);
+                if (value instanceof Boolean) return (Boolean) value;
+            } catch (NoSuchMethodError missing) {
+                // The Kotlin getter JVM name is version-dependent.
+            } catch (Throwable error) {
+                Log.w(TAG, "Could not read scene framework flag", error);
+                break;
             }
         }
         return null;
     }
 
-    private static void requestNativeBouncer(Object manager, String reason) {
-        if (manager == null) {
-            Log.e(TAG, "Native bouncer unavailable: keyguard manager not captured");
-            return;
+    private static int readNativeStatusBarState(NativeTargets targets) {
+        try {
+            Object controller = targets.keyguardInteractor != null
+                    ? XposedHelpers.getObjectField(targets.keyguardInteractor,
+                            "statusBarStateController")
+                    : XposedHelpers.getObjectField(targets.manager,
+                            "mStatusBarStateController");
+            Object state = XposedHelpers.callMethod(controller, "getState");
+            return state instanceof Integer ? (Integer) state : -1;
+        } catch (Throwable error) {
+            Log.w(TAG, "Could not read native status bar state", error);
+            return -1;
         }
-        for (String name : new String[] {"showPrimaryBouncer", "showBouncer"}) {
-            for (Method method : manager.getClass().getMethods()) {
-                if (!method.getName().equals(name)) continue;
-                Class<?>[] p = method.getParameterTypes();
-                try {
-                    if (p.length == 2 && p[0] == boolean.class && p[1] == String.class) {
-                        XposedHelpers.callMethod(manager, name, true, reason);
-                        Log.i(TAG, "Requested native credential entry via " + name);
-                        return;
-                    }
-                    if (p.length == 1 && p[0] == boolean.class) {
-                        XposedHelpers.callMethod(manager, name, true);
-                        Log.i(TAG, "Requested native credential entry via " + name);
-                        return;
-                    }
-                } catch (Throwable error) {
-                    Log.e(TAG, "Native credential entry failed: " + name, error);
-                }
+    }
+
+    private static boolean isBouncerShowing(Object manager) {
+        if (manager == null) return false;
+        for (String method : new String[] {
+                "isBouncerShowing", "primaryBouncerIsOrWillBeShowing",
+                "primaryBouncerIsShowing"
+        }) {
+            Boolean shown = queryBoolean(manager, method);
+            if (shown != null) return shown;
+        }
+        return false;
+    }
+
+    private static Boolean queryBoolean(Object instance, String name) {
+        for (Method method : instance.getClass().getMethods()) {
+            if (!name.equals(method.getName()) || method.getParameterTypes().length != 0) {
+                continue;
+            }
+            try {
+                Object value = XposedHelpers.callMethod(instance, name);
+                return value instanceof Boolean ? (Boolean) value : null;
+            } catch (Throwable error) {
+                Log.w(TAG, "Native state query failed: " + name, error);
+                return null;
             }
         }
-        Log.e(TAG, "No available native bouncer entry method");
+        return null;
     }
 
     private static boolean enabled() {
@@ -273,7 +310,7 @@ public final class BB6KeyguardKeyboardHook implements IXposedHookLoadPackage {
             return !"false".equals(XposedHelpers.callStaticMethod(
                     props, "get", ENABLE_PROP, "true"));
         } catch (Throwable error) {
-            Log.w(TAG, "Unable to read keyguard enable property", error);
+            Log.w(TAG, "Cannot read enable property", error);
             return false;
         }
     }
