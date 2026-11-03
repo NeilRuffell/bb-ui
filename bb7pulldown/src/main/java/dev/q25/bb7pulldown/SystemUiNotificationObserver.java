@@ -355,30 +355,38 @@ final class SystemUiNotificationObserver {
         // Missing rankings remain unclassified (displayed with alerting items).
         boolean silent = false;
         LinkedHashSet<String> conversationIds = new LinkedHashSet<>();
-        if (notification != null && notification.getShortcutId() != null
-                && !notification.getShortcutId().isEmpty()) {
-            conversationIds.add(notification.getShortcutId());
-        }
         String conversationTitle = plain(extras == null ? null
                 : extras.getCharSequence(Notification.EXTRA_CONVERSATION_TITLE), 140);
+        try {
+            if (notification != null && notification.getShortcutId() != null
+                    && !notification.getShortcutId().isEmpty()) {
+                conversationIds.add(notification.getShortcutId());
+            }
+        } catch (RuntimeException error) {
+            Log.w(TAG, "Notification shortcut metadata unavailable", error);
+        }
         if (rankings != null) {
             NotificationListenerService.Ranking ranking =
                     new NotificationListenerService.Ranking();
             if (rankings.getRanking(sbn.getKey(), ranking)) {
                 silent = ranking.getImportance() < NotificationManager.IMPORTANCE_DEFAULT;
-                NotificationChannel channel = ranking.getChannel();
-                if (channel != null && channel.getConversationId() != null
-                        && !channel.getConversationId().isEmpty()) {
-                    conversationIds.add(channel.getConversationId());
-                }
-                ShortcutInfo shortcut = ranking.getConversationShortcutInfo();
-                if (shortcut != null) {
-                    if (shortcut.getId() != null && !shortcut.getId().isEmpty()) {
-                        conversationIds.add(shortcut.getId());
+                try {
+                    NotificationChannel channel = ranking.getChannel();
+                    if (channel != null && channel.getConversationId() != null
+                            && !channel.getConversationId().isEmpty()) {
+                        conversationIds.add(channel.getConversationId());
                     }
-                    if (conversationTitle.isEmpty()) {
-                        conversationTitle = plain(shortcut.getShortLabel(), 140);
+                    ShortcutInfo shortcut = ranking.getConversationShortcutInfo();
+                    if (shortcut != null) {
+                        if (shortcut.getId() != null && !shortcut.getId().isEmpty()) {
+                            conversationIds.add(shortcut.getId());
+                        }
+                        if (conversationTitle.isEmpty()) {
+                            conversationTitle = plain(shortcut.getShortLabel(), 140);
+                        }
                     }
+                } catch (RuntimeException error) {
+                    Log.w(TAG, "Native conversation ranking metadata unavailable", error);
                 }
             }
         }
