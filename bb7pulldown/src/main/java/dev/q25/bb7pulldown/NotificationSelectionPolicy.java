@@ -11,27 +11,40 @@ final class NotificationSelectionPolicy {
     private NotificationSelectionPolicy() {}
 
     static List<NotificationItem> forPackage(List<NotificationItem> all, String selectedPackage) {
-        if (selectedPackage == null || all == null || all.isEmpty()) {
+        if (selectedPackage == null || NotificationCategoryPolicy.isSilent(selectedPackage)) {
             return Collections.emptyList();
         }
-        // Hide a group summary only when real children from that group are present.
-        // Keep orphan summaries visible.
+        return filter(all, selectedPackage, false);
+    }
+
+    static List<NotificationItem> forSilent(List<NotificationItem> all) {
+        return filter(all, null, true);
+    }
+
+    private static List<NotificationItem> filter(List<NotificationItem> all, String packageName,
+            boolean silentOnly) {
+        if (all == null || all.isEmpty()) return Collections.emptyList();
+
+        // Only group children within this category suppress their group summary.
         Set<String> childGroups = new HashSet<>();
         for (NotificationItem item : all) {
-            if (item != null && selectedPackage.equals(item.packageName)
+            if (belongs(item, packageName, silentOnly)
                     && !item.groupSummary && item.groupKey != null) {
                 childGroups.add(item.groupKey);
             }
         }
-        List<NotificationItem> alerting = new ArrayList<>();
-        List<NotificationItem> silent = new ArrayList<>();
+        List<NotificationItem> result = new ArrayList<>();
         for (NotificationItem item : all) {
-            if (item == null || !selectedPackage.equals(item.packageName)) continue;
+            if (!belongs(item, packageName, silentOnly)) continue;
             if (item.groupSummary && item.groupKey != null
                     && childGroups.contains(item.groupKey)) continue;
-            (item.silent ? silent : alerting).add(item);
+            result.add(item);
         }
-        alerting.addAll(silent);
-        return Collections.unmodifiableList(alerting);
+        return Collections.unmodifiableList(result);
+    }
+
+    private static boolean belongs(NotificationItem item, String packageName, boolean silentOnly) {
+        return item != null && (silentOnly ? item.silent
+                : !item.silent && packageName.equals(item.packageName));
     }
 }
