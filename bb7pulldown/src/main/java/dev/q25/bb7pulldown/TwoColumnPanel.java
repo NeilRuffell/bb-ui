@@ -817,6 +817,7 @@ final class TwoColumnPanel extends FrameLayout {
                                     event.getRawX() - downX, event.getRawY() - downY,
                                     touchSlop)) {
                         swiping = true;
+                        setPressed(false);
                         if (getParent() != null) getParent().requestDisallowInterceptTouchEvent(true);
                         return true;
                     }
@@ -850,6 +851,7 @@ final class TwoColumnPanel extends FrameLayout {
                             return super.onTouchEvent(event);
                         }
                         swiping = true;
+                        setPressed(false);
                         if (getParent() != null) getParent().requestDisallowInterceptTouchEvent(true);
                     }
                     setTranslationX(dx);
