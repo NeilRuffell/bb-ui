@@ -44,7 +44,7 @@ final class FavoritesClient {
                 String label = item.conversationTitle.isEmpty()
                         ? item.title : item.conversationTitle;
                 for (String id : item.conversationIds) {
-                    String unique = item.packageName + "\u0000" + id;
+                    String unique = item.packageName.length() + ":" + item.packageName + id;
                     if (!seen.add(unique) || id.isEmpty()) continue;
                     try {
                         JSONObject candidate = new JSONObject();
