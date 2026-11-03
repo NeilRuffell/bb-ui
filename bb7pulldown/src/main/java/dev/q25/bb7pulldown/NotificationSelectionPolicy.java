@@ -21,6 +21,21 @@ final class NotificationSelectionPolicy {
         return filter(all, null, true);
     }
 
+    /** Filter UI duplicates only; platform notification state remains intact. */
+    static List<NotificationItem> withoutRepresentedSilentMedia(
+            List<NotificationItem> all, Set<String> representedMediaKeys) {
+        if (all == null || all.isEmpty()) return Collections.emptyList();
+        if (representedMediaKeys == null || representedMediaKeys.isEmpty()) return all;
+        List<NotificationItem> visible = new ArrayList<>(all.size());
+        for (NotificationItem item : all) {
+            if (item != null && item.silent && representedMediaKeys.contains(item.key)) {
+                continue;
+            }
+            visible.add(item);
+        }
+        return Collections.unmodifiableList(visible);
+    }
+
     private static List<NotificationItem> filter(List<NotificationItem> all, String packageName,
             boolean silentOnly) {
         if (all == null || all.isEmpty()) return Collections.emptyList();

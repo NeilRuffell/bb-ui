@@ -73,6 +73,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
     private static boolean shown;
     private static WindowManager windowManager;
     private static TwoColumnPanel panel;
+    private static NativeMediaSessions mediaSessions;
     private static boolean openingOrClosing;
     private static BroadcastReceiver screenOffReceiver;
     private static Context receiverContext;
@@ -332,6 +333,8 @@ public final class PullDownHook implements IXposedHookLoadPackage {
                     dismissPanelImmediately();
                 } else {
                     current.setNotifications(SystemUiNotificationObserver.itemsSnapshot());
+                    NativeMediaSessions media = mediaSessions;
+                    if (media != null) media.refresh();
                 }
             }
         });
@@ -549,6 +552,10 @@ public final class PullDownHook implements IXposedHookLoadPackage {
         // Query the live, system-owned notification listener before drawing.
         // The gesture and 15/85 geometry are unchanged.
         SystemUiNotificationObserver.refreshBeforeOpen();
+        NativeMediaSessions nativeMedia = new NativeMediaSessions(context, entries -> {
+            TwoColumnPanel visiblePanel = panel;
+            if (visiblePanel != null && shown) visiblePanel.setMediaSessions(entries);
+        });
         TwoColumnPanel root = new TwoColumnPanel(
                 context, PullDownHook::dismissPanel, PullDownHook::openNotification,
                 new TwoColumnPanel.NotificationActionListener() {
@@ -568,7 +575,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
                     @Override public void onSystemControls() {
                         showSystemControls(context);
                     }
-                });
+                }, nativeMedia::send);
         root.setNotifications(SystemUiNotificationObserver.itemsSnapshot());
         WindowManager.LayoutParams params = new WindowManager.LayoutParams(
                 WindowManager.LayoutParams.MATCH_PARENT,
@@ -598,6 +605,8 @@ public final class PullDownHook implements IXposedHookLoadPackage {
             panel = root;
             windowManager = manager;
             shown = true;
+            mediaSessions = nativeMedia;
+            nativeMedia.start();
             updateStatusAppearance();
             Log.i(TAG, "Two-column window attached; fullWidth=true left=15 right=85"
                     + " heightPx=" + height);
@@ -630,6 +639,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
                     } catch (Throwable e) {
                         Log.w(TAG, "Unable to remove pull-down cleanly", e);
                     } finally {
+                        stopMediaSessions();
                         unregisterScreenOffReceiver();
                         panel = null;
                         windowManager = null;
@@ -697,6 +707,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
         } catch (Throwable error) {
             Log.w(TAG, "Unable to immediately hide notification panel", error);
         } finally {
+            stopMediaSessions();
             unregisterScreenOffReceiver();
             panel = null;
             windowManager = null;
@@ -705,6 +716,12 @@ public final class PullDownHook implements IXposedHookLoadPackage {
             updateStatusAppearance();
             Log.i(TAG, "Two-column pull-down immediately hidden");
         }
+    }
+
+    private static void stopMediaSessions() {
+        NativeMediaSessions running = mediaSessions;
+        mediaSessions = null;
+        if (running != null) running.stop();
     }
 
     private static int dp(Context context, int value) {

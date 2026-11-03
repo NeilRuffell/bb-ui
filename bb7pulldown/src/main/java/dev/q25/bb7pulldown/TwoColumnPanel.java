@@ -10,6 +10,7 @@ import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
+import android.media.session.MediaSession;
 import android.text.TextUtils;
 import android.text.format.DateFormat;
 import android.text.format.DateUtils;
@@ -30,8 +31,10 @@ import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.Collections;
 import java.util.Date;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * Independent 15/85 notification panel. The left side is a selectable
@@ -45,6 +48,9 @@ final class TwoColumnPanel extends FrameLayout {
         void onSystemControls();
     }
     interface OpenNotificationListener { void onOpen(String notificationKey); }
+    interface MediaControlListener {
+        boolean onControl(MediaSession.Token token, int action);
+    }
     interface NotificationActionListener {
         void onAction(String notificationKey, int actionIndex);
         void onDismiss(String notificationKey);
@@ -58,6 +64,16 @@ final class TwoColumnPanel extends FrameLayout {
     private int focusedStatusZone = -1;
     private final OpenNotificationListener onOpenNotification;
     private final NotificationActionListener onActions;
+    private final MediaControlListener onMediaControl;
+    private final LinearLayout mediaRow;
+    private final ImageView mediaAppIcon;
+    private final ImageView[] mediaButtons = new ImageView[3];
+    private final TextView mediaNowPlaying;
+    private final TextView mediaIndex;
+    private List<NativeMediaSessions.Entry> mediaSessions = Collections.emptyList();
+    private MediaSession.Token selectedMediaToken;
+    private boolean mediaControlsOpen;
+    private int selectedMediaButton = NativeMediaSessions.PLAY_PAUSE;
     private final List<LinearLayout> notificationRows = new ArrayList<>();
     // Focus sequence includes each notification, then its native actions,
     // then its dismiss control, before the next notification.
@@ -79,6 +95,7 @@ final class TwoColumnPanel extends FrameLayout {
     private final List<FrameLayout> iconRows = new ArrayList<>();
     private List<String> renderedPackages = Collections.emptyList();
     private List<NotificationItem> notifications = Collections.emptyList();
+    private List<NotificationItem> visibleNotifications = Collections.emptyList();
     private List<NotificationItem> renderedCards = Collections.emptyList();
     private String renderedCardPackage;
     private String selectedPackage;
@@ -87,7 +104,7 @@ final class TwoColumnPanel extends FrameLayout {
 
     TwoColumnPanel(Context context, CloseListener close,
             OpenNotificationListener openNotification, NotificationActionListener actions,
-            StatusZoneListener statusZone) {
+            StatusZoneListener statusZone, MediaControlListener mediaControl) {
         super(context);
         palette = BB7Theme.palette(context);
         Log.i(TAG, "BB7 shade palette: " + (palette == BB7Theme.Palette.DARK ? "dark" : "light"));
@@ -95,6 +112,7 @@ final class TwoColumnPanel extends FrameLayout {
         onOpenNotification = openNotification;
         onActions = actions;
         onStatusZone = statusZone;
+        onMediaControl = mediaControl;
         setFocusable(true);
         setFocusableInTouchMode(true);
         setBackgroundColor(palette.canvas);
@@ -126,6 +144,84 @@ final class TwoColumnPanel extends FrameLayout {
         currentDate.setFocusable(false);
         content.addView(currentDate, new LinearLayout.LayoutParams(
                 LayoutParams.MATCH_PARENT, dp(30)));
+
+        // One focusable row for all native media sessions, hidden when none exist.
+        mediaRow = new LinearLayout(context);
+        mediaRow.setOrientation(LinearLayout.HORIZONTAL);
+        mediaRow.setGravity(Gravity.CENTER_VERTICAL);
+        mediaRow.setPadding(dp(9), dp(3), dp(9), dp(3));
+        mediaRow.setBackgroundColor(palette.heading);
+        mediaRow.setVisibility(View.GONE);
+        mediaRow.setFocusable(true);
+        mediaRow.setFocusableInTouchMode(true);
+        mediaRow.setClickable(true);
+        mediaRow.setOnKeyListener((view, code, event) -> onMediaKey(code, event));
+        mediaRow.setOnFocusChangeListener((view, focused) -> {
+            if (focused) leaveStatusZone();
+            else mediaControlsOpen = false;
+            updateMediaHighlight();
+        });
+        mediaRow.setOnClickListener(view -> {
+            if (!mediaControlsOpen) {
+                mediaControlsOpen = true;
+                selectedMediaButton = NativeMediaSessions.PLAY_PAUSE;
+                mediaRow.requestFocus();
+                updateMediaHighlight();
+            } else {
+                performMediaAction();
+            }
+        });
+
+        mediaAppIcon = new ImageView(context);
+        mediaAppIcon.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        mediaAppIcon.setFocusable(false);
+        mediaRow.addView(mediaAppIcon, new LinearLayout.LayoutParams(dp(29), dp(29)));
+
+        mediaNowPlaying = text("", 12, palette.title);
+        mediaNowPlaying.setSingleLine(true);
+        // Android's native TextView marquee scrolls only when the track info overflows.
+        mediaNowPlaying.setEllipsize(TextUtils.TruncateAt.MARQUEE);
+        mediaNowPlaying.setMarqueeRepeatLimit(-1);
+        mediaNowPlaying.setSelected(true);
+        mediaNowPlaying.setGravity(Gravity.CENTER_VERTICAL);
+        mediaNowPlaying.setPadding(dp(7), 0, dp(3), 0);
+        mediaNowPlaying.setFocusable(false);
+        mediaRow.addView(mediaNowPlaying, new LinearLayout.LayoutParams(
+                0, LayoutParams.MATCH_PARENT, 1f));
+
+        final int[] icons = {
+                android.R.drawable.ic_media_previous,
+                android.R.drawable.ic_media_play,
+                android.R.drawable.ic_media_next
+        };
+        final String[] descriptions = {"Previous", "Play or pause", "Next"};
+        for (int i = 0; i < mediaButtons.length; i++) {
+            final int action = i;
+            ImageView button = new ImageView(context);
+            button.setImageResource(icons[i]);
+            button.setScaleType(ImageView.ScaleType.FIT_CENTER);
+            button.setPadding(dp(9), dp(9), dp(9), dp(9));
+            button.setFocusable(false); // Trackpad focus remains on the parent row.
+            button.setClickable(true);
+            button.setContentDescription(descriptions[i]);
+            button.setOnClickListener(view -> {
+                selectedMediaButton = action;
+                mediaControlsOpen = true;
+                mediaRow.requestFocus();
+                performMediaAction();
+                updateMediaHighlight();
+            });
+            mediaButtons[i] = button;
+            mediaRow.addView(button, new LinearLayout.LayoutParams(dp(39), dp(39)));
+        }
+
+        mediaIndex = text("", 11, palette.muted);
+        mediaIndex.setGravity(Gravity.CENTER);
+        mediaIndex.setFocusable(false);
+        mediaRow.addView(mediaIndex, new LinearLayout.LayoutParams(
+                LayoutParams.WRAP_CONTENT, LayoutParams.MATCH_PARENT));
+        content.addView(mediaRow, new LinearLayout.LayoutParams(
+                LayoutParams.MATCH_PARENT, dp(46)));
 
         LinearLayout columns = new LinearLayout(context);
         columns.setOrientation(LinearLayout.HORIZONTAL);
@@ -191,11 +287,186 @@ final class TwoColumnPanel extends FrameLayout {
                 LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
     }
 
+    /** Media sessions are supplied by Android's MediaSessionManager (not action text). */
+    void setMediaSessions(List<NativeMediaSessions.Entry> updated) {
+        boolean hadFocus = mediaRow.isFocused();
+        int previousIndex = mediaSessionIndex();
+        mediaSessions = updated == null ? Collections.emptyList() : updated;
+        if (mediaSessions.isEmpty()) {
+            selectedMediaToken = null;
+            mediaControlsOpen = false;
+            mediaRow.setVisibility(View.GONE);
+            updateVisibleNotifications();
+            if (hadFocus) focusSelectedAppIcon();
+            return;
+        }
+        int index = mediaSessionIndex();
+        if (index < 0) index = Math.min(Math.max(previousIndex, 0),
+                mediaSessions.size() - 1);
+        selectedMediaToken = mediaSessions.get(index).token;
+        mediaRow.setVisibility(View.VISIBLE);
+        renderMediaSession();
+        updateVisibleNotifications();
+    }
+
+    private int mediaSessionIndex() {
+        for (int i = 0; i < mediaSessions.size(); i++) {
+            if (Objects.equals(selectedMediaToken, mediaSessions.get(i).token)) return i;
+        }
+        return -1;
+    }
+
+    private void cycleMediaSession(int step) {
+        if (mediaSessions.isEmpty()) return;
+        int index = mediaSessionIndex();
+        if (index < 0) index = 0;
+        int next = (index + (step < 0 ? -1 : 1) + mediaSessions.size())
+                % mediaSessions.size();
+        selectedMediaToken = mediaSessions.get(next).token;
+        renderMediaSession();
+    }
+
+    private void renderMediaSession() {
+        int index = mediaSessionIndex();
+        if (index < 0) return;
+        NativeMediaSessions.Entry entry = mediaSessions.get(index);
+        PackageManager pm = getContext().getPackageManager();
+        try {
+            mediaAppIcon.setImageDrawable(pm.getApplicationIcon(entry.packageName));
+        } catch (PackageManager.NameNotFoundException | RuntimeException error) {
+            mediaAppIcon.setImageDrawable(pm.getDefaultActivityIcon());
+        }
+        String nowPlaying = entry.title;
+        if (!entry.artist.isEmpty()) {
+            nowPlaying = nowPlaying.isEmpty() ? entry.artist
+                    : nowPlaying + "  ·  " + entry.artist;
+        }
+        if (nowPlaying.isEmpty()) nowPlaying = "Now playing";
+        mediaNowPlaying.setText(nowPlaying);
+        mediaButtons[NativeMediaSessions.PLAY_PAUSE].setImageResource(entry.playing
+                ? android.R.drawable.ic_media_pause : android.R.drawable.ic_media_play);
+        mediaButtons[NativeMediaSessions.PLAY_PAUSE].setContentDescription(
+                entry.playing ? "Pause" : "Play");
+        mediaIndex.setText(mediaSessions.size() > 1
+                ? (index + 1) + "/" + mediaSessions.size() : "");
+        mediaIndex.setVisibility(mediaSessions.size() > 1 ? View.VISIBLE : View.GONE);
+        mediaRow.setContentDescription("Now playing: " + nowPlaying
+                + (mediaSessions.size() > 1
+                        ? ", " + (index + 1) + " of " + mediaSessions.size() : ""));
+        updateMediaHighlight();
+    }
+
+    private void updateMediaHighlight() {
+        boolean focused = mediaRow.isFocused();
+        mediaRow.setBackground(focused && !mediaControlsOpen
+                ? BB7Theme.selected(dp(2), dp(1))
+                : new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+                        palette == BB7Theme.Palette.DARK
+                                ? new int[] {0xff2f4053, 0xff1e2c3b}
+                                : new int[] {0xffecf1f7, 0xffd8e2ec}));
+        mediaNowPlaying.setTextColor(focused && !mediaControlsOpen
+                ? Color.WHITE : palette.title);
+        mediaIndex.setTextColor(focused && !mediaControlsOpen
+                ? Color.WHITE : palette.muted);
+        int index = mediaSessionIndex();
+        if (index < 0) return;
+        NativeMediaSessions.Entry entry = mediaSessions.get(index);
+        for (int i = 0; i < mediaButtons.length; i++) {
+            boolean enabled = i == NativeMediaSessions.PREVIOUS ? entry.canPrevious
+                    : i == NativeMediaSessions.NEXT ? entry.canNext : entry.canPlayPause;
+            boolean selected = focused && mediaControlsOpen && selectedMediaButton == i;
+            ImageView button = mediaButtons[i];
+            button.setBackground(selected ? BB7Theme.selected(dp(3), dp(1)) : null);
+            button.setColorFilter(selected || focused && !mediaControlsOpen
+                    ? Color.WHITE : palette.headingText);
+            button.setAlpha(enabled ? 1f : 0.35f);
+        }
+    }
+
+    private void performMediaAction() {
+        int index = mediaSessionIndex();
+        if (index < 0) return;
+        NativeMediaSessions.Entry entry = mediaSessions.get(index);
+        boolean allowed = selectedMediaButton == NativeMediaSessions.PREVIOUS
+                ? entry.canPrevious : selectedMediaButton == NativeMediaSessions.NEXT
+                ? entry.canNext : entry.canPlayPause;
+        if (allowed) onMediaControl.onControl(entry.token, selectedMediaButton);
+    }
+
+    private boolean onMediaKey(int code, KeyEvent event) {
+        if (mediaSessions.isEmpty()) return false;
+        switch (code) {
+            case KeyEvent.KEYCODE_DPAD_LEFT:
+            case KeyEvent.KEYCODE_DPAD_RIGHT:
+                if (event.getAction() == KeyEvent.ACTION_DOWN) {
+                    int step = code == KeyEvent.KEYCODE_DPAD_LEFT ? -1 : 1;
+                    if (mediaControlsOpen) {
+                        selectedMediaButton = AppSelectionPolicy.move(
+                                selectedMediaButton, step, mediaButtons.length);
+                        updateMediaHighlight();
+                    } else {
+                        cycleMediaSession(step);
+                    }
+                }
+                return true;
+            case KeyEvent.KEYCODE_DPAD_UP:
+            case KeyEvent.KEYCODE_DPAD_DOWN:
+                if (event.getAction() == KeyEvent.ACTION_DOWN) {
+                    if (mediaControlsOpen) {
+                        cycleMediaSession(code == KeyEvent.KEYCODE_DPAD_UP ? -1 : 1);
+                    } else if (code == KeyEvent.KEYCODE_DPAD_UP) {
+                        enterStatusZone();
+                    } else {
+                        focusSelectedAppIcon();
+                    }
+                }
+                return true;
+            case KeyEvent.KEYCODE_DPAD_CENTER:
+            case KeyEvent.KEYCODE_ENTER:
+            case KeyEvent.KEYCODE_NUMPAD_ENTER:
+            case KeyEvent.KEYCODE_SPACE:
+                if (event.getAction() == KeyEvent.ACTION_UP) {
+                    if (!mediaControlsOpen) {
+                        mediaControlsOpen = true;
+                        selectedMediaButton = NativeMediaSessions.PLAY_PAUSE;
+                        updateMediaHighlight();
+                    } else {
+                        performMediaAction();
+                    }
+                }
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    private void focusMediaRow() {
+        if (mediaRow.getVisibility() == View.VISIBLE) {
+            leaveStatusZone();
+            mediaRow.requestFocus();
+        } else {
+            focusSelectedAppIcon();
+        }
+    }
+
     /** Update the two columns from the same notification snapshot. */
     void setNotifications(List<NotificationItem> items) {
         notifications = items == null ? Collections.emptyList()
                 : Collections.unmodifiableList(new ArrayList<>(items));
-        setNotificationPackages(NotificationCategoryPolicy.categoriesFor(notifications));
+        updateVisibleNotifications();
+    }
+
+    /** Hide silent media cards only when the native media bar represents them. */
+    private void updateVisibleNotifications() {
+        Set<MediaSession.Token> representedTokens = new HashSet<>();
+        for (NativeMediaSessions.Entry session : mediaSessions) {
+            representedTokens.add(session.token);
+        }
+        Set<String> representedKeys =
+                SystemUiNotificationObserver.notificationKeysForMediaTokens(representedTokens);
+        visibleNotifications = NotificationSelectionPolicy.withoutRepresentedSilentMedia(
+                notifications, representedKeys);
+        setNotificationPackages(NotificationCategoryPolicy.categoriesFor(visibleNotifications));
         renderSelectedNotifications();
     }
 
@@ -300,6 +571,8 @@ final class TwoColumnPanel extends FrameLayout {
         int index = renderedPackages.indexOf(selectedPackage);
         if (index >= 0 && index < iconRows.size()) {
             iconRows.get(index).requestFocus();
+        } else if (mediaRow.getVisibility() == View.VISIBLE) {
+            mediaRow.requestFocus();
         } else {
             requestFocus();
         }
@@ -318,8 +591,8 @@ final class TwoColumnPanel extends FrameLayout {
     private void renderSelectedNotifications() {
         boolean silentCategory = NotificationCategoryPolicy.isSilent(selectedPackage);
         List<NotificationItem> selected = silentCategory
-                ? NotificationSelectionPolicy.forSilent(notifications)
-                : NotificationSelectionPolicy.forPackage(notifications, selectedPackage);
+                ? NotificationSelectionPolicy.forSilent(visibleNotifications)
+                : NotificationSelectionPolicy.forPackage(visibleNotifications, selectedPackage);
         if (Objects.equals(renderedCardPackage, selectedPackage)
                 && renderedCards.equals(selected)) return;
 
@@ -824,7 +1097,8 @@ final class TwoColumnPanel extends FrameLayout {
                     int next = AppSelectionPolicy.move(selectedIndex,
                             direction, iconRows.size());
                     if (keyCode == KeyEvent.KEYCODE_DPAD_UP && selectedIndex == 0) {
-                        enterStatusZone();
+                        if (mediaRow.getVisibility() == View.VISIBLE) focusMediaRow();
+                        else enterStatusZone();
                     } else if (next >= 0) {
                         iconRows.get(next).requestFocus();
                     }
@@ -886,6 +1160,8 @@ final class TwoColumnPanel extends FrameLayout {
                     if (notificationPaneActive && !notificationTargets.isEmpty()) {
                         leaveStatusZone();
                         focusSelectedNotification();
+                    } else if (mediaRow.getVisibility() == View.VISIBLE) {
+                        focusMediaRow();
                     } else {
                         focusSelectedAppIcon();
                     }
@@ -933,7 +1209,10 @@ final class TwoColumnPanel extends FrameLayout {
         if (event.getKeyCode() == KeyEvent.KEYCODE_BACK) {
             if (event.getAction() == KeyEvent.ACTION_UP) {
                 if (activeReplyInput != null) closeInlineReply();
-                else if (focusedStatusZone >= 0) focusSelectedAppIcon();
+                else if (mediaControlsOpen) {
+                    mediaControlsOpen = false;
+                    updateMediaHighlight();
+                } else if (focusedStatusZone >= 0) focusMediaRow();
                 else if (notificationPaneActive) returnToAppIcons();
                 else onClose.onClose();
             }
