@@ -1,5 +1,7 @@
 # BBOS6 keyguard keyboard entry (stage 1)
 
+**Q25 compatibility fix (0.9.33):** The Q25 runtime reports that `StatusBarKeyguardViewManager.primaryBouncerIsShowing()` does not exist. The hook now queries available native visibility methods without assuming that method exists; the captured manager can still request authentication even when an optional state query is absent. It preserves Space in a focused credential text editor, retains key-down/up consumption on the initial lock screen, and uses compatible native bouncer entry signatures. This needs physical-device validation before merging.
+
 Branch: `feat/bb6-keyguard-keyboard-entry`, based on `master`.
 
 **LineageOS 24.0 integration:** `NotificationShadeWindowView` inherits
