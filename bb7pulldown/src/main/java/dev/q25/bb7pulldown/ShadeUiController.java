@@ -3,11 +3,11 @@ package dev.q25.bb7pulldown;
 import android.view.KeyEvent;
 
 /**
- * Platform-independent shade/navigation state owner.
+ * LSPosed-independent Android shade/navigation state owner.
  *
  * The SystemUI integration (currently PullDownHook, later native SystemUI)
  * implements Listener. Both shade pages and the standalone status-bar focus
- * surface receive THIS controller, not their own navigation state machines.
+ * surface receive this same controller, not separate navigation instances.
  *
  * Back from the status bar always exits the current surface; Down returns to
  * shade content, or opens native Recents when the shade has not been opened.
