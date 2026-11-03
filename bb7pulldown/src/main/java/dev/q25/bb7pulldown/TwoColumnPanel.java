@@ -151,8 +151,7 @@ final class TwoColumnPanel extends FrameLayout {
         addView(content, new FrameLayout.LayoutParams(
                 LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
 
-        content.addView(new ShadeDateHeader(context),
-                ShadeDateHeader.layoutParams(context));
+        // Shared date bar belongs to UnifiedShadeHost, above both pages.
 
         // One focusable row for all native media sessions, hidden when none exist.
         mediaRow = new LinearLayout(context);
