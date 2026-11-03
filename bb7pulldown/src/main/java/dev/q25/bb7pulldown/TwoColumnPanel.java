@@ -8,6 +8,7 @@ import android.view.inputmethod.EditorInfo;
 import android.widget.EditText;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
+import android.os.Bundle;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.media.session.MediaSession;
@@ -21,6 +22,7 @@ import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewConfiguration;
+import android.view.accessibility.AccessibilityNodeInfo;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
@@ -785,6 +787,8 @@ final class TwoColumnPanel extends FrameLayout {
         private float downX;
         private float downY;
         private boolean swiping;
+        private boolean ignoreTouch;
+        private boolean dismissing;
 
         SwipeDismissCard(Context context, boolean clearable, Runnable onDismiss) {
             super(context);
@@ -795,14 +799,20 @@ final class TwoColumnPanel extends FrameLayout {
 
         @Override public boolean onInterceptTouchEvent(MotionEvent event) {
             if (!clearable) return super.onInterceptTouchEvent(event);
+            if (dismissing) return true;
             switch (event.getActionMasked()) {
                 case MotionEvent.ACTION_DOWN:
                     downX = event.getRawX();
                     downY = event.getRawY();
                     swiping = false;
+                    ignoreTouch = false;
+                    break;
+                case MotionEvent.ACTION_POINTER_DOWN:
+                    ignoreTouch = true;
+                    if (swiping) resetSwipe();
                     break;
                 case MotionEvent.ACTION_MOVE:
-                    if (!swiping && event.getPointerCount() == 1
+                    if (!ignoreTouch && !swiping && event.getPointerCount() == 1
                             && NotificationSwipePolicy.isHorizontal(
                                     event.getRawX() - downX, event.getRawY() - downY,
                                     touchSlop)) {
@@ -819,17 +829,20 @@ final class TwoColumnPanel extends FrameLayout {
 
         @Override public boolean onTouchEvent(MotionEvent event) {
             if (!clearable) return super.onTouchEvent(event);
+            if (dismissing) return true;
             switch (event.getActionMasked()) {
                 case MotionEvent.ACTION_DOWN:
                     downX = event.getRawX();
                     downY = event.getRawY();
                     swiping = false;
+                    ignoreTouch = false;
                     return super.onTouchEvent(event);
+                case MotionEvent.ACTION_POINTER_DOWN:
+                    ignoreTouch = true;
+                    if (swiping) resetSwipe();
+                    return true;
                 case MotionEvent.ACTION_MOVE:
-                    if (event.getPointerCount() != 1) {
-                        if (swiping) resetSwipe();
-                        return true;
-                    }
+                    if (ignoreTouch || event.getPointerCount() != 1) return true;
                     float dx = event.getRawX() - downX;
                     if (!swiping) {
                         if (!NotificationSwipePolicy.isHorizontal(
@@ -843,10 +856,15 @@ final class TwoColumnPanel extends FrameLayout {
                     setAlpha(1f - Math.min(0.5f, Math.abs(dx) / Math.max(1, getWidth())));
                     return true;
                 case MotionEvent.ACTION_UP:
+                    if (ignoreTouch) {
+                        ignoreTouch = false;
+                        return true;
+                    }
                     if (!swiping) return super.onTouchEvent(event);
                     float distance = event.getRawX() - downX;
                     swiping = false;
                     if (NotificationSwipePolicy.shouldDismiss(distance, getWidth(), touchSlop)) {
+                        dismissing = true;
                         animate().translationX(Math.signum(distance) * getWidth())
                                 .alpha(0f).setDuration(150).withEndAction(() -> {
                                     onDismiss.run();
@@ -854,6 +872,7 @@ final class TwoColumnPanel extends FrameLayout {
                                     // return it to its original position.
                                     postDelayed(() -> {
                                         if (getParent() != null) resetSwipe();
+                                        dismissing = false;
                                     }, 350);
                                 }).start();
                     } else {
@@ -861,13 +880,29 @@ final class TwoColumnPanel extends FrameLayout {
                     }
                     return true;
                 case MotionEvent.ACTION_CANCEL:
-                case MotionEvent.ACTION_POINTER_DOWN:
+                    ignoreTouch = false;
                     if (!swiping) return super.onTouchEvent(event);
                     resetSwipe();
                     return true;
                 default:
                     return super.onTouchEvent(event);
             }
+        }
+
+        @Override public void onInitializeAccessibilityNodeInfo(AccessibilityNodeInfo info) {
+            super.onInitializeAccessibilityNodeInfo(info);
+            if (clearable) {
+                info.setDismissable(true);
+                info.addAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_DISMISS);
+            }
+        }
+
+        @Override public boolean performAccessibilityAction(int action, Bundle arguments) {
+            if (clearable && action == AccessibilityNodeInfo.ACTION_DISMISS) {
+                onDismiss.run();
+                return true;
+            }
+            return super.performAccessibilityAction(action, arguments);
         }
 
         private void resetSwipe() {
