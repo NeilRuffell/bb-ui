@@ -10,6 +10,7 @@ import java.lang.ref.WeakReference;
 
 import de.robv.android.xposed.IXposedHookLoadPackage;
 import de.robv.android.xposed.XC_MethodHook;
+import de.robv.android.xposed.XposedBridge;
 import de.robv.android.xposed.XposedHelpers;
 import de.robv.android.xposed.callbacks.XC_LoadPackage;
 
@@ -49,7 +50,7 @@ public final class BB6KeyguardKeyboardHook implements IXposedHookLoadPackage {
             Log.w(TAG, "Native keyguard manager absent; Space will be blocked while locked");
         } else {
             try {
-                XposedHelpers.hookAllConstructors(managerClass, new XC_MethodHook() {
+                XposedBridge.hookAllConstructors(managerClass, new XC_MethodHook() {
                     @Override protected void afterHookedMethod(MethodHookParam param) {
                         keyguardViewManager = new WeakReference<>(param.thisObject);
                         Log.i(TAG, "Native keyguard manager captured");
