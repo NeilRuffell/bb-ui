@@ -63,7 +63,7 @@ final class TwoColumnPanel extends FrameLayout {
     private final BB7Theme.Palette palette;
     private final CloseListener onClose;
     private final StatusZoneListener onStatusZone;
-    private int focusedStatusZone = -1;
+    private final ShadeStatusNavigation statusNavigation;
     private final OpenNotificationListener onOpenNotification;
     private final NotificationActionListener onActions;
     private final MediaControlListener onMediaControl;
@@ -114,6 +114,32 @@ final class TwoColumnPanel extends FrameLayout {
         onActions = actions;
         onStatusZone = statusZone;
         onMediaControl = mediaControl;
+        statusNavigation = new ShadeStatusNavigation(new ShadeStatusNavigation.Listener() {
+            @Override public void onZoneFocus(int zone) {
+                onStatusZone.onZoneFocus(zone);
+            }
+
+            @Override public void onReturnToContent(boolean viaBack) {
+                if (viaBack) {
+                    // Preserve existing notification-shade Back navigation.
+                    focusMediaRow();
+                } else if (notificationPaneActive && !notificationTargets.isEmpty()) {
+                    focusSelectedNotification();
+                } else if (mediaRow.getVisibility() == View.VISIBLE) {
+                    focusMediaRow();
+                } else {
+                    focusSelectedAppIcon();
+                }
+            }
+
+            @Override public void onNotificationsSelected() {
+                focusSelectedAppIcon();
+            }
+
+            @Override public void onQuickSettingsSelected() {
+                onStatusZone.onSystemControls();
+            }
+        });
         setFocusable(true);
         setFocusableInTouchMode(true);
         setBackgroundColor(palette.canvas);
@@ -125,8 +151,7 @@ final class TwoColumnPanel extends FrameLayout {
         addView(content, new FrameLayout.LayoutParams(
                 LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
 
-        content.addView(new ShadeDateHeader(context),
-                ShadeDateHeader.layoutParams(context));
+        // Shared date bar belongs to UnifiedShadeHost, above both pages.
 
         // One focusable row for all native media sessions, hidden when none exist.
         mediaRow = new LinearLayout(context);
@@ -660,7 +685,7 @@ final class TwoColumnPanel extends FrameLayout {
         }
         if (notificationPaneActive && notificationRows.isEmpty()) {
             returnToAppIcons();
-        } else if (focusedStatusZone >= 0) {
+        } else if (statusNavigation.isFocused()) {
             // A live notification refresh must not steal focus from the status bar.
             updateNotificationHighlight();
         } else if (notificationPaneActive) {
@@ -1129,23 +1154,21 @@ final class TwoColumnPanel extends FrameLayout {
 
     private void enterStatusZone() {
         if (activeReplyInput != null) return;
-        focusedStatusZone = 0;
         requestFocus();
-        onStatusZone.onZoneFocus(focusedStatusZone);
+        statusNavigation.enter(ShadeStatusNavigation.NOTIFICATIONS);
         Log.i(TAG, "Native status bar focused: notifications");
     }
 
     private void leaveStatusZone() {
-        if (focusedStatusZone < 0) return;
-        focusedStatusZone = -1;
-        onStatusZone.onZoneFocus(-1);
+        statusNavigation.leave();
     }
 
-    int statusFocusZone() { return focusedStatusZone; }
+    int statusFocusZone() {
+        return statusNavigation.zone();
+    }
 
     void clearStatusZoneFocus() {
-        focusedStatusZone = -1;
-        onStatusZone.onZoneFocus(-1);
+        statusNavigation.leave();
     }
 
     private boolean onNotificationKey(View view, int keyCode, KeyEvent event) {
@@ -1297,44 +1320,8 @@ final class TwoColumnPanel extends FrameLayout {
 
     @Override
     public boolean dispatchKeyEvent(KeyEvent event) {
-        if (focusedStatusZone >= 0) {
-            int code = event.getKeyCode();
-            if (code == KeyEvent.KEYCODE_DPAD_LEFT
-                    || code == KeyEvent.KEYCODE_DPAD_RIGHT) {
-                if (event.getAction() == KeyEvent.ACTION_DOWN) {
-                    focusedStatusZone = code == KeyEvent.KEYCODE_DPAD_LEFT ? 0 : 1;
-                    onStatusZone.onZoneFocus(focusedStatusZone);
-                }
-                return true;
-            }
-            if (code == KeyEvent.KEYCODE_DPAD_DOWN) {
-                if (event.getAction() == KeyEvent.ACTION_UP) {
-                    if (notificationPaneActive && !notificationTargets.isEmpty()) {
-                        leaveStatusZone();
-                        focusSelectedNotification();
-                    } else if (mediaRow.getVisibility() == View.VISIBLE) {
-                        focusMediaRow();
-                    } else {
-                        focusSelectedAppIcon();
-                    }
-                }
-                return true;
-            }
-            if (code == KeyEvent.KEYCODE_DPAD_UP) return true;
-            if (code == KeyEvent.KEYCODE_DPAD_CENTER
-                    || code == KeyEvent.KEYCODE_ENTER
-                    || code == KeyEvent.KEYCODE_NUMPAD_ENTER
-                    || code == KeyEvent.KEYCODE_SPACE) {
-                if (event.getAction() == KeyEvent.ACTION_UP) {
-                    if (focusedStatusZone == 1) {
-                        clearStatusZoneFocus();
-                        onStatusZone.onSystemControls();
-                    } else {
-                        focusSelectedAppIcon();
-                    }
-                }
-                return true;
-            }
+        if (statusNavigation.handleKey(event.getKeyCode(), event.getAction())) {
+            return true;
         }
         // Hardware Delete/Backspace dismisses the focused clearable notification,
         // including when one of its native action controls has focus. Never
@@ -1364,8 +1351,7 @@ final class TwoColumnPanel extends FrameLayout {
                 else if (mediaControlsOpen) {
                     mediaControlsOpen = false;
                     updateMediaHighlight();
-                } else if (focusedStatusZone >= 0) focusMediaRow();
-                else if (notificationPaneActive) returnToAppIcons();
+                } else if (notificationPaneActive) returnToAppIcons();
                 else onClose.onClose();
             }
             return true;

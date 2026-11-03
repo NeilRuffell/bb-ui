@@ -26,10 +26,13 @@ final class BB6ConnectionsPanel extends FrameLayout {
     interface Listener {
         void onClose();
         void onActivate(int kind);
+        void onStatusZoneFocus(int zone);
+        void onShowNotifications();
     }
 
     private final BB7Theme.Palette palette;
     private final Listener listener;
+    private final ShadeStatusNavigation statusNavigation;
     private final LinearLayout[] rows = new LinearLayout[ConnectionControlPolicy.COUNT];
     private final TextView[] labels = new TextView[ConnectionControlPolicy.COUNT];
     private final TextView[] statuses = new TextView[ConnectionControlPolicy.COUNT];
@@ -41,8 +44,26 @@ final class BB6ConnectionsPanel extends FrameLayout {
     BB6ConnectionsPanel(Context context, Listener listener) {
         super(context);
         this.listener = listener;
+        statusNavigation = new ShadeStatusNavigation(new ShadeStatusNavigation.Listener() {
+            @Override public void onZoneFocus(int zone) {
+                listener.onStatusZoneFocus(zone);
+            }
+
+            @Override public void onReturnToContent(boolean viaBack) {
+                focusFirst();
+            }
+
+            @Override public void onNotificationsSelected() {
+                listener.onShowNotifications();
+            }
+
+            @Override public void onQuickSettingsSelected() {
+                focusFirst();
+            }
+        });
         palette = BB7Theme.palette(context);
         setBackgroundColor(palette.canvas);
+        setFocusable(true);
         setFocusableInTouchMode(true);
 
         LinearLayout content = new LinearLayout(context);
@@ -50,9 +71,7 @@ final class BB6ConnectionsPanel extends FrameLayout {
         addView(content, new LayoutParams(LayoutParams.MATCH_PARENT,
                 LayoutParams.MATCH_PARENT));
 
-        // Reuse the notification shade's centered date-only header.
-        content.addView(new ShadeDateHeader(context),
-                ShadeDateHeader.layoutParams(context));
+        // UnifiedShadeHost renders the common date strip above this page.
 
         LinearLayout card = new LinearLayout(context);
         card.setOrientation(LinearLayout.VERTICAL);
@@ -91,7 +110,10 @@ final class BB6ConnectionsPanel extends FrameLayout {
             row.setFocusableInTouchMode(true);
             row.setClickable(true);
             row.setOnClickListener(view -> listener.onActivate(index));
-            row.setOnFocusChangeListener((view, focused) -> updateSelection());
+            row.setOnFocusChangeListener((view, focused) -> {
+                if (focused) statusNavigation.leave();
+                updateSelection();
+            });
             row.setOnKeyListener((view, code, event) -> onRowKey(index, code, event));
             card.addView(row, new LinearLayout.LayoutParams(
                     LayoutParams.MATCH_PARENT, dp(52)));
@@ -136,7 +158,21 @@ final class BB6ConnectionsPanel extends FrameLayout {
     }
 
     void focusFirst() {
+        statusNavigation.leave();
         rows[0].requestFocus();
+    }
+
+    int statusFocusZone() {
+        return statusNavigation.zone();
+    }
+
+    void clearStatusZoneFocus() {
+        statusNavigation.leave();
+    }
+
+    private void enterStatusZone() {
+        requestFocus();
+        statusNavigation.enter(ShadeStatusNavigation.QUICK_SETTINGS);
     }
 
     void refresh(NativeConnectionControls.Status snapshot) {
@@ -174,10 +210,14 @@ final class BB6ConnectionsPanel extends FrameLayout {
     private boolean onRowKey(int index, int keyCode, KeyEvent event) {
         if (keyCode == KeyEvent.KEYCODE_DPAD_UP
                 || keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
-            if (event.getAction() == KeyEvent.ACTION_UP) {
-                int target = Math.max(0, Math.min(ConnectionControlPolicy.COUNT - 1,
-                        index + (keyCode == KeyEvent.KEYCODE_DPAD_UP ? -1 : 1)));
-                rows[target].requestFocus();
+            if (event.getAction() == KeyEvent.ACTION_DOWN) {
+                if (keyCode == KeyEvent.KEYCODE_DPAD_UP && index == 0) {
+                    enterStatusZone();
+                } else {
+                    int target = Math.max(0, Math.min(ConnectionControlPolicy.COUNT - 1,
+                            index + (keyCode == KeyEvent.KEYCODE_DPAD_UP ? -1 : 1)));
+                    rows[target].requestFocus();
+                }
             }
             return true;
         }
@@ -193,6 +233,9 @@ final class BB6ConnectionsPanel extends FrameLayout {
     }
 
     @Override public boolean dispatchKeyEvent(KeyEvent event) {
+        if (statusNavigation.handleKey(event.getKeyCode(), event.getAction())) {
+            return true;
+        }
         if (event.getKeyCode() == KeyEvent.KEYCODE_BACK
                 || event.getKeyCode() == KeyEvent.KEYCODE_ESCAPE) {
             if (event.getAction() == KeyEvent.ACTION_UP) listener.onClose();

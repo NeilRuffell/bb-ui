@@ -76,11 +76,10 @@ public final class PullDownHook implements IXposedHookLoadPackage {
             Collections.synchronizedMap(new WeakHashMap<>());
     private static boolean shown;
     private static WindowManager windowManager;
+    private static UnifiedShadeHost shadeHost;
     private static TwoColumnPanel panel;
     private static NativeMediaSessions mediaSessions;
     private static boolean quickShown;
-    private static boolean quickOpeningOrClosing;
-    private static WindowManager quickWindowManager;
     private static BB6ConnectionsPanel quickPanel;
     private static BroadcastReceiver quickStateReceiver;
     private static Context quickReceiverContext;
@@ -215,43 +214,38 @@ public final class PullDownHook implements IXposedHookLoadPackage {
     }
 
     private static void showStatusFocus(Context context) {
-        if (shown || openingOrClosing || quickShown || quickOpeningOrClosing
+        if (shown || openingOrClosing || quickShown
                 || focusWindow != null || locked(context)) return;
         WindowManager wm = (WindowManager) context.getSystemService(Context.WINDOW_SERVICE);
         if (wm == null) return;
+        // The standalone status-bar focus window uses the same controller
+        // as Notifications and Quick Settings. Its Down destination remains
+        // native Recents; Back exits focus without opening another surface.
+        ShadeStatusNavigation statusNavigation = new ShadeStatusNavigation(
+                new ShadeStatusNavigation.Listener() {
+                    @Override public void onZoneFocus(int zone) {
+                        focusZone = zone;
+                        updateStatusFocus(zone);
+                    }
+
+                    @Override public void onReturnToContent(boolean viaBack) {
+                        dismissStatusFocus();
+                        if (!viaBack) openNativeRecents();
+                    }
+
+                    @Override public void onNotificationsSelected() {
+                        dismissStatusFocus();
+                        showPanel(context);
+                    }
+
+                    @Override public void onQuickSettingsSelected() {
+                        dismissStatusFocus();
+                        showSystemControls(context);
+                    }
+                });
         FrameLayout root = new FrameLayout(context) {
             @Override public boolean dispatchKeyEvent(KeyEvent event) {
-                int code = event.getKeyCode();
-                if (code == KeyEvent.KEYCODE_BACK || code == KeyEvent.KEYCODE_ESCAPE) {
-                    if (event.getAction() == KeyEvent.ACTION_UP) {
-                        dismissStatusFocus();
-                    }
-                    return true;
-                }
-                if (code == KeyEvent.KEYCODE_DPAD_LEFT
-                        || code == KeyEvent.KEYCODE_DPAD_RIGHT) {
-                    if (event.getAction() == KeyEvent.ACTION_DOWN) {
-                        focusZone = code == KeyEvent.KEYCODE_DPAD_LEFT ? 0 : 1;
-                        updateStatusFocus(focusZone);
-                    }
-                    return true;
-                }
-                if (code == KeyEvent.KEYCODE_DPAD_DOWN) {
-                    if (event.getAction() == KeyEvent.ACTION_UP) {
-                        dismissStatusFocus();
-                        openNativeRecents();
-                    }
-                    return true;
-                }
-                if (code == KeyEvent.KEYCODE_DPAD_UP) return true;
-                if (code == KeyEvent.KEYCODE_DPAD_CENTER || code == KeyEvent.KEYCODE_ENTER
-                        || code == KeyEvent.KEYCODE_NUMPAD_ENTER || code == KeyEvent.KEYCODE_SPACE) {
-                    if (event.getAction() == KeyEvent.ACTION_UP) {
-                        int selected = focusZone;
-                        dismissStatusFocus();
-                         if (selected == 0) showPanel(getContext());
-                        else showSystemControls(getContext());
-                    }
+                if (statusNavigation.handleKey(event.getKeyCode(), event.getAction())) {
                     return true;
                 }
                 return super.dispatchKeyEvent(event);
@@ -273,9 +267,8 @@ public final class PullDownHook implements IXposedHookLoadPackage {
             wm.addView(root, params);
             focusManager = wm;
             focusWindow = root;
-            focusZone = 0;
             root.requestFocus();
-            updateStatusFocus(focusZone);
+            statusNavigation.enter(ShadeStatusNavigation.NOTIFICATIONS);
             Log.i(TAG, "BlackBerry key entered native status-bar navigation");
         } catch (Throwable error) {
             Log.e(TAG, "Unable to acquire status-bar focus; native input retained", error);
@@ -302,7 +295,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
     private static boolean handleTopEdgeTouch(View view, MotionEvent event) {
         int action = event.getActionMasked();
         if (action == MotionEvent.ACTION_DOWN) {
-            if (!enabled() || shown || openingOrClosing || locked(view.getContext())
+            if (!enabled() || shadeHost != null || openingOrClosing || locked(view.getContext())
                     || event.getPointerCount() != 1
                     || event.getToolType(0) != MotionEvent.TOOL_TYPE_FINGER) return false;
             SwipeState state = new SwipeState(event.getRawY(), event.getRawX());
@@ -407,91 +400,55 @@ public final class PullDownHook implements IXposedHookLoadPackage {
     }
 
     private static void showSystemControls(Context context) {
-        // Right-hand native status-zone now opens the BBOS6 Manage Connections UI.
-        dismissPanelImmediately();
-        showQuickConnections(context);
+        if (shadeHost == null) showShade(context, UnifiedShadeHost.QUICK_SETTINGS);
+        else switchShadePage(UnifiedShadeHost.QUICK_SETTINGS);
     }
 
-    private static void showQuickConnections(Context context) {
-        if (quickShown || quickOpeningOrClosing || shown || openingOrClosing
-                || locked(context)) return;
-        if (focusWindow != null) dismissStatusFocus();
-        quickOpeningOrClosing = true;
-        WindowManager manager = (WindowManager)
-                context.getSystemService(Context.WINDOW_SERVICE);
-        if (manager == null) {
-            quickOpeningOrClosing = false;
+    /** Page changes keep the same WindowManager window and translation. */
+    private static void switchShadePage(int next) {
+        UnifiedShadeHost root = shadeHost;
+        if (root == null || openingOrClosing) return;
+        Context context = root.getContext();
+        if (locked(context)) {
+            dismissShadeImmediately();
             return;
         }
-        BB6ConnectionsPanel root = new BB6ConnectionsPanel(context,
-                new BB6ConnectionsPanel.Listener() {
-                    @Override public void onClose() {
-                        dismissQuickConnections();
-                    }
-                    @Override public void onActivate(int kind) {
-                        activateQuickConnection(kind);
-                    }
-                });
-        WindowManager.LayoutParams params = new WindowManager.LayoutParams(
-                WindowManager.LayoutParams.MATCH_PARENT,
-                Math.max(1, context.getResources().getDisplayMetrics().heightPixels
-                        - nativeStatusBarHeight(context)),
-                STATUS_BAR_SUB_PANEL_WINDOW_TYPE,
-                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
-                PixelFormat.OPAQUE);
-        params.setTitle("BB6 Manage Connections");
-        params.gravity = Gravity.TOP | Gravity.START;
-        params.y = nativeStatusBarHeight(context);
-        params.setFitInsetsTypes(0);
-        params.layoutInDisplayCutoutMode =
-                WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS;
-        root.setTranslationY(-params.height);
-        try {
-            manager.addView(root, params);
-            quickPanel = root;
-            quickWindowManager = manager;
-            quickShown = true;
-            registerScreenOffReceiver(context);
-            registerQuickConnectionStateReceiver(context);
-            updateStatusAppearance();
-            root.post(() -> {
-                if (quickPanel != root || !quickShown) return;
-                root.animate().translationY(0f).setDuration(220).withEndAction(() -> {
-                    if (quickPanel == root && quickShown) {
-                        quickOpeningOrClosing = false;
-                        root.focusFirst();
-                    }
-                }).start();
-            });
-            Log.i(TAG, "BBOS6 Manage Connections opened: mobile, Wi-Fi, Bluetooth");
-        } catch (Throwable error) {
-            Log.e(TAG, "Unable to attach BBOS6 Quick Settings panel", error);
-            if (quickPanel == root && quickWindowManager != null) {
-                try { quickWindowManager.removeViewImmediate(root); }
-                catch (Throwable removeError) {
-                    Log.w(TAG, "Quick Settings rollback removal failed", removeError);
-                }
-            }
-            stopQuickConnectionStateReceiver();
-            unregisterScreenOffReceiver();
-            quickPanel = null;
-            quickWindowManager = null;
-            quickShown = false;
-            quickOpeningOrClosing = false;
-            updateStatusAppearance();
+        if (root.page() == next) {
+            root.focusContent();
+            return;
         }
+        // Refresh native data for the page we are entering. Neither page is
+        // detached or reconstructed, and the root entrance animation is untouched.
+        if (next == UnifiedShadeHost.NOTIFICATIONS) {
+            SystemUiNotificationObserver.refreshBeforeOpen();
+            if (panel != null) {
+                panel.setFavorites(activeFavorites);
+                panel.setNotifications(SystemUiNotificationObserver.itemsSnapshot());
+            }
+            FavoritesClient.reportObserved(context, activeFavorites,
+                    SystemUiNotificationObserver.itemsSnapshot());
+            if (mediaSessions != null) mediaSessions.refresh();
+        } else if (quickPanel != null) {
+            quickPanel.refresh(NativeConnectionControls.read(context));
+        }
+        root.setPage(next);
+        shown = next == UnifiedShadeHost.NOTIFICATIONS;
+        quickShown = next == UnifiedShadeHost.QUICK_SETTINGS;
+        updateStatusAppearance();
+        root.focusContent();
+        Log.i(TAG, "Unified shade switched page=" + next + " without animation");
     }
 
     private static void activateQuickConnection(int kind) {
         BB6ConnectionsPanel root = quickPanel;
-        if (root == null || !quickShown || quickOpeningOrClosing) return;
+        if (root == null || !quickShown) return;
         Context context = root.getContext();
         if (locked(context)) {
-            dismissQuickConnectionsImmediately();
+            dismissShadeImmediately();
             return;
         }
         // Remove our overlay before native SystemUI displays its Internet/BT UI.
-        dismissQuickConnectionsImmediately();
+        dismissShadeImmediately();
         if (!NativeQuickSettingsTiles.activate(kind)
                 && !NativeConnectionControls.openNativeSettings(context, kind)) {
             // Final compatibility path: never strand the user without working QS.
@@ -542,38 +499,6 @@ public final class PullDownHook implements IXposedHookLoadPackage {
         }
     }
 
-    private static void dismissQuickConnections() {
-        BB6ConnectionsPanel root = quickPanel;
-        if (root == null || !quickShown || quickOpeningOrClosing) return;
-        quickOpeningOrClosing = true;
-        int height = root.getHeight();
-        if (height <= 0) height = root.getResources().getDisplayMetrics().heightPixels;
-        root.animate().translationY(-height).setDuration(180)
-                .withEndAction(() -> {
-                    if (quickPanel == root) dismissQuickConnectionsImmediately();
-                }).start();
-    }
-
-    private static void dismissQuickConnectionsImmediately() {
-        BB6ConnectionsPanel root = quickPanel;
-        if (root == null) return;
-        quickPanel = null;
-        quickShown = false;
-        try {
-            root.animate().cancel();
-            if (quickWindowManager != null) quickWindowManager.removeViewImmediate(root);
-        } catch (Throwable error) {
-            Log.w(TAG, "Unable to hide BBOS6 Quick Settings panel", error);
-        } finally {
-            stopQuickConnectionStateReceiver();
-            unregisterScreenOffReceiver();
-            quickWindowManager = null;
-            quickOpeningOrClosing = false;
-            updateStatusAppearance();
-            Log.i(TAG, "BBOS6 Manage Connections closed");
-        }
-    }
-
     /** Native status bar stays untouched outside the requested UI states. */
     private static GradientDrawable graphiteBackground(Context context) {
         GradientDrawable background = new GradientDrawable(
@@ -588,6 +513,11 @@ public final class PullDownHook implements IXposedHookLoadPackage {
     }
 
     private static void updateStatusAppearance() {
+        UnifiedShadeHost currentShade = shadeHost;
+        if (currentShade != null) {
+            currentShade.setStatusBarFocused(shown && panelStatusFocused()
+                    || quickShown && quickPanelStatusFocused());
+        }
         View bar = nativeStatusBar.get();
         if (bar == null) bar = decoratedStatusBar;
         if (bar == null) return;
@@ -598,10 +528,11 @@ public final class PullDownHook implements IXposedHookLoadPackage {
                 decoratedStatusBar = null;
                 originalStatusBackground = null;
             }
-            boolean focused = focusWindow != null || shown && panel != null
-                    && panelStatusFocused();
+            boolean focused = focusWindow != null
+                    || shown && panelStatusFocused()
+                    || quickShown && quickPanelStatusFocused();
             boolean decorated = focused || shown || openingOrClosing
-                    || quickShown || quickOpeningOrClosing
+                    || quickShown
                     || recentsVisible || nativeShadeExpanded;
             if (!decorated) {
                 if (decoratedStatusBar == target) {
@@ -617,7 +548,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
             }
             Drawable base = graphiteBackground(target.getContext());
             int selectedZone = focusWindow != null ? focusZone
-                    : quickShown ? 1
+                    : quickShown && quickPanelStatusFocused() ? quickPanelFocusedZone()
                     : shown && panelStatusFocused() ? panelFocusedZone() : -1;
             if (selectedZone < 0 || target.getWidth() <= 0) {
                 target.setBackground(base);
@@ -639,6 +570,14 @@ public final class PullDownHook implements IXposedHookLoadPackage {
 
     private static int panelFocusedZone() {
         return panel == null ? -1 : panel.statusFocusZone();
+    }
+
+    private static boolean quickPanelStatusFocused() {
+        return quickPanel != null && quickPanel.statusFocusZone() >= 0;
+    }
+
+    private static int quickPanelFocusedZone() {
+        return quickPanel == null ? -1 : quickPanel.statusFocusZone();
     }
 
     /** Quickstep sends only the native overview visibility transition. */
@@ -713,28 +652,40 @@ public final class PullDownHook implements IXposedHookLoadPackage {
     }
 
     private static void showPanel(Context context) {
+        if (shadeHost != null) {
+            switchShadePage(UnifiedShadeHost.NOTIFICATIONS);
+        } else {
+            showShade(context, UnifiedShadeHost.NOTIFICATIONS);
+        }
+    }
+
+    /**
+     * One window per shade session. Both pages remain attached until the shade
+     * really closes; internal page changes only toggle view visibility.
+     */
+    private static void showShade(Context context, int initialPage) {
         if (focusWindow != null) dismissStatusFocus();
-        if (shown || openingOrClosing || quickShown || quickOpeningOrClosing
-                || !enabled() || locked(context)) return;
+        if (shadeHost != null || openingOrClosing || !enabled() || locked(context)) return;
         openingOrClosing = true;
         WindowManager manager = (WindowManager)
                 context.getSystemService(Context.WINDOW_SERVICE);
         if (manager == null) {
             openingOrClosing = false;
-            Log.w(TAG, "WindowManager unavailable");
+            Log.w(TAG, "Shade WindowManager unavailable");
             return;
         }
-        // Query the live, system-owned notification listener before drawing.
-        // The gesture and 15/85 geometry are unchanged.
+
+        try {
         SystemUiNotificationObserver.refreshBeforeOpen();
         activeFavorites = FavoritesClient.read(context);
         FavoritesClient.reportObserved(context, activeFavorites,
                 SystemUiNotificationObserver.itemsSnapshot());
+
         NativeMediaSessions nativeMedia = new NativeMediaSessions(context, entries -> {
-            TwoColumnPanel visiblePanel = panel;
-            if (visiblePanel != null && shown) visiblePanel.setMediaSessions(entries);
+            TwoColumnPanel current = panel;
+            if (shadeHost != null && current != null) current.setMediaSessions(entries);
         });
-        TwoColumnPanel root = new TwoColumnPanel(
+        TwoColumnPanel notifications = new TwoColumnPanel(
                 context, PullDownHook::dismissPanel, PullDownHook::openNotification,
                 new TwoColumnPanel.NotificationActionListener() {
                     @Override public void onAction(String key, int index) {
@@ -754,8 +705,26 @@ public final class PullDownHook implements IXposedHookLoadPackage {
                         showSystemControls(context);
                     }
                 }, nativeMedia::send);
-        root.setFavorites(activeFavorites);
-        root.setNotifications(SystemUiNotificationObserver.itemsSnapshot());
+        BB6ConnectionsPanel connections = new BB6ConnectionsPanel(context,
+                new BB6ConnectionsPanel.Listener() {
+                    @Override public void onClose() {
+                        dismissShade();
+                    }
+                    @Override public void onActivate(int kind) {
+                        activateQuickConnection(kind);
+                    }
+                    @Override public void onStatusZoneFocus(int zone) {
+                        updateStatusFocus(zone);
+                    }
+                    @Override public void onShowNotifications() {
+                        switchShadePage(UnifiedShadeHost.NOTIFICATIONS);
+                    }
+                });
+        notifications.setFavorites(activeFavorites);
+        notifications.setNotifications(SystemUiNotificationObserver.itemsSnapshot());
+
+        UnifiedShadeHost root = new UnifiedShadeHost(
+                context, notifications, connections, initialPage, PullDownHook::dismissShade);
         WindowManager.LayoutParams params = new WindowManager.LayoutParams(
                 WindowManager.LayoutParams.MATCH_PARENT,
                 Math.max(1, context.getResources().getDisplayMetrics().heightPixels
@@ -763,7 +732,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
                 STATUS_BAR_SUB_PANEL_WINDOW_TYPE,
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
                 PixelFormat.OPAQUE);
-        params.setTitle("BB7 Pull-down");
+        params.setTitle("BB UI Unified Shade");
         params.gravity = Gravity.TOP | Gravity.START;
         params.y = nativeStatusBarHeight(context);
         params.setFitInsetsTypes(0);
@@ -771,64 +740,68 @@ public final class PullDownHook implements IXposedHookLoadPackage {
                 WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS;
         int height = params.height;
         root.setTranslationY(-height);
+        boolean attached = false;
         try {
             manager.addView(root, params);
-            // Match CentralSurfacesImpl: observe Android's own system-dialog
-            // close broadcast for Home, as well as screen-off for privacy.
-            try {
-                registerScreenOffReceiver(context);
-            } catch (Throwable registrationError) {
-                manager.removeViewImmediate(root);
-                throw registrationError;
-            }
-            panel = root;
+            attached = true;
+            shadeHost = root;
             windowManager = manager;
-            shown = true;
+            panel = notifications;
+            quickPanel = connections;
+            shown = initialPage == UnifiedShadeHost.NOTIFICATIONS;
+            quickShown = initialPage == UnifiedShadeHost.QUICK_SETTINGS;
+            registerScreenOffReceiver(context);
+            registerQuickConnectionStateReceiver(context);
             mediaSessions = nativeMedia;
             nativeMedia.start();
-            registerFavoritesObserver(context, root);
+            registerFavoritesObserver(context, notifications);
             updateStatusAppearance();
-            Log.i(TAG, "Two-column window attached; fullWidth=true left=15 right=85"
+
+            Log.i(TAG, "Unified shade window attached: initialPage=" + initialPage
                     + " heightPx=" + height);
             root.post(() -> {
+                if (shadeHost != root) return;
                 root.animate().translationY(0f).setDuration(220).withEndAction(() -> {
-                    openingOrClosing = false;
-                    root.focusSelectedAppIcon();
+                    if (shadeHost == root) {
+                        openingOrClosing = false;
+                        root.focusContent();
+                    }
                 }).start();
             });
         } catch (Throwable error) {
+            Log.e(TAG, "Unable to attach unified shade; rolling back", error);
+            if (shadeHost == root) {
+                dismissShadeImmediately();
+            } else if (attached) {
+                try { manager.removeViewImmediate(root); }
+                catch (Throwable rollbackError) {
+                    Log.w(TAG, "Unable to remove failed unified shade window", rollbackError);
+                }
+                openingOrClosing = false;
+            } else {
+                openingOrClosing = false;
+            }
+        }
+        } catch (Throwable initializationError) {
             openingOrClosing = false;
-            shown = false;
-            panel = null;
-            windowManager = null;
-            Log.e(TAG, "Unable to display full-width pull-down; stock system unaffected", error);
+            Log.e(TAG, "Unable to initialize unified shade pages", initializationError);
         }
     }
 
     private static void dismissPanel() {
-        if (!shown || openingOrClosing || panel == null) return;
+        dismissShade();
+    }
+
+    private static void dismissShade() {
+        UnifiedShadeHost root = shadeHost;
+        if (root == null || openingOrClosing) return;
         openingOrClosing = true;
-        TwoColumnPanel root = panel;
         int height = root.getHeight();
         if (height <= 0) height = root.getResources().getDisplayMetrics().heightPixels;
-        root.clearStatusZoneFocus();
+        root.clearStatusBarFocus();
         root.animate().translationY(-height).setDuration(180)
                 .withEndAction(() -> {
-                    try {
-                        if (windowManager != null) windowManager.removeViewImmediate(root);
-                    } catch (Throwable e) {
-                        Log.w(TAG, "Unable to remove pull-down cleanly", e);
-                    } finally {
-                        stopFavoritesObserver();
-                        stopMediaSessions();
-                        unregisterScreenOffReceiver();
-                        panel = null;
-                        windowManager = null;
-                        shown = false;
-                        openingOrClosing = false;
-                        updateStatusAppearance();
-                        Log.i(TAG, "Two-column pull-down dismissed");
-                    }
+                    if (shadeHost == root) dismissShadeImmediately();
                 }).start();
     }
 
@@ -839,12 +812,10 @@ public final class PullDownHook implements IXposedHookLoadPackage {
                 String action = intent.getAction();
                 if (Intent.ACTION_CLOSE_SYSTEM_DIALOGS.equals(action)) {
                     Log.i(TAG, "Native close-system-dialogs event received");
-                    dismissPanelImmediately();
-                    dismissQuickConnectionsImmediately();
+                    dismissShadeImmediately();
                 } else if (Intent.ACTION_SCREEN_OFF.equals(action)) {
                     Log.i(TAG, "Native screen-off event received");
-                    dismissPanelImmediately();
-                    dismissQuickConnectionsImmediately();
+                    dismissShadeImmediately();
                 }
             }
         };
@@ -881,24 +852,33 @@ public final class PullDownHook implements IXposedHookLoadPackage {
     }
 
     private static void dismissPanelImmediately() {
-        TwoColumnPanel current = panel;
+        dismissShadeImmediately();
+    }
+
+    /** One cleanup path for QS, notifications, Home, and screen-off. */
+    private static void dismissShadeImmediately() {
+        UnifiedShadeHost current = shadeHost;
         if (current == null) return;
+        shadeHost = null;
+        shown = false;
+        quickShown = false;
         try {
-            current.clearStatusZoneFocus();
+            current.clearStatusBarFocus();
             current.animate().cancel();
             if (windowManager != null) windowManager.removeViewImmediate(current);
         } catch (Throwable error) {
-            Log.w(TAG, "Unable to immediately hide notification panel", error);
+            Log.w(TAG, "Unable to remove unified shade window", error);
         } finally {
             stopFavoritesObserver();
+            stopQuickConnectionStateReceiver();
             stopMediaSessions();
             unregisterScreenOffReceiver();
             panel = null;
+            quickPanel = null;
             windowManager = null;
-            shown = false;
             openingOrClosing = false;
             updateStatusAppearance();
-            Log.i(TAG, "Two-column pull-down immediately hidden");
+            Log.i(TAG, "Unified shade window removed");
         }
     }
 
@@ -907,9 +887,13 @@ public final class PullDownHook implements IXposedHookLoadPackage {
         stopFavoritesObserver();
         ContentObserver observer = new ContentObserver(new Handler(Looper.getMainLooper())) {
             @Override public void onChange(boolean selfChange) {
-                if (panel != root || !shown) return;
+                // Settings remain synchronized even when the retained QS page
+                // is visible, so returning to notifications uses fresh rules.
+                if (panel != root || shadeHost == null) return;
                 activeFavorites = FavoritesClient.read(context);
-                root.setFavorites(activeFavorites);
+                if (shown) {
+                    root.setFavorites(activeFavorites);
+                }
                 FavoritesClient.reportObserved(context, activeFavorites,
                         SystemUiNotificationObserver.itemsSnapshot());
             }
