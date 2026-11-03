@@ -71,9 +71,7 @@ final class BB6ConnectionsPanel extends FrameLayout {
         addView(content, new LayoutParams(LayoutParams.MATCH_PARENT,
                 LayoutParams.MATCH_PARENT));
 
-        // Reuse the notification shade's centered date-only header.
-        content.addView(new ShadeDateHeader(context),
-                ShadeDateHeader.layoutParams(context));
+        // UnifiedShadeHost renders the common date strip above this page.
 
         LinearLayout card = new LinearLayout(context);
         card.setOrientation(LinearLayout.VERTICAL);
