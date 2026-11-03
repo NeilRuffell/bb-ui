@@ -41,6 +41,8 @@ final class NotificationItem {
     final String groupKey;
     final boolean groupSummary;
     final boolean silent;
+    final List<String> conversationIds;
+    final String conversationTitle;
 
     NotificationItem(String key, String packageName, String title, String text, long postedAt) {
         this(key, packageName, title, text, postedAt, false, Collections.emptyList(),
@@ -56,6 +58,14 @@ final class NotificationItem {
     NotificationItem(String key, String packageName, String title, String text,
             long postedAt, boolean clearable, List<ActionItem> actions,
             String groupKey, boolean groupSummary, boolean silent) {
+        this(key, packageName, title, text, postedAt, clearable, actions,
+                groupKey, groupSummary, silent, Collections.emptyList(), "");
+    }
+
+    NotificationItem(String key, String packageName, String title, String text,
+            long postedAt, boolean clearable, List<ActionItem> actions,
+            String groupKey, boolean groupSummary, boolean silent,
+            List<String> conversationIds, String conversationTitle) {
         this.key = key;
         this.packageName = packageName;
         this.title = title == null ? "" : title;
@@ -65,6 +75,9 @@ final class NotificationItem {
         this.groupKey = groupKey;
         this.groupSummary = groupSummary;
         this.silent = silent;
+        this.conversationIds = Collections.unmodifiableList(conversationIds == null
+                ? Collections.emptyList() : new ArrayList<>(conversationIds));
+        this.conversationTitle = conversationTitle == null ? "" : conversationTitle;
         this.actions = Collections.unmodifiableList(
                 actions == null ? Collections.emptyList() : new ArrayList<>(actions));
     }
@@ -76,6 +89,8 @@ final class NotificationItem {
         return postedAt == other.postedAt && clearable == other.clearable
                 && groupSummary == other.groupSummary && silent == other.silent
                 && Objects.equals(groupKey, other.groupKey)
+                && Objects.equals(conversationIds, other.conversationIds)
+                && Objects.equals(conversationTitle, other.conversationTitle)
                 && Objects.equals(key, other.key)
                 && Objects.equals(packageName, other.packageName)
                 && Objects.equals(title, other.title) && Objects.equals(text, other.text)
@@ -84,6 +99,6 @@ final class NotificationItem {
 
     @Override public int hashCode() {
         return Objects.hash(key, packageName, title, text, postedAt, clearable, actions,
-                groupKey, groupSummary, silent);
+                groupKey, groupSummary, silent, conversationIds, conversationTitle);
     }
 }

@@ -11,7 +11,8 @@ final class NotificationSelectionPolicy {
     private NotificationSelectionPolicy() {}
 
     static List<NotificationItem> forPackage(List<NotificationItem> all, String selectedPackage) {
-        if (selectedPackage == null || NotificationCategoryPolicy.isSilent(selectedPackage)) {
+        if (selectedPackage == null || NotificationCategoryPolicy.isSilent(selectedPackage)
+                || NotificationCategoryPolicy.isFavorites(selectedPackage)) {
             return Collections.emptyList();
         }
         return filter(all, selectedPackage, false);
@@ -34,6 +35,25 @@ final class NotificationSelectionPolicy {
             visible.add(item);
         }
         return Collections.unmodifiableList(visible);
+    }
+
+    /** Group summaries are hidden only if the filtered list contains a child. */
+    static List<NotificationItem> withoutRedundantGroupSummaries(List<NotificationItem> matched) {
+        if (matched == null || matched.isEmpty()) return Collections.emptyList();
+        Set<String> childGroups = new HashSet<>();
+        for (NotificationItem item : matched) {
+            if (item != null && !item.groupSummary && item.groupKey != null) {
+                childGroups.add(item.groupKey);
+            }
+        }
+        List<NotificationItem> result = new ArrayList<>();
+        for (NotificationItem item : matched) {
+            if (item == null) continue;
+            if (item.groupSummary && item.groupKey != null
+                    && childGroups.contains(item.groupKey)) continue;
+            result.add(item);
+        }
+        return Collections.unmodifiableList(result);
     }
 
     private static List<NotificationItem> filter(List<NotificationItem> all, String packageName,

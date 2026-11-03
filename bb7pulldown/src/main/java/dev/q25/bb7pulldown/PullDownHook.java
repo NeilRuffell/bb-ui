@@ -10,6 +10,7 @@ import android.content.IntentFilter;
 import android.graphics.PixelFormat;
 import android.os.Handler;
 import android.os.Looper;
+import android.database.ContentObserver;
 import android.view.KeyEvent;
 import android.content.pm.PackageManager;
 import android.widget.FrameLayout;
@@ -74,6 +75,9 @@ public final class PullDownHook implements IXposedHookLoadPackage {
     private static WindowManager windowManager;
     private static TwoColumnPanel panel;
     private static NativeMediaSessions mediaSessions;
+    private static FavoritesRules activeFavorites = new FavoritesRules();
+    private static ContentObserver favoritesObserver;
+    private static Context favoritesObserverContext;
     private static boolean openingOrClosing;
     private static BroadcastReceiver screenOffReceiver;
     private static Context receiverContext;
@@ -333,6 +337,8 @@ public final class PullDownHook implements IXposedHookLoadPackage {
                     dismissPanelImmediately();
                 } else {
                     current.setNotifications(SystemUiNotificationObserver.itemsSnapshot());
+                    FavoritesClient.reportObserved(current.getContext(), activeFavorites,
+                            SystemUiNotificationObserver.itemsSnapshot());
                     NativeMediaSessions media = mediaSessions;
                     if (media != null) media.refresh();
                 }
@@ -552,6 +558,9 @@ public final class PullDownHook implements IXposedHookLoadPackage {
         // Query the live, system-owned notification listener before drawing.
         // The gesture and 15/85 geometry are unchanged.
         SystemUiNotificationObserver.refreshBeforeOpen();
+        activeFavorites = FavoritesClient.read(context);
+        FavoritesClient.reportObserved(context, activeFavorites,
+                SystemUiNotificationObserver.itemsSnapshot());
         NativeMediaSessions nativeMedia = new NativeMediaSessions(context, entries -> {
             TwoColumnPanel visiblePanel = panel;
             if (visiblePanel != null && shown) visiblePanel.setMediaSessions(entries);
@@ -576,6 +585,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
                         showSystemControls(context);
                     }
                 }, nativeMedia::send);
+        root.setFavorites(activeFavorites);
         root.setNotifications(SystemUiNotificationObserver.itemsSnapshot());
         WindowManager.LayoutParams params = new WindowManager.LayoutParams(
                 WindowManager.LayoutParams.MATCH_PARENT,
@@ -607,6 +617,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
             shown = true;
             mediaSessions = nativeMedia;
             nativeMedia.start();
+            registerFavoritesObserver(context, root);
             updateStatusAppearance();
             Log.i(TAG, "Two-column window attached; fullWidth=true left=15 right=85"
                     + " heightPx=" + height);
@@ -639,6 +650,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
                     } catch (Throwable e) {
                         Log.w(TAG, "Unable to remove pull-down cleanly", e);
                     } finally {
+                        stopFavoritesObserver();
                         stopMediaSessions();
                         unregisterScreenOffReceiver();
                         panel = null;
@@ -707,6 +719,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
         } catch (Throwable error) {
             Log.w(TAG, "Unable to immediately hide notification panel", error);
         } finally {
+            stopFavoritesObserver();
             stopMediaSessions();
             unregisterScreenOffReceiver();
             panel = null;
@@ -715,6 +728,42 @@ public final class PullDownHook implements IXposedHookLoadPackage {
             openingOrClosing = false;
             updateStatusAppearance();
             Log.i(TAG, "Two-column pull-down immediately hidden");
+        }
+    }
+
+    /** Listen only while our panel is visible; settings updates are live. */
+    private static void registerFavoritesObserver(Context context, TwoColumnPanel root) {
+        stopFavoritesObserver();
+        ContentObserver observer = new ContentObserver(new Handler(Looper.getMainLooper())) {
+            @Override public void onChange(boolean selfChange) {
+                if (panel != root || !shown) return;
+                activeFavorites = FavoritesClient.read(context);
+                root.setFavorites(activeFavorites);
+                FavoritesClient.reportObserved(context, activeFavorites,
+                        SystemUiNotificationObserver.itemsSnapshot());
+            }
+        };
+        try {
+            context.getContentResolver().registerContentObserver(
+                    FavoritesSettingsProvider.RULES_URI, false, observer);
+            favoritesObserver = observer;
+            favoritesObserverContext = context;
+        } catch (RuntimeException error) {
+            Log.w(TAG, "Favorites live settings observer unavailable", error);
+        }
+    }
+
+    private static void stopFavoritesObserver() {
+        ContentObserver observer = favoritesObserver;
+        Context context = favoritesObserverContext;
+        favoritesObserver = null;
+        favoritesObserverContext = null;
+        if (observer != null && context != null) {
+            try {
+                context.getContentResolver().unregisterContentObserver(observer);
+            } catch (RuntimeException error) {
+                Log.w(TAG, "Unable to release Favorites observer", error);
+            }
         }
     }
 
