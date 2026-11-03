@@ -724,7 +724,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
         notifications.setNotifications(SystemUiNotificationObserver.itemsSnapshot());
 
         UnifiedShadeHost root = new UnifiedShadeHost(
-                context, notifications, connections, initialPage);
+                context, notifications, connections, initialPage, PullDownHook::dismissShade);
         WindowManager.LayoutParams params = new WindowManager.LayoutParams(
                 WindowManager.LayoutParams.MATCH_PARENT,
                 Math.max(1, context.getResources().getDisplayMetrics().heightPixels
@@ -891,7 +891,9 @@ public final class PullDownHook implements IXposedHookLoadPackage {
                 // is visible, so returning to notifications uses fresh rules.
                 if (panel != root || shadeHost == null) return;
                 activeFavorites = FavoritesClient.read(context);
-                root.setFavorites(activeFavorites);
+                if (shown) {
+                    root.setFavorites(activeFavorites);
+                }
                 FavoritesClient.reportObserved(context, activeFavorites,
                         SystemUiNotificationObserver.itemsSnapshot());
             }
