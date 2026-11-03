@@ -94,46 +94,88 @@ public final class BB6KeyguardKeyboardHook implements IXposedHookLoadPackage {
         }
         boolean locked = guard.isKeyguardLocked();
         Object manager = keyguardViewManager.get();
-        boolean managerReady = false;
-        boolean primaryBouncerShowing = false;
+        // Manager presence and visibility-method availability are independent.
+        // The Q25 runtime has been observed without primaryBouncerIsShowing().
+        // Do not let a missing optional query prevent authentication entry.
+        boolean managerReady = manager != null;
+        boolean bouncerShowing = false;
         boolean bouncerInTransit = false;
-
-        if (locked && manager != null) {
-            try {
-                Object shown = XposedHelpers.callMethod(manager, "primaryBouncerIsShowing");
-                Object transit = XposedHelpers.callMethod(manager, "isPrimaryBouncerInTransit");
-                if (shown instanceof Boolean && transit instanceof Boolean) {
-                    primaryBouncerShowing = (Boolean) shown;
-                    bouncerInTransit = (Boolean) transit;
-                    managerReady = true;
-                }
-            } catch (Throwable error) {
-                Log.e(TAG, "Could not determine native credential visibility", error);
+        if (locked && managerReady) {
+            Boolean visible = queryBoolean(manager, "isBouncerShowing");
+            if (visible == null) {
+                visible = queryBoolean(manager, "primaryBouncerIsShowing");
             }
+            bouncerShowing = Boolean.TRUE.equals(visible);
+            bouncerInTransit = Boolean.TRUE.equals(
+                    queryBoolean(manager, "isPrimaryBouncerInTransit"));
         }
 
         View focused = window.findFocus();
         boolean editorFocused = focused != null && focused.onCheckIsTextEditor();
 
         int decision = SPACE_POLICY.route(event.getAction(), event.getDownTime(),
-                event.getRepeatCount(), locked, primaryBouncerShowing,
+                event.getRepeatCount(), locked, bouncerShowing,
                 bouncerInTransit, managerReady, editorFocused);
         if (decision == KeyguardSpacePolicy.PASS) return false;
 
         if (decision == KeyguardSpacePolicy.REQUEST_BOUNCER) {
             try {
-                // LineageOS 24.0 signature: (boolean scrimmed, String reason).
-                XposedHelpers.callMethod(manager, "showPrimaryBouncer",
-                        true, "BB UI: physical Space on lockscreen");
-                Log.i(TAG, "Space consumed; native primary bouncer requested");
+                // Do not select a focused control or simulate an unlock swipe.
+                requestNativeBouncer(manager);
+                Log.i(TAG, "Space consumed; native credential bouncer requested");
             } catch (Throwable error) {
-                // This key must NEVER fall through to a focused QS tile.
-                Log.e(TAG, "Bouncer request failed; lockscreen Space still consumed", error);
+                // Fail closed: never deliver this key to a focused QS tile.
+                Log.e(TAG, "Bouncer request failed; lockscreen Space consumed", error);
             }
         } else if (event.getAction() == KeyEvent.ACTION_DOWN && !managerReady && locked) {
-            Log.w(TAG, "Space consumed on lockscreen; keyguard manager unavailable");
+            Log.w(TAG, "Space consumed; native keyguard manager not captured");
         }
         return true;
+    }
+
+    /** Optional runtime method: device builds do not all expose identical
+     * keyguard visibility helpers. Check the method before invoking it.
+     */
+    private static Boolean queryBoolean(Object manager, String methodName) {
+        if (manager == null) return null;
+        try {
+            for (java.lang.reflect.Method method : manager.getClass().getMethods()) {
+                if (method.getName().equals(methodName)
+                        && method.getParameterTypes().length == 0
+                        && (method.getReturnType() == boolean.class
+                            || method.getReturnType() == Boolean.class)) {
+                    Object result = XposedHelpers.callMethod(manager, methodName);
+                    return result instanceof Boolean ? (Boolean) result : null;
+                }
+            }
+        } catch (Throwable error) {
+            Log.w(TAG, "Could not query optional keyguard state: " + methodName, error);
+        }
+        return null;
+    }
+
+    /** Native SystemUI bouncer methods differ across vendor builds.
+     * Prefer primary credentials; fall back to the native bouncer entry.
+     */
+    private static void requestNativeBouncer(Object manager) {
+        if (manager == null) throw new IllegalStateException("No native keyguard manager");
+        String reason = "BB UI: physical Space on lockscreen";
+        for (String name : new String[] {"showPrimaryBouncer", "showBouncer"}) {
+            for (java.lang.reflect.Method method : manager.getClass().getMethods()) {
+                if (!method.getName().equals(name)) continue;
+                Class<?>[] params = method.getParameterTypes();
+                if (params.length == 2 && params[0] == boolean.class
+                        && params[1] == String.class) {
+                    XposedHelpers.callMethod(manager, name, true, reason);
+                    return;
+                }
+                if (params.length == 1 && params[0] == boolean.class) {
+                    XposedHelpers.callMethod(manager, name, true);
+                    return;
+                }
+            }
+        }
+        throw new NoSuchMethodError("No compatible native keyguard bouncer entry point");
     }
 
     private static boolean enabled() {
