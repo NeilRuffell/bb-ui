@@ -1,6 +1,6 @@
 package dev.q25.bb7pulldown;
 
-/** Pure routing policy; Android's existing authentication UI handles credentials. */
+/** Locked Space is a native credential-entry command, not a focused click. */
 final class KeyguardSpacePolicy {
     static final int PASS = 0;
     static final int CONSUME = 1;
@@ -8,16 +8,17 @@ final class KeyguardSpacePolicy {
 
     private static final int DOWN = 0;
     private static final int UP = 1;
-
     private long interceptedDownTime = -1;
 
     int route(int action, long downTime, int repeatCount,
             boolean keyguardShowing, boolean bouncerShowing, boolean textEditorFocused) {
-        // A matching release cannot reach a newly focused QS or notification view.
         if (downTime == interceptedDownTime) {
             if (action == UP) {
                 interceptedDownTime = -1;
-                return CONSUME;
+                // Do not request entry if an existing unlock UI appeared
+                // in between physical DOWN and UP.
+                return keyguardShowing && !bouncerShowing && !textEditorFocused
+                        ? REQUEST_NATIVE_ENTRY : CONSUME;
             }
             if (action == DOWN) return CONSUME;
         }
@@ -26,10 +27,9 @@ final class KeyguardSpacePolicy {
 
         if (action == DOWN) {
             interceptedDownTime = downTime;
-            return repeatCount == 0 ? REQUEST_NATIVE_ENTRY : CONSUME;
+            return CONSUME;
         }
-        // An orphan Space UP on the lock screen must not click a selected item.
-        if (action == UP) return CONSUME;
-        return PASS;
+        // Orphan release must not activate a selected notification or QS tile.
+        return action == UP ? CONSUME : PASS;
     }
 }
