@@ -1,3 +1,5 @@
+> **Historical feature-branch notes.** This page describes an earlier implementation of Favorites. For current project setup and code navigation, start with [README.md](README.md). Check current source behavior before relying on the details below.
+
 # Favorites notification category (test branch)
 
 Branch: `feat/favorites-notification-rules`
