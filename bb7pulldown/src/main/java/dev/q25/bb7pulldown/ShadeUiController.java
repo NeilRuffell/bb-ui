@@ -30,14 +30,16 @@ final class ShadeUiController {
                 listener.onStatusFocusChanged(zone);
             }
 
-            @Override public void onReturnToContent(boolean viaBack) {
-                if (viaBack) {
-                    listener.onExit();
-                } else if (openPage == ShadeStatusNavigation.NONE) {
+            @Override public void onDown() {
+                if (openPage == ShadeStatusNavigation.NONE) {
                     listener.onNativeRecents();
                 } else {
                     listener.onFocusShadeContent();
                 }
+            }
+
+            @Override public void onBack() {
+                listener.onExit();
             }
 
             @Override public void onNotificationsSelected() {
