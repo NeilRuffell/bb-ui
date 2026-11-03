@@ -354,6 +354,8 @@ final class TwoColumnPanel extends FrameLayout {
                                 : new int[] {0xffecf1f7, 0xffd8e2ec}));
         mediaAppName.setTextColor(focused && !mediaControlsOpen
                 ? Color.WHITE : palette.title);
+        mediaIndex.setTextColor(focused && !mediaControlsOpen
+                ? Color.WHITE : palette.muted);
         int index = mediaSessionIndex();
         if (index < 0) return;
         NativeMediaSessions.Entry entry = mediaSessions.get(index);
