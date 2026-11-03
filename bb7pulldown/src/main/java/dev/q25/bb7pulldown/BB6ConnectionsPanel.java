@@ -16,7 +16,6 @@ import android.view.MotionEvent;
 import android.view.View;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
-import android.widget.TextClock;
 import android.widget.TextView;
 
 /**
@@ -51,32 +50,9 @@ final class BB6ConnectionsPanel extends FrameLayout {
         addView(content, new LayoutParams(LayoutParams.MATCH_PARENT,
                 LayoutParams.MATCH_PARENT));
 
-        // Original OS6 arrangement: blue date/time band above one connection group.
-        FrameLayout dateBand = new FrameLayout(context);
-        dateBand.setBackground(new GradientDrawable(
-                GradientDrawable.Orientation.TOP_BOTTOM, BB7Theme.gradientColors()));
-        content.addView(dateBand, new LinearLayout.LayoutParams(
-                LayoutParams.MATCH_PARENT, dp(49)));
-        TextClock date = new TextClock(context);
-        date.setFormat12Hour("EEE d MMM");
-        date.setFormat24Hour("EEE d MMM");
-        date.setTextSize(12);
-        date.setTextColor(Color.WHITE);
-        date.setSingleLine(true);
-        date.setGravity(Gravity.CENTER_VERTICAL);
-        FrameLayout.LayoutParams dateParams = new FrameLayout.LayoutParams(
-                LayoutParams.WRAP_CONTENT, LayoutParams.MATCH_PARENT, Gravity.START);
-        dateParams.leftMargin = dp(11);
-        dateBand.addView(date, dateParams);
-        TextClock time = new TextClock(context);
-        time.setFormat12Hour("h:mm");
-        time.setFormat24Hour("HH:mm");
-        time.setTextSize(22);
-        time.setTextColor(Color.WHITE);
-        time.setGravity(Gravity.CENTER);
-        time.setSingleLine(true);
-        dateBand.addView(time, new FrameLayout.LayoutParams(
-                LayoutParams.WRAP_CONTENT, LayoutParams.MATCH_PARENT, Gravity.CENTER));
+        // Reuse the notification shade's centered date-only header.
+        content.addView(new ShadeDateHeader(context),
+                ShadeDateHeader.layoutParams(context));
 
         LinearLayout card = new LinearLayout(context);
         card.setOrientation(LinearLayout.VERTICAL);
