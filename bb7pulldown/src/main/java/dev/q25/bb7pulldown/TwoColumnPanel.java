@@ -24,6 +24,7 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
+import android.widget.TextClock;
 
 import java.util.ArrayList;
 import java.util.Calendar;
@@ -99,11 +100,31 @@ final class TwoColumnPanel extends FrameLayout {
         setBackgroundColor(palette.canvas);
         setContentDescription("BB7 two-column pull-down");
 
+        // Fixed BBOS6-style current-date strip beneath the native status bar.
+        // TextClock updates automatically if the date or timezone changes.
+        LinearLayout content = new LinearLayout(context);
+        content.setOrientation(LinearLayout.VERTICAL);
+        addView(content, new FrameLayout.LayoutParams(
+                LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
+
+        TextClock currentDate = new TextClock(context);
+        currentDate.setFormat12Hour("EEE, MMM d, yyyy");
+        currentDate.setFormat24Hour("EEE, MMM d, yyyy");
+        currentDate.setTextColor(palette.headingText);
+        currentDate.setTextSize(11);
+        currentDate.setTypeface(null, android.graphics.Typeface.BOLD);
+        currentDate.setGravity(Gravity.CENTER_VERTICAL);
+        currentDate.setPadding(dp(12), 0, dp(12), 0);
+        currentDate.setBackgroundColor(palette.heading);
+        currentDate.setFocusable(false);
+        content.addView(currentDate, new LinearLayout.LayoutParams(
+                LayoutParams.MATCH_PARENT, dp(27)));
+
         LinearLayout columns = new LinearLayout(context);
         columns.setOrientation(LinearLayout.HORIZONTAL);
         columns.setWeightSum(PanelRatio.TOTAL_WEIGHT);
-        addView(columns, new FrameLayout.LayoutParams(
-                LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
+        content.addView(columns, new LinearLayout.LayoutParams(
+                LayoutParams.MATCH_PARENT, 0, 1f));
 
         FrameLayout left = new FrameLayout(context);
         left.setBackgroundColor(palette.left);
