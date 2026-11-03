@@ -119,7 +119,13 @@ final class NativeMediaSessions {
         for (Map.Entry<MediaSession.Token, MediaController> old : controllers.entrySet()) {
             if (next.containsKey(old.getKey())) continue;
             MediaController.Callback callback = callbacks.remove(old.getKey());
-            if (callback != null) old.getValue().unregisterCallback(callback);
+            if (callback != null) {
+                try {
+                    old.getValue().unregisterCallback(callback);
+                } catch (RuntimeException error) {
+                    Log.w(TAG, "Unable to release inactive media controller callback", error);
+                }
+            }
         }
         for (Map.Entry<MediaSession.Token, MediaController> item : next.entrySet()) {
             if (callbacks.containsKey(item.getKey())) continue;
@@ -237,6 +243,6 @@ final class NativeMediaSessions {
         }
         callbacks.clear();
         controllers.clear();
-        listener.onSessionsChanged(Collections.emptyList());
+        // The panel is being removed; do not alter its focus during teardown.
     }
 }
