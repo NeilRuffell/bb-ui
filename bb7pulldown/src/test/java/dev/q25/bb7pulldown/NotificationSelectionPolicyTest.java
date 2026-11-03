@@ -28,6 +28,43 @@ public class NotificationSelectionPolicyTest {
         assertTrue(NotificationSelectionPolicy.forPackage(Collections.emptyList(), "a").isEmpty());
     }
 
+    private static NotificationItem flagged(String key, String pkg, boolean silent,
+            String group, boolean summary) {
+        return new NotificationItem(key, pkg, key, "body", 1, true,
+                Collections.emptyList(), group, summary, silent);
+    }
+
+    @Test public void silentItemsAreOnlyInSharedSilentPane() {
+        NotificationItem alertA = flagged("a1", "a", false, null, false);
+        NotificationItem silentA = flagged("a2", "a", true, null, false);
+        NotificationItem silentB = flagged("b1", "b", true, null, false);
+        List<NotificationItem> all = Arrays.asList(alertA, silentA, silentB);
+        assertEquals(Collections.singletonList(alertA),
+                NotificationSelectionPolicy.forPackage(all, "a"));
+        assertTrue(NotificationSelectionPolicy.forPackage(all, "b").isEmpty());
+        assertEquals(Arrays.asList(silentA, silentB),
+                NotificationSelectionPolicy.forSilent(all));
+        assertTrue(NotificationSelectionPolicy.forPackage(
+                all, NotificationCategoryPolicy.SILENT_ID).isEmpty());
+    }
+
+    @Test public void silentGroupSummaryIsHiddenWhenSilentChildrenArePresent() {
+        NotificationItem summary = flagged("s", "a", true, "group", true);
+        NotificationItem child = flagged("c", "a", true, "group", false);
+        assertEquals(Collections.singletonList(child),
+                NotificationSelectionPolicy.forSilent(Arrays.asList(summary, child)));
+    }
+
+    @Test public void silentSummaryRemainsWhenOnlyAlertingChildrenExist() {
+        NotificationItem summary = flagged("s", "a", true, "group", true);
+        NotificationItem child = flagged("c", "a", false, "group", false);
+        List<NotificationItem> all = Arrays.asList(summary, child);
+        assertEquals(Collections.singletonList(summary),
+                NotificationSelectionPolicy.forSilent(all));
+        assertEquals(Collections.singletonList(child),
+                NotificationSelectionPolicy.forPackage(all, "a"));
+    }
+
     @Test public void contentUpdatesAreDetectableWithoutNewPackage() {
         NotificationItem changed = new NotificationItem("1", "a", "First", "updated", 1);
         assertFalse(a1.equals(changed));
