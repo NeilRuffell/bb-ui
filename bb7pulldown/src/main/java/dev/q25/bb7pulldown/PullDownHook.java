@@ -431,6 +431,12 @@ public final class PullDownHook implements IXposedHookLoadPackage {
                     @Override public void onActivate(int kind) {
                         activateQuickConnection(kind);
                     }
+                    @Override public void onStatusZoneFocus(int zone) {
+                        updateStatusFocus(zone);
+                    }
+                    @Override public void onShowNotifications() {
+                        switchQuickConnectionsToNotifications();
+                    }
                 });
         WindowManager.LayoutParams params = new WindowManager.LayoutParams(
                 WindowManager.LayoutParams.MATCH_PARENT,
@@ -480,6 +486,19 @@ public final class PullDownHook implements IXposedHookLoadPackage {
             quickOpeningOrClosing = false;
             updateStatusAppearance();
         }
+    }
+
+    /**
+     * Return through the same right/left status-zone selection used by the
+     * notification shade. Remove the QS window before opening notifications
+     * so neither panel competes for hardware focus or window ownership.
+     */
+    private static void switchQuickConnectionsToNotifications() {
+        BB6ConnectionsPanel root = quickPanel;
+        if (root == null || !quickShown || quickOpeningOrClosing) return;
+        Context context = root.getContext();
+        dismissQuickConnectionsImmediately();
+        if (!locked(context)) showPanel(context);
     }
 
     private static void activateQuickConnection(int kind) {
@@ -560,6 +579,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
         quickPanel = null;
         quickShown = false;
         try {
+            root.clearStatusZoneFocus();
             root.animate().cancel();
             if (quickWindowManager != null) quickWindowManager.removeViewImmediate(root);
         } catch (Throwable error) {
@@ -598,8 +618,9 @@ public final class PullDownHook implements IXposedHookLoadPackage {
                 decoratedStatusBar = null;
                 originalStatusBackground = null;
             }
-            boolean focused = focusWindow != null || shown && panel != null
-                    && panelStatusFocused();
+            boolean focused = focusWindow != null
+                    || shown && panelStatusFocused()
+                    || quickShown && quickPanelStatusFocused();
             boolean decorated = focused || shown || openingOrClosing
                     || quickShown || quickOpeningOrClosing
                     || recentsVisible || nativeShadeExpanded;
@@ -617,7 +638,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
             }
             Drawable base = graphiteBackground(target.getContext());
             int selectedZone = focusWindow != null ? focusZone
-                    : quickShown ? 1
+                    : quickShown && quickPanelStatusFocused() ? quickPanelFocusedZone()
                     : shown && panelStatusFocused() ? panelFocusedZone() : -1;
             if (selectedZone < 0 || target.getWidth() <= 0) {
                 target.setBackground(base);
@@ -639,6 +660,14 @@ public final class PullDownHook implements IXposedHookLoadPackage {
 
     private static int panelFocusedZone() {
         return panel == null ? -1 : panel.statusFocusZone();
+    }
+
+    private static boolean quickPanelStatusFocused() {
+        return quickPanel != null && quickPanel.statusFocusZone() >= 0;
+    }
+
+    private static int quickPanelFocusedZone() {
+        return quickPanel == null ? -1 : quickPanel.statusFocusZone();
     }
 
     /** Quickstep sends only the native overview visibility transition. */
