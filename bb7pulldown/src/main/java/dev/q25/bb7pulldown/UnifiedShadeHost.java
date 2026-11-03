@@ -18,16 +18,19 @@ final class UnifiedShadeHost extends FrameLayout {
     private final ShadeDateHeader dateHeader;
     private final TwoColumnPanel notifications;
     private final BB6ConnectionsPanel connections;
+    private final ShadeUiController navigation;
     private final Runnable closeShade;
     private int page;
     private float headerTouchDownY;
     private boolean headerSwipeClosed;
 
     UnifiedShadeHost(Context context, TwoColumnPanel notifications,
-            BB6ConnectionsPanel connections, int initialPage, Runnable closeShade) {
+            BB6ConnectionsPanel connections, ShadeUiController navigation,
+            int initialPage, Runnable closeShade) {
         super(context);
         this.notifications = notifications;
         this.connections = connections;
+        this.navigation = navigation;
         this.closeShade = closeShade;
 
         LinearLayout layout = new LinearLayout(context);
@@ -77,10 +80,7 @@ final class UnifiedShadeHost extends FrameLayout {
         if (next != NOTIFICATIONS && next != QUICK_SETTINGS) {
             throw new IllegalArgumentException("Unknown shade page");
         }
-        if (page != next) {
-            notifications.clearStatusZoneFocus();
-            connections.clearStatusZoneFocus();
-        }
+        if (page != next) navigation.focusContent();
         page = next;
         notifications.setVisibility(next == NOTIFICATIONS ? View.VISIBLE : View.GONE);
         connections.setVisibility(next == QUICK_SETTINGS ? View.VISIBLE : View.GONE);
@@ -91,6 +91,7 @@ final class UnifiedShadeHost extends FrameLayout {
     }
 
     void focusContent() {
+        navigation.focusContent();
         if (page == QUICK_SETTINGS) {
             connections.focusFirst();
         } else {
@@ -103,8 +104,7 @@ final class UnifiedShadeHost extends FrameLayout {
     }
 
     void clearStatusBarFocus() {
-        notifications.clearStatusZoneFocus();
-        connections.clearStatusZoneFocus();
+        navigation.focusContent();
     }
 
     private int dp(int value) {
