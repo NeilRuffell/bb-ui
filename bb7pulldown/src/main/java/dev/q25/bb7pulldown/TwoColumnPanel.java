@@ -323,6 +323,13 @@ final class TwoColumnPanel extends FrameLayout {
             Long previousDay = null;
             for (int i = 0; i < selected.size(); i++) {
                 NotificationItem item = selected.get(i);
+                long timestamp = item.postedAt > 0
+                        ? item.postedAt : System.currentTimeMillis();
+                long day = localDayKey(timestamp);
+                if (previousDay == null || previousDay.longValue() != day) {
+                    addDateHeader(timestamp);
+                    previousDay = day;
+                }
                 if (item.silent && !silentHeadingAdded) {
                     // A purely visual section heading; never a focus target.
                     TextView heading = text("Silent", 12, palette.muted);
@@ -331,13 +338,6 @@ final class TwoColumnPanel extends FrameLayout {
                     heading.setPadding(dp(8), dp(12), dp(8), dp(8));
                     notificationList.addView(heading);
                     silentHeadingAdded = true;
-                }
-                long timestamp = item.postedAt > 0
-                        ? item.postedAt : System.currentTimeMillis();
-                long day = localDayKey(timestamp);
-                if (previousDay == null || previousDay.longValue() != day) {
-                    addDateHeader(timestamp);
-                    previousDay = day;
                 }
                 LinearLayout card = createNotificationCard(item);
                 notificationList.addView(card);
