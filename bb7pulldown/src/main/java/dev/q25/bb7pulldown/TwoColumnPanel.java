@@ -149,7 +149,7 @@ final class TwoColumnPanel extends FrameLayout {
         notificationScroller = new ScrollView(context);
         notificationScroller.setFillViewport(true);
         notificationScroller.setClipToPadding(false);
-        notificationScroller.setPadding(dp(10), dp(10), dp(10), dp(10));
+        notificationScroller.setPadding(0, dp(4), 0, dp(4));
         addSwipeUpDismiss(notificationScroller);
         rightContent.addView(notificationScroller, new LinearLayout.LayoutParams(
                 LayoutParams.MATCH_PARENT, 0, 1f));
@@ -317,10 +317,10 @@ final class TwoColumnPanel extends FrameLayout {
             addPlaceholder("No notifications for this app");
         } else {
             boolean silentHeadingAdded = false;
-            for (NotificationItem item : selected) {
+            for (int i = 0; i < selected.size(); i++) {
+                NotificationItem item = selected.get(i);
                 if (item.silent && !silentHeadingAdded) {
-                    // A purely visual separator. Not in notificationTargets,
-                    // so it cannot add an extra trackpad/keyboard stop.
+                    // A purely visual section heading; never a focus target.
                     TextView heading = text("Silent", 12, palette.muted);
                     heading.setTypeface(null, android.graphics.Typeface.BOLD);
                     heading.setFocusable(false);
@@ -331,6 +331,14 @@ final class TwoColumnPanel extends FrameLayout {
                 LinearLayout card = createNotificationCard(item);
                 notificationList.addView(card);
                 notificationRows.add(card);
+                if (i < selected.size() - 1) {
+                    // A hairline between list entries, not a keyboard/trackpad stop.
+                    View separator = new View(getContext());
+                    separator.setFocusable(false);
+                    separator.setBackgroundColor(palette.divider);
+                    notificationList.addView(separator, new LinearLayout.LayoutParams(
+                            LayoutParams.MATCH_PARENT, dp(1)));
+                }
             }
         }
         if (notificationPaneActive && notificationRows.isEmpty()) {
@@ -376,10 +384,9 @@ final class TwoColumnPanel extends FrameLayout {
         notificationTargetKeys.add(item.key);
         notificationTargetActions.add(FOCUS_CARD);
         card.setOrientation(LinearLayout.VERTICAL);
-        card.setPadding(dp(12), dp(11), dp(12), dp(11));
+        card.setPadding(dp(12), dp(8), dp(12), dp(8));
         GradientDrawable background = new GradientDrawable();
         background.setColor(palette.card);
-        background.setCornerRadius(dp(5));
         card.setBackground(background);
 
         TextView title = text(item.title.isEmpty() ? "Notification" : item.title,
@@ -424,7 +431,6 @@ final class TwoColumnPanel extends FrameLayout {
                 + (item.text.isEmpty() ? "" : ", " + item.text));
         LinearLayout.LayoutParams cardParams = new LinearLayout.LayoutParams(
                 LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT);
-        cardParams.bottomMargin = dp(9);
         card.setLayoutParams(cardParams);
         return card;
     }
@@ -582,11 +588,11 @@ final class TwoColumnPanel extends FrameLayout {
                     && Objects.equals(renderedCards.get(i).key, selectedNotificationKey);
             GradientDrawable background;
             if (selected) {
-                background = selectedBlueBackground();
+                // Keep the existing blue gradient, but make the list row square.
+                background = BB7Theme.selected(0, dp(1));
             } else {
                 background = new GradientDrawable();
                 background.setColor(palette.card);
-                background.setCornerRadius(dp(5));
             }
             card.setBackground(background);
             for (int child = 0; child < card.getChildCount(); child++) {
