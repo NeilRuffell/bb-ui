@@ -280,31 +280,30 @@ final class BB6NativeLockscreenComposition {
         }
 
         int viewId = view.getId();
-        if (viewId == View.NO_ID) {
-            Log.w(TAG, "Skipping native view without a stable ID");
-            return false;
-        }
-        boolean directReference = false;
+        boolean referencedDescendant = false;
+        boolean unresolvedReference = false;
         for (int referencedId : referenced) {
             View referencedView = keyguardRoot.findViewById(referencedId);
             if (referencedView == null) {
-                // Do not mutate an already inconsistent native layout.
-                Log.w(TAG, "Skipping native view removal: unresolved burn-in "
-                        + "reference " + referencedId);
-                return false;
+                unresolvedReference = true;
+                break;
             }
-            if (referencedView == view) {
-                directReference = true;
-            } else if (view instanceof ViewGroup
+            if (view instanceof ViewGroup && referencedView != view
                     && belongsTo(referencedView, (ViewGroup) view)) {
-                // The helper refers to a descendant, not the container's own
-                // ID. Cannot unregister that reference just by removing the
-                // container; leave it attached.
-                Log.w(TAG, "Skipping native view group containing burn-in child "
-                        + referencedId);
-                return false;
+                referencedDescendant = true;
+                break;
             }
         }
+
+        int action = AodReferencePolicy.plan(
+                viewId, referenced, unresolvedReference, referencedDescendant);
+        if (action == AodReferencePolicy.BLOCK) {
+            Log.w(TAG, "Preserving native keyguard view " + viewId
+                    + ": unresolved or nested AOD burn-in reference");
+            return false;
+        }
+        boolean directReference =
+                action == AodReferencePolicy.UNREGISTER_THEN_DETACH;
 
         Slot slot = new Slot(view, group, layer, directReference);
         if (directReference && !removeBurnInReference(layer, view)) {
