@@ -1,65 +1,44 @@
 # BBOS6-style lock screen (development branch)
 
-**Branch:** `feat/bb6-lockscreen-banner` — **APK:** `0.9.39-bb6-no-native-lock-notifications-dev`.
-Not merged into `master`; physical-device visual verification is still required.
+**Branch:** `feat/bb6-lockscreen-banner`  
+**APK:** `0.9.40-bb6-native-chrome-composition-dev`  
+**Status:** Test build; not merged into `master`.
 
-This feature follows the original BlackBerry 6 top banner: wireless operator
-(if available), date, time, and a narrow notification-indicator strip. Each
-indicator is the **real application's icon followed by the number of active
-Android alert notifications**. The counts are per posted notification
-record, not an app's own unread-message total. Group summaries are not
-double-counted when their children exist.
+The interactive lock screen uses our BlackBerry 6-inspired operator, date,
+time and per-app notification icon/count row. It reuses SystemUI's native
+notification listener. Counts are active Android notification records, not
+necessarily in-app unread-message totals. Native privacy exclusions apply.
 
-The module reuses SystemUI's own registered `NotificationListenerService`
-and renders only package icons and counts, never notification text or sender
-information. Entries marked `VISIBILITY_SECRET`, hidden by native ranking,
-or excluded by Android's lock-screen-notification setting are not shown.
-Ongoing foreground-service notices are excluded from the alert strip.
+## Replacing redundant native lock-screen UI
 
-## Native lock-screen notification removal
+The old prototype made some native elements transparent or `GONE`. This
+version instead **physically detaches duplicate views from their parents**
+while the BB6 interactive keyguard is active:
 
-**BB6 lock screen:** Native Android notification cards, notification shelves,
-empty-shade artwork and the stock notification list's entire frame are removed
-from layout. The native `shared_notification_container` is set to
-`View.GONE`, **not** `View.INVISIBLE`, so it reserves no space and neither
-displays nor accepts focus from its notification descendants.
+- Native lock-screen clock faces (using actual dynamic ClockViewIds / clock
+  controller views, not guessed resource names)
+- Native Smartspace date content, **without deleting its weather/alarm/DND**
+- Native keyguard carrier label, **without removing signal/battery/privacy**
+- Native stock notification icon strip (restored for Always-On Display)
+- The complete native notification stack and its empty-frame container
+- The generic swipe-to-unlock hint is stopped at its indication producer;
+  other native charging, biometric, security and accessibility messages remain
 
-**Android notification shade:** The container is the same one SystemUI uses
-after unlocking. It is retained, never deleted, never unregistered, and
-restored for `StatusBarState.SHADE` (unlocked) and
-`StatusBarState.SHADE_LOCKED` (expanded shade while still locked).
-The app-icon/count row in our BB6 header continues receiving live
-notifications from SystemUI's existing listener.
+Original view instances, parents and layout positions are retained and
+restored for AOD, password/PIN/pattern bouncer, shade or unlocked state.
+Notification data is never canceled, and the normal Android shade still
+uses the original stack. No new standalone window, credential entry screen,
+input interceptor, polling timer or global View hook is added by this feature.
+The previously verified Space-to-unlock implementation remains unchanged.
 
-The state transitions are observed at Q25's verified
-`StatusBarStateControllerImpl.setState(int, boolean)` method.
-A lightweight native layout callback reasserts `GONE` only when the
-SystemUI binder has reset visibility, avoiding a global View hook or
-a timer/polling loop. All stock notifications and the bouncer remain
-registered and untouched internally; only lock-screen presentation changes.
+**For ROM integration:** Detached views are a temporary Vector development
+adapter. A rootless LineageOS fork should use a conditional, native keyguard
+blueprint so these stock views **are never built in the BB6 interactive
+composition**. See
+[LineageOS 24 native integration](rom/lineage-24.0/LOCKSCREEN_INTEGRATION.md).
+The full ROM adaptation is documented but not implemented or tested yet.
 
-Test the lockscreen (with both zero and multiple notifications), unlocked
-shade, locked expanded shade, Space-to-password, and returning to lockscreen
-after unlocking. There must be **no blank native notification rectangle**.
-
-## Integration
-
-`BB6LockScreenHook` adds the non-focusable `BB6LockScreenHeader` as a child
-of native `NotificationShadeWindowView`. It creates **no new window** and
-does not own keyboard input, unlocking, credential verification or the
-native status bar. The separate, previously verified Space-to-password
-implementation remains unchanged. On lock-screen bouncer presentation,
-the banner hides and the native clock (when found by its resource ID)
-is restored. On returning to the lock screen, it reappears.
-
-`LockscreenNotificationCounts` is plain Java and independent of SystemUI.
-`SystemUiNotificationObserver` is reused by the notification shade and
-this banner. The observer is installed only once.
-
-**Scope:** the existing unified BB UI Vector module must still have
-`com.android.systemui` enabled. Keep superseded separate modules disabled.
-
-Build/test/install on KDE neon:
+## Build and test on KDE neon
 
 ```sh
 cd ~/Projects/bb-ui
@@ -72,32 +51,33 @@ timeout 45s adb shell pm install -r /data/local/tmp/bb-ui.apk &&
 adb shell am crash com.android.systemui
 ```
 
-Test when locked, with multiple notifications from the same app, while
-notifications arrive or are dismissed, and when invoking Space-to-password.
-The header must **never cover the password input**. Verify normal unlock
-and return-to-lockscreen behavior.
-
-Diagnostic logs:
+Review: screen on/off, date/time/carrier duplicates, multiple app notification
+counts, locked/unlocked shade, Space-to-password, incorrect password, AOD,
+charging and native security messages. If a duplicate remains, examine the
+native integration diagnostics rather than masking the element with opacity.
 
 ```sh
 adb logcat -d -s 'BB6-LockScreen:V' 'BB6-Keyguard:V' '*:S' | tail -70
 ```
 
-Rollback only the lock-screen styling:
+Disable the preview without affecting the stable Space feature:
 
 ```sh
 adb shell setprop debug.bb6lockscreen.enabled false
 adb shell am crash com.android.systemui
 ```
 
-Set the property to `true` and restart SystemUI to re-enable.
+Use `adb shell setprop debug.bb6lockscreen.enabled true` followed by the
+SystemUI process restart to re-enable. The rollback restores stock composition
+because the process restarts from the native layout.
+
 
 ---
 
 # BBOS6 keyguard Space-to-credential entry
 
-**Branch:** `feat/bb6-keyguard-keyboard-entry` (not merged into `master`).
-**Version:** 0.9.37. Device verification required before merging.
+**Merged into `master`:** Q25 Space-to-native-credential entry, version 0.9.37.
+The physical-device test succeeded before the merge.
 
 ## Requirement
 
