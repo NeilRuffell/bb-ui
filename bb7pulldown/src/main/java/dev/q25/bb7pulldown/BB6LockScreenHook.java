@@ -75,10 +75,8 @@ public final class BB6LockScreenHook implements IXposedHookLoadPackage {
 
     // This is one compact SystemUI child, not a second overlay window.
     // Only the lock screen owns this instance. The unlocked shade retains
-    // its existing BB6ConnectionsPanel and controller unchanged.
-    private static BB6ConnectionsPanel lockQuickPanel;
-    private static BroadcastReceiver lockQuickReceiver;
-    private static Context lockQuickReceiverContext;
+    // its existing BB6NativeQsPanel and controller unchanged.
+    private static BB6NativeQsPanel lockQuickPanel;
     // Window-scoped predictive/navigation Back ownership. Registered only
     // while the compact locked QS panel is attached, then unregistered.
     private static OnBackInvokedDispatcher lockQuickBackDispatcher;
@@ -360,13 +358,14 @@ public final class BB6LockScreenHook implements IXposedHookLoadPackage {
         }
 
         Context context = root.getContext();
-        BB6ConnectionsPanel panel = new BB6ConnectionsPanel(context,
-                new BB6ConnectionsPanel.Listener() {
+        BB6NativeQsPanel panel = new BB6NativeQsPanel(context,
+                new BB6NativeQsPanel.Listener() {
                     @Override public void onClose() {
                         closeLockscreenQuickSettings(true);
                     }
-                    @Override public void onActivate(int kind) {
-                        activateLockscreenQuickSetting(kind);
+                    @Override public void onAction(String spec, int kind,
+                            NativeQuickSettingsTiles.Action action) {
+                        activateLockscreenQuickSetting(spec, kind, action);
                     }
                 }, null, true);
 
@@ -389,7 +388,6 @@ public final class BB6LockScreenHook implements IXposedHookLoadPackage {
             root.addView(panel, params);
             lockQuickPanel = panel;
             registerLockQuickBackCallback(root);
-            registerLockQuickUpdates(context);
             panel.focusFirst();
             Log.i(TAG, "Limited lockscreen QS opened: mobile data, Wi-Fi, Bluetooth");
         } catch (RuntimeException error) {
@@ -398,39 +396,27 @@ public final class BB6LockScreenHook implements IXposedHookLoadPackage {
         }
     }
 
-    private static void activateLockscreenQuickSetting(int kind) {
+    private static void activateLockscreenQuickSetting(String spec, int kind,
+            NativeQuickSettingsTiles.Action action) {
         FrameLayout root = rootRef.get();
-        if (lockQuickPanel == null || !LockscreenQuickSettingsPolicy.mayActivate(
-                kind, mayShowLockscreenQuickSettings(root))) {
-            Log.w(TAG, "Blocked connection activation outside native keyguard");
+        if (lockQuickPanel == null || !LockscreenQuickSettingsPolicy.mayActivateSpec(
+                kind, spec, mayShowLockscreenQuickSettings(root))) {
+            Log.w(TAG, "Blocked native tile outside lock-screen allowlist/keyguard");
             closeLockscreenQuickSettings(false);
             return;
         }
-
-        // QSTileHost and individual tiles are shared with the unlocked QS.
-        // The tile's own SystemUI backend enforces any required unlock.
-        // No Settings.Panel ACTION_*, direct radio API, or activity fallback.
-        if (!NativeQuickSettingsTiles.activate(kind)) {
-            Log.w(TAG, "Native lockscreen QS tile missing/unavailable: "
-                    + ConnectionControlPolicy.label(kind)
-                    + "; no external Settings fallback permitted");
-        }
-        BB6ConnectionsPanel current = lockQuickPanel;
-        if (current != null) {
-            current.post(() -> {
-                if (lockQuickPanel == current
-                        && mayShowLockscreenQuickSettings(rootRef.get())) {
-                    current.refresh(NativeConnectionControls.read(current.getContext()));
-                }
-            });
+        // The native tile retains sole ownership of security, authentication,
+        // app TileServices, unlock prompts and platform action handling.
+        // No Settings or direct radio API fallback is permitted while locked.
+        if (!NativeQuickSettingsTiles.activate(spec, action)) {
+            Log.w(TAG, "Native locked QS action unavailable: " + spec);
         }
     }
 
     private static void closeLockscreenQuickSettings(boolean restoreHeaderFocus) {
-        BB6ConnectionsPanel panel = lockQuickPanel;
+        BB6NativeQsPanel panel = lockQuickPanel;
         lockQuickPanel = null;
         unregisterLockQuickBackCallback();
-        stopLockQuickUpdates();
         if (panel != null && panel.getParent() instanceof ViewGroup) {
             ((ViewGroup) panel.getParent()).removeView(panel);
         }
@@ -449,7 +435,7 @@ public final class BB6LockScreenHook implements IXposedHookLoadPackage {
 
     /**
      * Physical Back/Escape can be handled by SystemUI before the focused
-     * BB6ConnectionsPanel sees dispatchKeyEvent(). Observe the same declaring
+     * BB6NativeQsPanel sees dispatchKeyEvent(). Observe the same declaring
      * WindowRootView used by our existing Space-to-password hook, but match
      * ONLY Back/Escape while this specific lock-screen QS panel is attached.
      *
@@ -467,7 +453,7 @@ public final class BB6LockScreenHook implements IXposedHookLoadPackage {
                     KeyEvent.class, new XC_MethodHook() {
                 @Override protected void beforeHookedMethod(MethodHookParam param) {
                     if (!(param.args[0] instanceof KeyEvent)) return;
-                    BB6ConnectionsPanel panel = lockQuickPanel;
+                    BB6NativeQsPanel panel = lockQuickPanel;
                     FrameLayout root = rootRef.get();
                     if (panel == null || root == null || panel.getParent() != root
                             || !root.isAttachedToWindow()) return;
@@ -511,7 +497,7 @@ public final class BB6LockScreenHook implements IXposedHookLoadPackage {
                 return;
             }
             OnBackInvokedCallback callback = () -> {
-                BB6ConnectionsPanel panel = lockQuickPanel;
+                BB6NativeQsPanel panel = lockQuickPanel;
                 if (panel == null || panel.getParent() != root) return;
                 boolean eligible = mayShowLockscreenQuickSettings(root);
                 closeLockscreenQuickSettings(eligible);
@@ -536,44 +522,6 @@ public final class BB6LockScreenHook implements IXposedHookLoadPackage {
             dispatcher.unregisterOnBackInvokedCallback(callback);
         } catch (RuntimeException error) {
             Log.w(TAG, "Lockscreen QS Back callback cleanup unavailable", error);
-        }
-    }
-
-    private static void registerLockQuickUpdates(Context context) {
-        stopLockQuickUpdates();
-        IntentFilter filter = new IntentFilter();
-        filter.addAction(WifiManager.WIFI_STATE_CHANGED_ACTION);
-        filter.addAction(BluetoothAdapter.ACTION_STATE_CHANGED);
-        filter.addAction(Intent.ACTION_AIRPLANE_MODE_CHANGED);
-        filter.addAction(SubscriptionManager.ACTION_DEFAULT_SUBSCRIPTION_CHANGED);
-        BroadcastReceiver receiver = new BroadcastReceiver() {
-            @Override public void onReceive(Context ctx, Intent intent) {
-                BB6ConnectionsPanel panel = lockQuickPanel;
-                if (panel != null && mayShowLockscreenQuickSettings(rootRef.get())) {
-                    panel.refresh(NativeConnectionControls.read(panel.getContext()));
-                }
-            }
-        };
-        try {
-            context.registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED);
-            lockQuickReceiver = receiver;
-            lockQuickReceiverContext = context;
-        } catch (RuntimeException error) {
-            Log.w(TAG, "Locked QS state receiver unavailable", error);
-        }
-    }
-
-    private static void stopLockQuickUpdates() {
-        BroadcastReceiver receiver = lockQuickReceiver;
-        Context context = lockQuickReceiverContext;
-        lockQuickReceiver = null;
-        lockQuickReceiverContext = null;
-        if (receiver != null && context != null) {
-            try {
-                context.unregisterReceiver(receiver);
-            } catch (RuntimeException error) {
-                Log.w(TAG, "Locked QS state receiver cleanup unavailable", error);
-            }
         }
     }
 
