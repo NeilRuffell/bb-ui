@@ -7,8 +7,8 @@ android {
         applicationId 'dev.q25.trackpad'
         minSdk 33
         targetSdk 28
-        versionCode 82
-        versionName '0.9.52-native-bt-focus-guard-dev'
+        versionCode 83
+        versionName '0.9.53-lockscreen-native-notif-ownership-dev'
     }
     // Compile legacy feature sources into this one APK. These directories
     // are source roots only; their former application modules are not built.
