@@ -4,4 +4,5 @@ dev.q25.bb7focus.SettingsFocusThemeHook
 dev.q25.bb7focus.SystemUiFocusThemeHook
 dev.q25.bb7pulldown.PullDownHook
 dev.q25.bb7pulldown.BB6KeyguardKeyboardHook
+dev.q25.bb7pulldown.BB6BlueprintHook
 dev.q25.bb7pulldown.BB6LockScreenHook
