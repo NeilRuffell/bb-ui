@@ -13,6 +13,8 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.WeakHashMap;
 
 /**
  * ROM-oriented composition adapter for the BB6 lock screen.
@@ -48,6 +50,10 @@ final class BB6NativeLockscreenComposition {
 
     private final Map<View, Slot> detached = new LinkedHashMap<>();
     private final List<WeakReference<View>> clockViews = new ArrayList<>();
+    // After detaching a date child, child index 0 becomes weather. Never
+    // detach that next child on a later layout pass.
+    private final Set<ViewGroup> dateGroupsHandled =
+            Collections.newSetFromMap(new WeakHashMap<ViewGroup, Boolean>());
     private WeakReference<ViewGroup> nativeRoot = new WeakReference<>(null);
     private int smallClockId;
     private int largeClockId;
@@ -184,6 +190,7 @@ final class BB6NativeLockscreenComposition {
             }
         }
         detached.clear();
+        dateGroupsHandled.clear();
         active = false;
         strippedLogged = false;
         Log.i(TAG, "Native keyguard composition restored");
@@ -213,11 +220,16 @@ final class BB6NativeLockscreenComposition {
         View group = root.findViewById(id);
         if (!(group instanceof ViewGroup)) return false;
         ViewGroup children = (ViewGroup) group;
-        if (children.getChildCount() == 0) return false;
+        if (dateGroupsHandled.contains(children) || children.getChildCount() == 0) {
+            return false;
+        }
         View date = children.getChildAt(0);
-        // In upstream SmartspaceSection the date view is inserted first,
-        // weather (if any) is inserted at index 1. Never remove weather.
-        return date != null && detach(date);
+        // In upstream SmartspaceSection the date view is inserted first;
+        // weather (if any) is inserted at index 1. Mark the group so a later
+        // sync does not accidentally remove weather after the date is gone.
+        boolean detachedDate = date != null && detach(date);
+        if (detachedDate) dateGroupsHandled.add(children);
+        return detachedDate;
     }
 
     private static int id(Context context, String name) {
