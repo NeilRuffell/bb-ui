@@ -55,13 +55,19 @@ final class BB6LockScreenHeader extends LinearLayout {
         setClickable(false);
         setDescendantFocusability(FOCUS_AFTER_DESCENDANTS);
         setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-        setPadding(dp(12), dp(4), dp(12), dp(5));
+        // Match the native full-width status bar: the two highlighted
+        // regions join at the same screen edges without selecting the
+        // notification icons underneath.
+        setPadding(0, 0, 0, dp(5));
         setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
                 new int[]{0xdf111821, 0xbe131b25, 0x99131b25}));
 
         clockRow = new LinearLayout(context);
         clockRow.setOrientation(HORIZONTAL);
         clockRow.setGravity(Gravity.CENTER_VERTICAL);
+        // Preserve original text insets while allowing the selection to
+        // cover the full width of the native status bar.
+        clockRow.setPadding(dp(12), dp(4), dp(12), 0);
         // Exactly one focus owner: this row. It coordinates the background
         // of the separate native KeyguardStatusBarView on focus changes.
         clockRow.setFocusable(true);
@@ -80,7 +86,7 @@ final class BB6LockScreenHeader extends LinearLayout {
                 new int[]{0x00000000, 0x00000000}));
         clockRow.setBackground(clockBackground);
         addView(clockRow, new LinearLayout.LayoutParams(
-                LayoutParams.MATCH_PARENT, dp(49)));
+                LayoutParams.MATCH_PARENT, dp(53)));
 
         TextClock date = new TextClock(context);
         date.setFormat12Hour("EEE, MMM d");
@@ -112,12 +118,16 @@ final class BB6LockScreenHeader extends LinearLayout {
         View line = new View(context);
         line.setBackgroundColor(RULE);
         line.setFocusable(false);
-        addView(line, new LinearLayout.LayoutParams(
-                LayoutParams.MATCH_PARENT, dp(1)));
+        LinearLayout.LayoutParams ruleParams = new LinearLayout.LayoutParams(
+                LayoutParams.MATCH_PARENT, dp(1));
+        ruleParams.leftMargin = dp(12);
+        ruleParams.rightMargin = dp(12);
+        addView(line, ruleParams);
 
         notificationScroll = new HorizontalScrollView(context);
         notificationScroll.setHorizontalScrollBarEnabled(false);
         notificationScroll.setFillViewport(true);
+        notificationScroll.setPadding(dp(12), 0, dp(12), 0);
         notificationScroll.setFocusable(false);
         notificationScroll.setFocusableInTouchMode(false);
         notificationScroll.setClickable(false);
