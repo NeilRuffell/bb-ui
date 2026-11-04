@@ -65,6 +65,7 @@ public final class BB6LockScreenHook implements IXposedHookLoadPackage {
     private static ViewGroup.LayoutParams detachedStackLayoutParams;
     private static int detachedStackIndex = -1;
     private static boolean missingNativeStackLogged;
+    private static boolean missingKeyguardStatusBarLogged;
 
     @Override
     public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lp) {
@@ -184,6 +185,12 @@ public final class BB6LockScreenHook implements IXposedHookLoadPackage {
         }
         removeNativeStackWatcher();
         restoreNativeStack();
+        // The previous header may still own the native status-bar highlight
+        // if SystemUI replaced its window root during a transition.
+        if (previous != null) {
+            previous.setBb6CompositionActive(false);
+            previous.bindNativeStatusBar(null);
+        }
         Context context = root.getContext();
         BB6LockScreenHeader header = new BB6LockScreenHeader(context);
         header.setVisibility(View.GONE);
@@ -223,6 +230,8 @@ public final class BB6LockScreenHook implements IXposedHookLoadPackage {
         BB6LockScreenHeader header = headerRef.get();
         if (root == null || header == null || header.getParent() != root) return;
         if (!enabled()) {
+            header.setBb6CompositionActive(false);
+            header.bindNativeStatusBar(null);
             header.setVisibility(View.GONE);
             restoreNativeStack();
             return;
@@ -237,8 +246,8 @@ public final class BB6LockScreenHook implements IXposedHookLoadPackage {
         boolean shown = BB6NativeChromePolicy.useBb6Composition(
                 locked, power != null && power.isInteractive(),
                 nativeStatusState(), bouncerRequested || nativeBouncerShowing());
-        // Stock clock/date/carrier views are left native and unduplicated.
-        // Only the notification-list subtree is temporarily removed.
+        // The native blueprint owns stock clock/date construction.
+        // Our single status/date-time focus target leaves icons passive.
         updateNativeStack(root, shown);
 
 
@@ -247,10 +256,30 @@ public final class BB6LockScreenHook implements IXposedHookLoadPackage {
             Log.i(TAG, "BBOS6 notification strip " + (shown ? "eligible" : "inactive"));
         }
         if (!shown) {
+            header.setBb6CompositionActive(false);
+            header.bindNativeStatusBar(null);
             header.setVisibility(View.GONE);
             return;
         }
         boolean ownsKeyguard = BB6BlueprintHook.isApplied();
+        View statusBar = null;
+        if (ownsKeyguard) {
+            int statusBarId = root.getResources().getIdentifier(
+                    "keyguard_header", "id", PACKAGE);
+            if (statusBarId != 0) {
+                statusBar = root.findViewById(statusBarId);
+            }
+            if (statusBar == null && !missingKeyguardStatusBarLogged) {
+                missingKeyguardStatusBarLogged = true;
+                Log.w(TAG, "Native keyguard_header unavailable for combined "
+                        + "status/date-time focus; native views left unchanged");
+            } else if (statusBar != null) {
+                missingKeyguardStatusBarLogged = false;
+            }
+        }
+        // A single focus target is clockRow. Its focus state applies to the
+        // native status bar as well; the notification strip is not focusable.
+        header.bindNativeStatusBar(statusBar);
         header.setBb6CompositionActive(ownsKeyguard);
         Map<String, Integer> counts =
                 SystemUiNotificationObserver.lockscreenCountsSnapshot(context);
