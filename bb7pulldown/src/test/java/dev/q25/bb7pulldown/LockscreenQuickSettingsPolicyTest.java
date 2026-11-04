@@ -59,6 +59,33 @@ public class LockscreenQuickSettingsPolicyTest {
         assertFalse(LockscreenQuickSettingsPolicy.mayActivate(3, true));
     }
 
+    @Test public void nativeSpecsAreConstrainedToTheirLockedRows() {
+        assertTrue(LockscreenQuickSettingsPolicy.mayActivateSpec(
+                ConnectionControlPolicy.MOBILE, "internet", true));
+        assertTrue(LockscreenQuickSettingsPolicy.mayActivateSpec(
+                ConnectionControlPolicy.MOBILE, "cell", true));
+        assertTrue(LockscreenQuickSettingsPolicy.mayActivateSpec(
+                ConnectionControlPolicy.WIFI, "internet", true));
+        assertTrue(LockscreenQuickSettingsPolicy.mayActivateSpec(
+                ConnectionControlPolicy.WIFI, "wifi", true));
+        assertTrue(LockscreenQuickSettingsPolicy.mayActivateSpec(
+                ConnectionControlPolicy.BLUETOOTH, "bt", true));
+        assertFalse(LockscreenQuickSettingsPolicy.mayActivateSpec(
+                ConnectionControlPolicy.MOBILE, "bt", true));
+        assertFalse(LockscreenQuickSettingsPolicy.mayActivateSpec(
+                ConnectionControlPolicy.WIFI, "flashlight", true));
+        assertFalse(LockscreenQuickSettingsPolicy.mayActivateSpec(
+                ConnectionControlPolicy.BLUETOOTH, "internet", true));
+        assertFalse(LockscreenQuickSettingsPolicy.mayActivateSpec(
+                ConnectionControlPolicy.BLUETOOTH, "custom(pkg/.Service)", true));
+        assertFalse(LockscreenQuickSettingsPolicy.mayActivateSpec(
+                ConnectionControlPolicy.WIFI, "wifi", false));
+        assertFalse(LockscreenQuickSettingsPolicy.mayActivateSpec(
+                ConnectionControlPolicy.WIFI, null, true));
+        assertFalse(LockscreenQuickSettingsPolicy.mayActivateSpec(
+                -1, "internet", true));
+    }
+
     @Test public void lockedScreenNeverLaunchesSettingsFallback() {
         assertFalse(LockscreenQuickSettingsPolicy.mayLaunchExternalSettings(true));
         assertTrue(LockscreenQuickSettingsPolicy.mayLaunchExternalSettings(false));
