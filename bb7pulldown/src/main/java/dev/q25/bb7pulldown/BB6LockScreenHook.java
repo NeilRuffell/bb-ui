@@ -112,6 +112,7 @@ public final class BB6LockScreenHook implements IXposedHookLoadPackage {
                     @Override protected void afterHookedMethod(MethodHookParam param) {
                         if (!Boolean.FALSE.equals(param.getResult())) {
                             bouncerRequested = true;
+                            BB6BlueprintHook.scheduleSync();
                             requestRefresh();
                         }
                     }
@@ -119,6 +120,7 @@ public final class BB6LockScreenHook implements IXposedHookLoadPackage {
                 XposedBridge.hookAllMethods(primary, "hide", new XC_MethodHook() {
                     @Override protected void afterHookedMethod(MethodHookParam param) {
                         bouncerRequested = false;
+                        BB6BlueprintHook.scheduleSync();
                         requestRefresh();
                     }
                 });
@@ -153,6 +155,7 @@ public final class BB6LockScreenHook implements IXposedHookLoadPackage {
             XposedBridge.hookAllConstructors(state, new XC_MethodHook() {
                 @Override protected void afterHookedMethod(MethodHookParam param) {
                     stateControllerRef = new WeakReference<>(param.thisObject);
+                    BB6BlueprintHook.scheduleSync();
                     requestRefresh();
                 }
             });
@@ -201,6 +204,7 @@ public final class BB6LockScreenHook implements IXposedHookLoadPackage {
         }
         rootRef = new WeakReference<>(root);
         headerRef = new WeakReference<>(header);
+        BB6BlueprintHook.onRootAttached(root);
         registerNativeStackWatcher(root);
         lastCounts = Collections.emptyMap();
         lastVisible = false;
@@ -246,6 +250,8 @@ public final class BB6LockScreenHook implements IXposedHookLoadPackage {
             header.setVisibility(View.GONE);
             return;
         }
+        boolean ownsKeyguard = BB6BlueprintHook.isApplied();
+        header.setBb6CompositionActive(ownsKeyguard);
         Map<String, Integer> counts =
                 SystemUiNotificationObserver.lockscreenCountsSnapshot(context);
         if (!counts.equals(lastCounts)) {
@@ -253,8 +259,10 @@ public final class BB6LockScreenHook implements IXposedHookLoadPackage {
             header.showCounts(counts);
             Log.i(TAG, "Lock-screen notification indicators: apps=" + counts.size());
         }
-        // No empty notification indicator frame when there are no alerts.
-        header.setVisibility(counts.isEmpty() ? View.GONE : View.VISIBLE);
+        // In native BB6 mode, the header also owns time/date. In fallback,
+        // the stock clock/date remain the only clock/date on screen.
+        header.setVisibility(ownsKeyguard || !counts.isEmpty()
+                ? View.VISIBLE : View.GONE);
     }
 
     /**
@@ -380,6 +388,29 @@ public final class BB6LockScreenHook implements IXposedHookLoadPackage {
         observerRootRef = new WeakReference<>(null);
     }
 
+    static void onBlueprintChanged() {
+        requestRefresh();
+    }
+
+    static boolean isBouncerActive() {
+        return bouncerRequested || nativeBouncerShowing();
+    }
+
+    static int statusStateForBlueprint() {
+        return nativeStatusState();
+    }
+
+    static boolean isNativeDozing() {
+        Object state = stateControllerRef.get();
+        if (state == null) return true;
+        try {
+            return Boolean.TRUE.equals(XposedHelpers.callMethod(state, "isDozing"));
+        } catch (Throwable error) {
+            Log.w(TAG, "Native doze state unknown: " + brief(error));
+            return true;
+        }
+    }
+
     private static boolean nativeBouncerShowing() {
         Object primary = primaryRef.get();
         if (primary == null) return false;
@@ -402,6 +433,7 @@ public final class BB6LockScreenHook implements IXposedHookLoadPackage {
                 if (Intent.ACTION_SCREEN_OFF.equals(intent.getAction())) {
                     bouncerRequested = false;
                 }
+                BB6BlueprintHook.scheduleSync();
                 requestRefresh();
             }
         };
