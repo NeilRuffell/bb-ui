@@ -17,14 +17,14 @@ final class UnifiedShadeHost extends FrameLayout {
 
     private final ShadeDateHeader dateHeader;
     private final TwoColumnPanel notifications;
-    private final BB6ConnectionsPanel connections;
+    private final BB6NativeQsPanel connections;
     private final ShadeUiController navigation;
     private final Runnable closeShade;
     private float headerTouchDownY;
     private boolean headerSwipeClosed;
 
     UnifiedShadeHost(Context context, TwoColumnPanel notifications,
-            BB6ConnectionsPanel connections, ShadeUiController navigation,
+            BB6NativeQsPanel connections, ShadeUiController navigation,
             int initialPage, Runnable closeShade) {
         super(context);
         this.notifications = notifications;
@@ -81,6 +81,7 @@ final class UnifiedShadeHost extends FrameLayout {
         }
         notifications.setVisibility(next == NOTIFICATIONS ? View.VISIBLE : View.GONE);
         connections.setVisibility(next == QUICK_SETTINGS ? View.VISIBLE : View.GONE);
+        connections.setActive(next == QUICK_SETTINGS);
     }
 
     int page() {
