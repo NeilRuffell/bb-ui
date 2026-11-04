@@ -264,7 +264,7 @@ final class BB6NativeQsPanel extends FrameLayout {
         Row item = new Row(key, spec, kind, tile, row, icon, primary, secondary);
         rows.add(item);
         String description = tile == null ? "Unavailable" :
-                (tile.contentDescription == null ? title.toString()
+                (tile.contentDescription == null ? String.valueOf(title == null ? spec : title)
                         : tile.contentDescription.toString());
         row.setContentDescription(description + ", " + secondary.getText());
         if (tile != null) {
@@ -283,6 +283,7 @@ final class BB6NativeQsPanel extends FrameLayout {
 
     private void dispatch(Row row, NativeQuickSettingsTiles.Action action) {
         if (row.tile == null || row.spec == null) return;
+        if (lockscreenMode && action != NativeQuickSettingsTiles.Action.PRIMARY) return;
         if (action == NativeQuickSettingsTiles.Action.SECONDARY
                 && !row.tile.hasSecondaryAction) return;
         if (action == NativeQuickSettingsTiles.Action.LONG_PRESS
