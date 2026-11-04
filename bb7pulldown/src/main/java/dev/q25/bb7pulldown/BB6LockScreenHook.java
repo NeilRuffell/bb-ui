@@ -437,16 +437,22 @@ public final class BB6LockScreenHook implements IXposedHookLoadPackage {
         removeNativeStackWatcher();
         stackLayoutObserver = () -> {
             if (!enabled() || rootRef.get() != root || !root.isAttachedToWindow()) return;
-            KeyguardManager km = (KeyguardManager)
-                    root.getContext().getSystemService(Context.KEYGUARD_SERVICE);
-            boolean locked = km != null && km.isKeyguardLocked();
-            PowerManager pm = (PowerManager)
-                    root.getContext().getSystemService(Context.POWER_SERVICE);
-            boolean compose = enabled() && BB6NativeChromePolicy.useBb6Composition(
-                    locked, pm != null && pm.isInteractive(), nativeStatusState(),
-                    bouncerRequested || nativeBouncerShowing());
-            updateNativeStack(root, compose);
-            NATIVE_CHROME.sync(root, compose);
+            // Never detach/reattach View children during an active layout
+            // traversal. Reconcile after traversal on the SystemUI UI thread.
+            root.post(() -> {
+                if (!enabled() || rootRef.get() != root
+                        || !root.isAttachedToWindow()) return;
+                KeyguardManager km = (KeyguardManager)
+                        root.getContext().getSystemService(Context.KEYGUARD_SERVICE);
+                boolean locked = km != null && km.isKeyguardLocked();
+                PowerManager pm = (PowerManager)
+                        root.getContext().getSystemService(Context.POWER_SERVICE);
+                boolean compose = BB6NativeChromePolicy.useBb6Composition(
+                        locked, pm != null && pm.isInteractive(), nativeStatusState(),
+                        bouncerRequested || nativeBouncerShowing());
+                updateNativeStack(root, compose);
+                NATIVE_CHROME.sync(root, compose);
+            });
         };
         observerRootRef = new WeakReference<>(root);
         root.getViewTreeObserver().addOnGlobalLayoutListener(stackLayoutObserver);
