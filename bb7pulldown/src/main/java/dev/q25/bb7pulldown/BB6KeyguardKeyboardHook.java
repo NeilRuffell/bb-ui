@@ -390,7 +390,7 @@ public final class BB6KeyguardKeyboardHook implements IXposedHookLoadPackage {
             } catch (NoSuchMethodError missing) {
                 // The Kotlin getter JVM name is version-dependent.
             } catch (Throwable error) {
-                Log.w(TAG, "Could not read scene framework flag", error);
+                Log.w(TAG, "Scene flag unavailable: " + brief(error));
                 break;
             }
         }
@@ -408,7 +408,7 @@ public final class BB6KeyguardKeyboardHook implements IXposedHookLoadPackage {
                 return ((Boolean) configured) && variant;
             }
         } catch (Throwable error) {
-            Log.w(TAG, "Scene framework mode could not be determined", error);
+            Log.w(TAG, "Scene framework mode unavailable: " + brief(error));
         }
         return null;
     }
