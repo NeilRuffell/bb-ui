@@ -1,13 +1,17 @@
 package dev.q25.bb7pulldown;
 
+import dev.q25.trackpad.theme.BB7Theme;
+
 import android.content.Context;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.StateListDrawable;
 import android.text.TextUtils;
 import android.view.Gravity;
+import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.HorizontalScrollView;
@@ -23,7 +27,10 @@ import java.util.Map;
  * Date/time and notification icons/counts on the native keyguard. The
  * native status bar remains sole owner of carrier and system status.
  *
- * No password field, custom window, tap handler or keyboard focus is added.
+ * One trackpad-focusable, nonactivating status/date-time region. Trackpad
+ * click/Enter has no action. Space is deliberately left to the existing
+ * WindowRootView-level native credential hook.
+ *
  * The native status bar keeps ownership of radios and battery indications.
  */
 final class BB6LockScreenHeader extends LinearLayout {
@@ -37,13 +44,27 @@ final class BB6LockScreenHeader extends LinearLayout {
         super(context);
         setOrientation(VERTICAL);
         setClipChildren(false);
-        setFocusable(false);
+        // One selectable item for the whole lock-screen status/date-time bar.
+        // No independent focus targets are created for notification icons.
+        setFocusable(true);
         setFocusableInTouchMode(false);
-        setClickable(false);
-        setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        setDescendantFocusability(FOCUS_BLOCK_DESCENDANTS);
+        setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_AUTO);
+
+        // Selecting the bar is intentionally inert. Do not intercept Space:
+        // BB6KeyguardKeyboardHook consumes Space at WindowRootView first.
+        setOnClickListener(v -> { });
+        setOnKeyListener((view, keyCode, event) ->
+                BB6LockScreenSelectionPolicy.isNoopSelectionKey(keyCode));
         setPadding(dp(12), dp(4), dp(12), dp(5));
-        setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
-                new int[]{0xdf111821, 0xbe131b25, 0x99131b25}));
+        GradientDrawable idle = new GradientDrawable(
+                GradientDrawable.Orientation.TOP_BOTTOM,
+                new int[]{0xdf111821, 0xbe131b25, 0x99131b25});
+        StateListDrawable background = new StateListDrawable();
+        background.addState(new int[]{android.R.attr.state_focused},
+                BB7Theme.selected(dp(5), dp(1)));
+        background.addState(new int[0], idle);
+        setBackground(background);
 
         clockRow = new LinearLayout(context);
         clockRow.setOrientation(HORIZONTAL);
@@ -94,7 +115,7 @@ final class BB6LockScreenHeader extends LinearLayout {
         notificationScroll.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
         notificationRow = new LinearLayout(context);
         notificationRow.setOrientation(HORIZONTAL);
-        notificationRow.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
+        notificationRow.setGravity(Gravity.CENTER_VERTICAL | Gravity.CENTER_HORIZONTAL);
         notificationRow.setFocusable(false);
         notificationRow.setFocusableInTouchMode(false);
         notificationScroll.addView(notificationRow, new HorizontalScrollView.LayoutParams(
@@ -134,7 +155,9 @@ final class BB6LockScreenHeader extends LinearLayout {
             indicator.setClickable(false);
             LinearLayout.LayoutParams indicatorParams = new LinearLayout.LayoutParams(
                     LayoutParams.WRAP_CONTENT, LayoutParams.MATCH_PARENT);
-            indicatorParams.rightMargin = dp(14);
+            // Symmetric spacing preserves the actual center of the group.
+            indicatorParams.leftMargin = dp(7);
+            indicatorParams.rightMargin = dp(7);
 
             ImageView icon = new ImageView(context);
             icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
