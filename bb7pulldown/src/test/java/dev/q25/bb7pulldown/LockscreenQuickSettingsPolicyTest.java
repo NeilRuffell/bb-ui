@@ -40,6 +40,17 @@ public class LockscreenQuickSettingsPolicyTest {
         assertFalse(LockscreenQuickSettingsPolicy.isAllowedControl(100));
     }
 
+    @Test public void lockedControlsArePinnedAndReturnDefensiveCopies() {
+        int[] first = LockscreenQuickSettingsPolicy.visibleKinds();
+        assertTrue(first.length == 3);
+        assertTrue(first[0] == ConnectionControlPolicy.MOBILE);
+        assertTrue(first[1] == ConnectionControlPolicy.WIFI);
+        assertTrue(first[2] == ConnectionControlPolicy.BLUETOOTH);
+        first[0] = -1;
+        assertTrue(LockscreenQuickSettingsPolicy.visibleKinds()[0]
+                == ConnectionControlPolicy.MOBILE);
+    }
+
     @Test public void noControlCanActivateOutsideTheLockedKeyguard() {
         for (int kind = 0; kind < ConnectionControlPolicy.COUNT; kind++) {
             assertTrue(LockscreenQuickSettingsPolicy.mayActivate(kind, true));
