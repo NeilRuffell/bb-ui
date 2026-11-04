@@ -9,9 +9,8 @@ final class BB6NativeChromePolicy {
 
     static boolean useBb6Composition(boolean locked, boolean interactive,
             int statusBarState, boolean bouncerShowing) {
-        return locked && interactive && !bouncerShowing
-                && (statusBarState == LockscreenNativeStackPolicy.KEYGUARD
-                || statusBarState == LockscreenNativeStackPolicy.UNKNOWN);
+        return interactive && !bouncerShowing
+                && LockscreenNativeStackPolicy.hideNativeStack(locked, statusBarState);
     }
 
     /** Suppress only the stock generic swipe instruction at its producer.
