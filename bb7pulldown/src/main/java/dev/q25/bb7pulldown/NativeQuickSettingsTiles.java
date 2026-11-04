@@ -10,6 +10,8 @@ import android.util.Log;
 
 import java.lang.ref.WeakReference;
 import java.lang.reflect.InvocationHandler;
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -46,6 +48,8 @@ final class NativeQuickSettingsTiles {
     private static volatile WeakReference<Object> interactor = new WeakReference<>(null);
     private static final Set<Session> sessions = new HashSet<>();
     private static boolean installed;
+    private static boolean sourceFailureLogged;
+    private static boolean hostAccessFailureLogged;
 
     enum Action { PRIMARY, SECONDARY, LONG_PRESS }
 
@@ -141,43 +145,141 @@ final class NativeQuickSettingsTiles {
     }
 
     /**
-     * Return tile objects owned by the native QS pipeline. QSHostAdapter and
-     * CurrentTilesInteractor expose the SAME native QSTile objects.
-     * Reading the interactor here is not tile creation or a second backend.
+     * Read the already-existing native tile collection. The Q25's actual
+     * SystemUI binary contains QSHostAdapter and CurrentTilesInteractorImpl,
+     * but DOES NOT expose their source-level getTiles/getCurrentTiles names
+     * (confirmed by the Q25 logcat). Do not call those absent methods.
+     *
+     * Instead inspect only the verified pipeline's StateFlow fields, and
+     * accept a collection ONLY when each entry contains a native QSTile.
+     * No tile instance is created, stored, or persisted here.
      */
     private static Collection<?> currentTiles() {
-        Object capturedHost = host.get();
-        if (capturedHost != null) {
-            try {
-                Object result = XposedHelpers.callMethod(capturedHost, "getTiles");
-                if (result instanceof Collection && !((Collection<?>) result).isEmpty()) {
-                    return (Collection<?>) result;
-                }
-            } catch (Throwable error) {
-                Log.w(TAG, "QSHostAdapter tile query unavailable", error);
-            }
+        Object pipeline = interactor.get();
+        if (pipeline != null) {
+            Collection<?> tiles = interactorTiles(pipeline);
+            if (tiles != null) return tiles;
         }
-        Object capturedInteractor = interactor.get();
-        if (capturedInteractor != null) {
-            try {
-                // Kotlin: CurrentTilesInteractor.currentTiles: StateFlow<List<TileModel>>
-                // Each TileModel carries the SystemUI-owned QSTile instance.
-                Object flow = XposedHelpers.callMethod(capturedInteractor, "getCurrentTiles");
-                Object models = XposedHelpers.callMethod(flow, "getValue");
-                if (models instanceof Collection) {
-                    List<Object> tiles = new ArrayList<>();
-                    for (Object model : (Collection<?>) models) {
-                        if (model != null) {
-                            tiles.add(XposedHelpers.callMethod(model, "getTile"));
-                        }
-                    }
-                    return tiles;
-                }
-            } catch (Throwable error) {
-                Log.w(TAG, "CurrentTilesInteractor tile query unavailable", error);
-            }
+        Object adapter = host.get();
+        if (adapter != null) {
+            Collection<?> tiles = adapterTiles(adapter);
+            if (tiles != null) return tiles;
+        }
+        if (!sourceFailureLogged) {
+            sourceFailureLogged = true;
+            Log.w(TAG, "No native tile source resolved; interactor=" + (pipeline != null)
+                    + ", adapter=" + (adapter != null));
+            if (pipeline != null) describePipeline(pipeline);
         }
         return Collections.emptyList();
+    }
+
+    private static Collection<?> adapterTiles(Object adapter) {
+        // Only use a declared, actually-present method. Some ROM binaries
+        // optimize away the source-level QSHostAdapter.getTiles() symbol.
+        try {
+            Method method = adapter.getClass().getMethod("getTiles");
+            Object value = method.invoke(adapter);
+            if (value instanceof Collection) return (Collection<?>) value;
+        } catch (NoSuchMethodException error) {
+            if (!hostAccessFailureLogged) {
+                hostAccessFailureLogged = true;
+                Log.i(TAG, "QSHostAdapter.getTiles absent in Q25 binary; using pipeline");
+            }
+        } catch (Throwable error) {
+            if (!hostAccessFailureLogged) {
+                hostAccessFailureLogged = true;
+                Log.w(TAG, "Cannot read QSHostAdapter tiles; using pipeline", error);
+            }
+        }
+        return null;
+    }
+
+    private static Collection<?> interactorTiles(Object pipeline) {
+        ClassLoader loader = pipeline.getClass().getClassLoader();
+        final Class<?> flowType = XposedHelpers.findClassIfExists(
+                "kotlinx.coroutines.flow.StateFlow", loader);
+        final Class<?> tileType = XposedHelpers.findClassIfExists(
+                "com.android.systemui.plugins.qs.QSTile", loader);
+        if (flowType == null || tileType == null) return null;
+        for (Class<?> type = pipeline.getClass();
+                type != null && type != Object.class; type = type.getSuperclass()) {
+            for (Field field : type.getDeclaredFields()) {
+                if (java.lang.reflect.Modifier.isStatic(field.getModifiers())) continue;
+                try {
+                    // Java/Kotlin field names may be optimized or obfuscated.
+                    // Check the live object type rather than a guessed name.
+                    field.setAccessible(true);
+                    Object flow = field.get(pipeline);
+                    if (flow == null || !flowType.isInstance(flow)) continue;
+                    Object models = stateFlowValue(flowType, flow);
+                    if (!(models instanceof Collection)) continue;
+                    Collection<?> collection = (Collection<?>) models;
+                    if (collection.isEmpty()) continue;
+                    List<Object> result = new ArrayList<>(collection.size());
+                    for (Object model : collection) {
+                        Object tile = nativeTileFromModel(model, tileType);
+                        if (tile == null) {
+                            result.clear();
+                            break;
+                        }
+                        result.add(tile);
+                    }
+                    if (!result.isEmpty() && result.size() == collection.size()) {
+                        return result;
+                    }
+                } catch (Throwable ignored) {
+                    // Fields unrelated to the native QS tile collection are
+                    // expected; never modify them or invoke their actions.
+                }
+            }
+        }
+        return null;
+    }
+
+    private static Object stateFlowValue(Class<?> flowType, Object flow) throws Exception {
+        // On a stock build the source-level accessor is getValue(). In an
+        // optimized ROM its method name can differ. The StateFlow interface
+        // has one zero-argument, Object-returning value accessor, which we
+        // resolve from the actual loaded interface rather than guessing.
+        for (Method method : flowType.getDeclaredMethods()) {
+            if (method.getParameterTypes().length != 0
+                    || method.getReturnType() != Object.class) continue;
+            method.setAccessible(true);
+            return method.invoke(flow);
+        }
+        return null;
+    }
+
+    private static Object nativeTileFromModel(Object model, Class<?> tileType)
+            throws IllegalAccessException {
+        if (model == null) return null;
+        if (tileType.isInstance(model)) return model;
+        // LineageOS TileModel carries a QSTile, TileSpec and Expandable.
+        // Read the QSTile field by its verified type, not the field name.
+        for (Class<?> type = model.getClass();
+                type != null && type != Object.class; type = type.getSuperclass()) {
+            for (Field field : type.getDeclaredFields()) {
+                if (java.lang.reflect.Modifier.isStatic(field.getModifiers())) continue;
+                if (!tileType.isAssignableFrom(field.getType())) continue;
+                field.setAccessible(true);
+                Object tile = field.get(model);
+                if (tileType.isInstance(tile)) return tile;
+            }
+        }
+        return null;
+    }
+
+    /** One-time diagnostics without dumping tile contents or user data. */
+    private static void describePipeline(Object pipeline) {
+        Class<?> type = pipeline.getClass();
+        StringBuilder fields = new StringBuilder();
+        for (Field field : type.getDeclaredFields()) {
+            if (fields.length() > 0) fields.append(", ");
+            fields.append(field.getType().getSimpleName());
+            if (fields.length() > 500) break;
+        }
+        Log.i(TAG, "Native interactor field types: " + fields);
     }
 
     static boolean activate(String spec, Action action) {
