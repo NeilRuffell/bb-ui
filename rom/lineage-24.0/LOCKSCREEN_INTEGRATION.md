@@ -88,6 +88,30 @@ patch.
    `(String reason, boolean scrimmed)` call order; when compiling a native
    ROM, call the source API as compiled in that ROM, not via reflection.
 
+## Burn-in layer reference integrity (verified Q25 failure)
+
+The 0.9.40 prototype crashed `com.android.systemui` repeatedly:
+`AodBurnInLayer.transform()` attempted `View.getLeft()` on a null View.
+The native `AodBurnInSection.kt` creates a persistent
+`AodBurnInLayer` (`androidx.constraintlayout.helper.widget.Layer`) which
+stores IDs of participating views, including dynamically created clock and
+Smartspace views registered by the native binders.
+
+For the temporary APK prototype, detaching a view must also unregister it
+from the burn-in layer **before** detachment and register it **after**
+reattachment. The layer always retains its required
+`burn_in_layer_empty_view`. `AodReferencePolicy` rejects detachment when
+the native reference API is missing or when removing a container would orphan
+a referenced descendant. Unit tests enforce the fail-closed decisions.
+
+In a **native ROM**, modify `AodBurnInSection`, `ClockSection`,
+`KeyguardClockViewBinder`, `SmartspaceSection`, and
+`KeyguardSmartspaceViewBinder` together with the BB6 keyguard blueprint.
+When a stock clock/date view is **never created**, do not register its ID in
+the burn-in layer or generate a constraint referencing it. This is the
+proper source-level solution. Do not mask the crash by catching
+`NullPointerException` in the native layout system.
+
 ## Development APK versus the final ROM
 
 The test APK uses `BB6NativeLockscreenComposition` to **detach** redundant
