@@ -12,6 +12,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowInsets;
 import android.view.ViewTreeObserver;
+import android.view.ViewParent;
 import android.widget.FrameLayout;
 
 import java.lang.ref.WeakReference;
@@ -67,11 +68,12 @@ public final class BB6LockScreenHook implements IXposedHookLoadPackage {
     private static Map<String, Integer> lastCounts = Collections.emptyMap();
     private static BroadcastReceiver screenReceiver;
     private static WeakReference<Object> stateControllerRef = new WeakReference<>(null);
-    private static WeakReference<View> nativeStackRef = new WeakReference<>(null);
     private static ViewTreeObserver.OnGlobalLayoutListener stackLayoutObserver;
     private static WeakReference<FrameLayout> observerRootRef = new WeakReference<>(null);
-    private static int originalStackVisibility = View.VISIBLE;
-    private static boolean stackHiddenByUs;
+    private static ViewGroup detachedStackParent;
+    private static View detachedStack;
+    private static ViewGroup.LayoutParams detachedStackLayoutParams;
+    private static int detachedStackIndex = -1;
     private static boolean missingNativeStackLogged;
 
     @Override
@@ -318,7 +320,6 @@ public final class BB6LockScreenHook implements IXposedHookLoadPackage {
                 context.getSystemService(Context.KEYGUARD_SERVICE);
         PowerManager power = (PowerManager) context.getSystemService(Context.POWER_SERVICE);
         boolean locked = keyguard != null && keyguard.isKeyguardLocked();
-        updateNativeStack(root, locked);
         if (!locked) bouncerRequested = false;
         boolean shown = BB6NativeChromePolicy.useBb6Composition(
                 locked, power != null && power.isInteractive(),
@@ -326,6 +327,7 @@ public final class BB6LockScreenHook implements IXposedHookLoadPackage {
         // Structural removal, not alpha=0 or GONE. Native clock/date/carrier
         // and duplicate icons are physically detached while BB6 owns the UI.
         // AOD, shade and authentication reattach the same original views.
+        updateNativeStack(root, shown);
         NATIVE_CHROME.sync(root, shown);
 
         if (shown != lastVisible) {
@@ -346,47 +348,51 @@ public final class BB6LockScreenHook implements IXposedHookLoadPackage {
     }
 
     /**
-     * Native LineageOS layout: super_notification_shade.xml places the whole
-     * SharedNotificationContainer directly under NotificationShadeWindowView.
-     * Its child is NotificationStackScrollLayout (including all rows, shelf,
-     * empty-shade artwork and any native notification background). GONE
-     * removes that entire subtree from layout; INVISIBLE would leave space.
+     * The whole native notification-list subtree is a child of the SystemUI
+     * window root (SharedNotificationContainer in super_notification_shade).
+     * While the BB6 lockscreen owns the screen, DETACH this subtree rather
+     * than setting INVISIBLE/GONE or leaving an empty constraint-frame.
      *
-     * The container itself is never removed or its rows canceled: the same
-     * instance remains available for SHADE / SHADE_LOCKED.
+     * Reattach the same original instance, at its original child index,
+     * before the normal SHADE, SHADE_LOCKED, bouncer or AOD presentation.
+     * SystemUI keeps its notification listener/pipeline and scroll state.
      */
-    private static void updateNativeStack(FrameLayout root, boolean locked) {
-        int state = nativeStatusState();
-        boolean hide = LockscreenNativeStackPolicy.hideNativeStack(locked, state);
-        View stack = nativeStackRef.get();
-        if (stack == null || stack.getRootView() != root.getRootView()) {
+    private static void updateNativeStack(FrameLayout root, boolean bb6Active) {
+        if (!bb6Active) {
             restoreNativeStack();
-            int resourceId = root.getResources().getIdentifier(
-                    NATIVE_STACK_ID, "id", PACKAGE);
-            stack = resourceId == 0 ? null : root.findViewById(resourceId);
-            if (stack == null) {
-                if (!missingNativeStackLogged) {
-                    missingNativeStackLogged = true;
-                    Log.w(TAG, "Native shared notification container not found; "
-                            + "not changing notification pipeline");
-                }
-                return;
-            }
-            nativeStackRef = new WeakReference<>(stack);
+            return;
         }
+        if (detachedStack != null && detachedStack.getParent() == null) return;
 
-        if (hide) {
-            if (!stackHiddenByUs && stack.getVisibility() != View.GONE) {
-                originalStackVisibility = stack.getVisibility();
-                stackHiddenByUs = true;
+        int resourceId = root.getResources().getIdentifier(
+                NATIVE_STACK_ID, "id", PACKAGE);
+        View stack = resourceId == 0 ? null : root.findViewById(resourceId);
+        if (stack == null) {
+            if (!missingNativeStackLogged) {
+                missingNativeStackLogged = true;
+                Log.w(TAG, "Native notification container not found in keyguard root");
             }
-            if (stack.getVisibility() != View.GONE) {
-                stack.setVisibility(View.GONE);
-                Log.i(TAG, "Native lockscreen notification container GONE "
-                        + "(no cards, shelf, or reserved frame)");
-            }
-        } else {
-            restoreNativeStack();
+            return;
+        }
+        ViewParent parent = stack.getParent();
+        if (!(parent instanceof ViewGroup)) {
+            Log.w(TAG, "Native shared notification container has no ViewGroup parent");
+            return;
+        }
+        ViewGroup group = (ViewGroup) parent;
+        int index = group.indexOfChild(stack);
+        if (index < 0) return;
+        ViewGroup.LayoutParams params = stack.getLayoutParams();
+        try {
+            group.removeView(stack);
+            detachedStackParent = group;
+            detachedStack = stack;
+            detachedStackIndex = index;
+            detachedStackLayoutParams = params;
+            Log.i(TAG, "Removed complete stock notification subtree from "
+                    + "BB6 lock-screen composition; no reserved frame");
+        } catch (RuntimeException error) {
+            Log.e(TAG, "Native notification subtree detach failed: " + brief(error));
         }
     }
 
@@ -404,18 +410,30 @@ public final class BB6LockScreenHook implements IXposedHookLoadPackage {
     }
 
     private static void restoreNativeStack() {
-        View stack = nativeStackRef.get();
-        if (stackHiddenByUs && stack != null && stack.getVisibility() == View.GONE) {
-            stack.setVisibility(originalStackVisibility);
-            Log.i(TAG, "Native notification container restored for shade");
+        if (detachedStack == null) return;
+        if (detachedStack.getParent() == null && detachedStackParent != null) {
+            try {
+                int index = Math.min(detachedStackIndex,
+                        detachedStackParent.getChildCount());
+                detachedStackParent.addView(detachedStack, index,
+                        detachedStackLayoutParams);
+                Log.i(TAG, "Reattached original native notification subtree "
+                        + "for shade, bouncer or AOD");
+            } catch (RuntimeException error) {
+                Log.e(TAG, "Cannot restore native notification subtree: "
+                        + brief(error));
+                return; // Keep handles so a later state update can retry.
+            }
         }
-        stackHiddenByUs = false;
+        detachedStackParent = null;
+        detachedStack = null;
+        detachedStackLayoutParams = null;
+        detachedStackIndex = -1;
     }
 
     /**
-     * SystemUI's native view binder can reapply visibility on a layout pass.
-     * Use its existing ViewTreeObserver event rather than polling or hooking
-     * android.view.View globally. Only change state if it actually differs.
+     * If SystemUI reconstructs its native views or changes their owner,
+     * reconcile actual parentage on a layout pass. No global View hook.
      */
     private static void registerNativeStackWatcher(FrameLayout root) {
         removeNativeStackWatcher();
@@ -424,12 +442,12 @@ public final class BB6LockScreenHook implements IXposedHookLoadPackage {
             KeyguardManager km = (KeyguardManager)
                     root.getContext().getSystemService(Context.KEYGUARD_SERVICE);
             boolean locked = km != null && km.isKeyguardLocked();
-            updateNativeStack(root, locked);
             PowerManager pm = (PowerManager)
                     root.getContext().getSystemService(Context.POWER_SERVICE);
             boolean compose = enabled() && BB6NativeChromePolicy.useBb6Composition(
                     locked, pm != null && pm.isInteractive(), nativeStatusState(),
                     bouncerRequested || nativeBouncerShowing());
+            updateNativeStack(root, compose);
             NATIVE_CHROME.sync(root, compose);
         };
         observerRootRef = new WeakReference<>(root);
