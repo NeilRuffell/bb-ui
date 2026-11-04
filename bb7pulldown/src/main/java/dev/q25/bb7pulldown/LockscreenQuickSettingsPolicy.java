@@ -2,7 +2,7 @@ package dev.q25.bb7pulldown;
 
 /**
  * Locked Quick Settings is a presentation/security policy over the SAME
- * Android QSTileHost backend used by the unlocked BB6 connections page.
+ * Android QSHostAdapter/QSTile backend used by the unlocked native tile page.
  *
  * Exactly the three currently implemented connection controls are exposed.
  * A tile can only be activated while the native interactive keyguard is
@@ -39,6 +39,26 @@ final class LockscreenQuickSettingsPolicy {
 
     static boolean mayActivate(int kind, boolean mayShowPanel) {
         return mayShowPanel && isAllowedControl(kind);
+    }
+
+    /**
+     * A row must select only the already-installed native tile corresponding
+     * to its locked presentation category. The category AND the tile spec are
+     * checked again at activation, not just when the row was rendered.
+     * Android 17 supports combined "internet" and split "cell"/"wifi".
+     */
+    static boolean mayActivateSpec(int kind, String spec, boolean mayShowPanel) {
+        if (!mayActivate(kind, mayShowPanel) || spec == null) return false;
+        switch (kind) {
+            case ConnectionControlPolicy.MOBILE:
+                return "cell".equals(spec) || "internet".equals(spec);
+            case ConnectionControlPolicy.WIFI:
+                return "wifi".equals(spec) || "internet".equals(spec);
+            case ConnectionControlPolicy.BLUETOOTH:
+                return "bt".equals(spec);
+            default:
+                return false;
+        }
     }
 
     /** Native Android QS tiles own all lock-screen security behavior. */
