@@ -39,8 +39,15 @@ final class BB6NativeLockscreenComposition {
         final ViewGroup parent;
         final int index;
         final ViewGroup.LayoutParams layoutParams;
+        // Native AOD Layer ID references must be removed BEFORE detaching
+        // and restored AFTER reattaching this view.
+        final View burnInLayer;
+        final boolean wasBurnInReference;
 
-        Slot(View view, ViewGroup parent) {
+        Slot(View view, ViewGroup parent, View burnInLayer,
+                boolean wasBurnInReference) {
+            this.burnInLayer = burnInLayer;
+            this.wasBurnInReference = wasBurnInReference;
             this.view = view;
             this.parent = parent;
             this.index = parent.indexOfChild(view);
@@ -170,6 +177,7 @@ final class BB6NativeLockscreenComposition {
 
     void restore() {
         if (detached.isEmpty()) {
+            dateGroupsHandled.clear();
             active = false;
             strippedLogged = false;
             return;
@@ -179,14 +187,23 @@ final class BB6NativeLockscreenComposition {
         ArrayList<Slot> slots = new ArrayList<>(detached.values());
         Collections.reverse(slots);
         for (Slot slot : slots) {
-            if (slot.view.getParent() != null) continue;
             if (slot.parent == null) continue;
-            int index = Math.min(slot.index, slot.parent.getChildCount());
             try {
-                slot.parent.addView(slot.view, index, slot.layoutParams);
+                if (slot.view.getParent() == null) {
+                    int index = Math.min(slot.index, slot.parent.getChildCount());
+                    slot.parent.addView(slot.view, index, slot.layoutParams);
+                }
+                if (slot.wasBurnInReference) {
+                    // Reinstate the reference only after the view is once
+                    // again a child of its original ConstraintLayout.
+                    if (!addBurnInReference(slot.burnInLayer, slot.view)) {
+                        Log.e(TAG, "Could not restore native burn-in reference for "
+                                + slot.view.getClass().getSimpleName());
+                    }
+                }
             } catch (RuntimeException error) {
                 Log.w(TAG, "Could not reattach native keyguard child "
-                        + slot.view.getClass().getSimpleName());
+                        + slot.view.getClass().getSimpleName(), error);
             }
         }
         detached.clear();
@@ -236,22 +253,119 @@ final class BB6NativeLockscreenComposition {
         return context.getResources().getIdentifier(name, "id", SYSTEM_UI);
     }
 
+    /**
+     * AodBurnInLayer (an AndroidX Layer/ConstraintHelper) retains view IDs.
+     * Layer.updatePostLayout calls getLeft() on each resolved view. The 0.9.40
+     * crash was caused by removing a referenced view without removing its ID:
+     * Layer then resolved null and SystemUI crashed on EVERY layout.
+     *
+     * Only detach after the native burn-in helper confirms its IDs are
+     * consistent. Unknown helper API => DO NOT detach: fail safely.
+     */
     private boolean detach(View view) {
         if (view == null || detached.containsKey(view)) return false;
         ViewParent parent = view.getParent();
-        if (!(parent instanceof ViewGroup)) return false;
+        ViewGroup keyguardRoot = nativeRoot.get();
+        if (!(parent instanceof ViewGroup) || keyguardRoot == null) return false;
         ViewGroup group = (ViewGroup) parent;
-        Slot slot = new Slot(view, group);
-        if (slot.index < 0) return false;
+        if (group.indexOfChild(view) < 0) return false;
+
+        int layerId = id(keyguardRoot.getContext(), "burn_in_layer");
+        View layer = layerId == 0 ? null : keyguardRoot.findViewById(layerId);
+        int[] referenced = referencedIds(layer);
+        if (referenced == null) {
+            Log.w(TAG, "Skipping native view removal: burn-in references "
+                    + "cannot be checked");
+            return false;
+        }
+
+        int viewId = view.getId();
+        if (viewId == View.NO_ID) {
+            Log.w(TAG, "Skipping native view without a stable ID");
+            return false;
+        }
+        boolean directReference = false;
+        for (int referencedId : referenced) {
+            View referencedView = keyguardRoot.findViewById(referencedId);
+            if (referencedView == null) {
+                // Do not mutate an already inconsistent native layout.
+                Log.w(TAG, "Skipping native view removal: unresolved burn-in "
+                        + "reference " + referencedId);
+                return false;
+            }
+            if (referencedView == view) {
+                directReference = true;
+            } else if (belongsTo(referencedView, view)) {
+                // The helper refers to a descendant, not the container's own
+                // ID. Cannot unregister that reference just by removing the
+                // container; leave it attached.
+                Log.w(TAG, "Skipping native view group containing burn-in child "
+                        + referencedId);
+                return false;
+            }
+        }
+
+        Slot slot = new Slot(view, group, layer, directReference);
+        if (directReference && !removeBurnInReference(layer, view)) {
+            Log.e(TAG, "Skipping native view removal: burn-in unregistration "
+                    + "failed for ID " + viewId);
+            return false;
+        }
+
         try {
             group.removeView(view);
             detached.put(view, slot);
             return true;
         } catch (RuntimeException error) {
+            if (directReference) addBurnInReference(layer, view);
             Log.w(TAG, "Native keyguard view detach declined: "
-                    + view.getClass().getSimpleName());
+                    + view.getClass().getSimpleName(), error);
             return false;
         }
+    }
+
+    private static int[] referencedIds(View layer) {
+        if (layer == null) return null;
+        try {
+            Object result = layer.getClass().getMethod("getReferencedIds")
+                    .invoke(layer);
+            return result instanceof int[] ? (int[]) result : null;
+        } catch (ReflectiveOperationException error) {
+            return null;
+        }
+    }
+
+    private static boolean removeBurnInReference(View layer, View view) {
+        try {
+            Object result = layer.getClass().getMethod("removeView", View.class)
+                    .invoke(layer, view);
+            if (!(result instanceof Integer) || ((Integer) result) < 0) {
+                return false;
+            }
+            return !contains(referencedIds(layer), view.getId());
+        } catch (ReflectiveOperationException error) {
+            Log.e(TAG, "AOD burn-in removeView failed", error);
+            return false;
+        }
+    }
+
+    private static boolean addBurnInReference(View layer, View view) {
+        if (layer == null || view.getParent() == null) return false;
+        try {
+            int[] ids = referencedIds(layer);
+            if (contains(ids, view.getId())) return true;
+            layer.getClass().getMethod("addView", View.class).invoke(layer, view);
+            return contains(referencedIds(layer), view.getId());
+        } catch (ReflectiveOperationException error) {
+            Log.e(TAG, "AOD burn-in addView failed", error);
+            return false;
+        }
+    }
+
+    private static boolean contains(int[] ids, int target) {
+        if (ids == null) return false;
+        for (int id : ids) if (id == target) return true;
+        return false;
     }
 
     private static boolean belongsTo(View child, ViewGroup root) {
