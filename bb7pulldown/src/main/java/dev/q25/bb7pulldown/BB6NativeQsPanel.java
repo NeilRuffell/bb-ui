@@ -345,6 +345,9 @@ final class BB6NativeQsPanel extends FrameLayout {
     }
 
     @Override public boolean dispatchTouchEvent(MotionEvent event) {
+        // Full QS must scroll vertically; the legacy three-radio swipe-to-exit
+        // gesture is retained only for the compact locked panel.
+        if (!lockscreenMode) return super.dispatchTouchEvent(event);
         switch (event.getActionMasked()) {
             case MotionEvent.ACTION_DOWN:
                 downY = event.getRawY();
