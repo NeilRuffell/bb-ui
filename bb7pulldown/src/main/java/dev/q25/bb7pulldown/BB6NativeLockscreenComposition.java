@@ -193,7 +193,7 @@ final class BB6NativeLockscreenComposition {
                     int index = Math.min(slot.index, slot.parent.getChildCount());
                     slot.parent.addView(slot.view, index, slot.layoutParams);
                 }
-                if (slot.wasBurnInReference) {
+                if (slot.wasBurnInReference && slot.view.getParent() == slot.parent) {
                     // Reinstate the reference only after the view is once
                     // again a child of its original ConstraintLayout.
                     if (!addBurnInReference(slot.burnInLayer, slot.view)) {
@@ -295,7 +295,8 @@ final class BB6NativeLockscreenComposition {
             }
             if (referencedView == view) {
                 directReference = true;
-            } else if (belongsTo(referencedView, view)) {
+            } else if (view instanceof ViewGroup
+                    && belongsTo(referencedView, (ViewGroup) view)) {
                 // The helper refers to a descendant, not the container's own
                 // ID. Cannot unregister that reference just by removing the
                 // container; leave it attached.
