@@ -77,6 +77,7 @@ adb push app/build/outputs/apk/debug/app-debug.apk /data/local/tmp/bb-ui.apk &&
 timeout 45s adb shell pm install -r /data/local/tmp/bb-ui.apk &&
 adb shell setprop debug.bb6lockscreen.enabled true &&
 adb shell setprop debug.bb6lockscreen.blueprint true &&
+adb shell setprop debug.bb6lockscreen.qs.enabled true &&
 adb shell am crash com.android.systemui
 ```
 
@@ -91,12 +92,19 @@ Verify the original unlocked QS panel still works unchanged.
 adb logcat -d -s 'BB6-LockScreen:V' 'BB6-Connections:V' 'BB6-Keyguard:V' 'AndroidRuntime:E' '*:S' | tail -100
 ```
 
-Emergency rollback (keeps the merged Space-to-password feature):
+Disable **only the new locked QS panel**, returning Enter/trackpad-center
+to the original inert status/date-time selection. The merged BBOS6 clock,
+notification indicators and Space-to-password all remain active:
 
 ```sh
-adb shell setprop debug.bb6lockscreen.enabled false
+adb shell setprop debug.bb6lockscreen.qs.enabled false
 adb shell am crash com.android.systemui
 ```
+
+To re-enable the panel, set `debug.bb6lockscreen.qs.enabled true`
+and restart SystemUI. The separate, older
+`debug.bb6lockscreen.enabled` property still disables the entire
+BB6 lock-screen preview if needed.
 
 **GitHub Actions can verify only APK compilation and unit tests, not
 native Q25 tile security behavior or physical trackpad input. Do not
