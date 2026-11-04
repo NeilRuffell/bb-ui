@@ -32,10 +32,11 @@ final class BB6ConnectionsPanel extends FrameLayout {
     private final Listener listener;
     private final ShadeUiController navigation;
     private final boolean lockscreenMode;
-    private final LinearLayout[] rows = new LinearLayout[ConnectionControlPolicy.COUNT];
-    private final TextView[] labels = new TextView[ConnectionControlPolicy.COUNT];
-    private final TextView[] statuses = new TextView[ConnectionControlPolicy.COUNT];
-    private final StatusMark[] marks = new StatusMark[ConnectionControlPolicy.COUNT];
+    private final int[] visibleKinds;
+    private final LinearLayout[] rows;
+    private final TextView[] labels;
+    private final TextView[] statuses;
+    private final StatusMark[] marks;
     private float downY;
     private float downX;
     private boolean closeStarted;
@@ -56,6 +57,16 @@ final class BB6ConnectionsPanel extends FrameLayout {
         this.listener = listener;
         this.navigation = navigation;
         this.lockscreenMode = lockscreenMode;
+        if (lockscreenMode) {
+            visibleKinds = LockscreenQuickSettingsPolicy.visibleKinds();
+        } else {
+            visibleKinds = new int[ConnectionControlPolicy.COUNT];
+            for (int i = 0; i < visibleKinds.length; i++) visibleKinds[i] = i;
+        }
+        rows = new LinearLayout[visibleKinds.length];
+        labels = new TextView[visibleKinds.length];
+        statuses = new TextView[visibleKinds.length];
+        marks = new StatusMark[visibleKinds.length];
         palette = BB7Theme.palette(context);
         setBackgroundColor(palette.canvas);
         setFocusable(true);
@@ -87,8 +98,9 @@ final class BB6ConnectionsPanel extends FrameLayout {
         card.addView(heading, new LinearLayout.LayoutParams(
                 LayoutParams.MATCH_PARENT, dp(31)));
 
-        for (int kind = 0; kind < ConnectionControlPolicy.COUNT; kind++) {
-            if (kind != 0) {
+        for (int position = 0; position < visibleKinds.length; position++) {
+            final int kind = visibleKinds[position];
+            if (position != 0) {
                 View divider = new View(context);
                 divider.setBackgroundColor(palette.divider);
                 LinearLayout.LayoutParams rule = new LinearLayout.LayoutParams(
@@ -96,7 +108,7 @@ final class BB6ConnectionsPanel extends FrameLayout {
                 rule.setMargins(dp(6), 0, dp(6), 0);
                 card.addView(divider, rule);
             }
-            final int index = kind;
+            final int index = position;
             LinearLayout row = new LinearLayout(context);
             row.setOrientation(LinearLayout.HORIZONTAL);
             row.setGravity(Gravity.CENTER_VERTICAL);
@@ -104,7 +116,7 @@ final class BB6ConnectionsPanel extends FrameLayout {
             row.setFocusable(true);
             row.setFocusableInTouchMode(true);
             row.setClickable(true);
-            row.setOnClickListener(view -> listener.onActivate(index));
+            row.setOnClickListener(view -> listener.onActivate(kind));
             row.setOnFocusChangeListener((view, focused) -> {
                 if (focused && navigation != null) navigation.focusContent();
                 updateSelection();
@@ -112,7 +124,7 @@ final class BB6ConnectionsPanel extends FrameLayout {
             row.setOnKeyListener((view, code, event) -> onRowKey(index, code, event));
             card.addView(row, new LinearLayout.LayoutParams(
                     LayoutParams.MATCH_PARENT, dp(52)));
-            rows[kind] = row;
+            rows[position] = row;
 
             RadioIcon icon = new RadioIcon(context, kind, palette.body);
             row.addView(icon, new LinearLayout.LayoutParams(dp(25), dp(25)));
@@ -128,7 +140,7 @@ final class BB6ConnectionsPanel extends FrameLayout {
                     0, LayoutParams.MATCH_PARENT, 1f);
             labelParams.leftMargin = dp(7);
             row.addView(label, labelParams);
-            labels[kind] = label;
+            labels[position] = label;
 
             TextView status = new TextView(context);
             status.setText("Unknown");
@@ -138,14 +150,14 @@ final class BB6ConnectionsPanel extends FrameLayout {
             status.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
             row.addView(status, new LinearLayout.LayoutParams(
                     LayoutParams.WRAP_CONTENT, LayoutParams.MATCH_PARENT));
-            statuses[kind] = status;
+            statuses[position] = status;
 
             StatusMark mark = new StatusMark(context, palette.muted);
             LinearLayout.LayoutParams markParams =
                     new LinearLayout.LayoutParams(dp(17), dp(17));
             markParams.leftMargin = dp(6);
             row.addView(mark, markParams);
-            marks[kind] = mark;
+            marks[position] = mark;
         }
 
         refresh(NativeConnectionControls.read(context));
@@ -167,13 +179,14 @@ final class BB6ConnectionsPanel extends FrameLayout {
     }
 
     void refresh(NativeConnectionControls.Status snapshot) {
-        for (int i = 0; i < ConnectionControlPolicy.COUNT; i++) {
-            Boolean state = snapshot == null ? null : snapshot.forKind(i);
-            statuses[i].setText(ConnectionControlPolicy.stateLabel(i, state));
+        for (int i = 0; i < visibleKinds.length; i++) {
+            int kind = visibleKinds[i];
+            Boolean state = snapshot == null ? null : snapshot.forKind(kind);
+            statuses[i].setText(ConnectionControlPolicy.stateLabel(kind, state));
             statuses[i].setTag(state);
             marks[i].setChecked(ConnectionControlPolicy.checked(state));
-            rows[i].setContentDescription(ConnectionControlPolicy.label(i) + ", "
-                    + ConnectionControlPolicy.stateLabel(i, state)
+            rows[i].setContentDescription(ConnectionControlPolicy.label(kind) + ", "
+                    + ConnectionControlPolicy.stateLabel(kind, state)
                     + (lockscreenMode ? ", native Quick Settings control"
                             : ", open native connection controls"));
         }
@@ -206,7 +219,7 @@ final class BB6ConnectionsPanel extends FrameLayout {
                 if (keyCode == KeyEvent.KEYCODE_DPAD_UP && index == 0) {
                     enterStatusZone();
                 } else {
-                    int target = Math.max(0, Math.min(ConnectionControlPolicy.COUNT - 1,
+                    int target = Math.max(0, Math.min(rows.length - 1,
                             index + (keyCode == KeyEvent.KEYCODE_DPAD_UP ? -1 : 1)));
                     rows[target].requestFocus();
                 }
