@@ -43,6 +43,7 @@ final class NativeQuickSettingsTiles {
     private static final String TAG = "BB6-NativeQS";
     private static final Handler MAIN = new Handler(Looper.getMainLooper());
     private static volatile WeakReference<Object> host = new WeakReference<>(null);
+    private static volatile WeakReference<Object> interactor = new WeakReference<>(null);
     private static final Set<Session> sessions = new HashSet<>();
     private static boolean installed;
 
@@ -86,37 +87,103 @@ final class NativeQuickSettingsTiles {
 
     static synchronized void install(ClassLoader loader) {
         if (installed) return;
-        // QSTileHost is no longer the authoritative host on lineage-24.0.
+        // Both types are present in inspected LineageOS 24 sources.
+        // The Compose QS grid reads CurrentTilesInteractor directly; it must
+        // not be assumed that a QSHostAdapter instance is always constructed.
         Class<?> adapter = XposedHelpers.findClassIfExists(
                 "com.android.systemui.qs.QSHostAdapter", loader);
-        if (adapter == null) {
-            Log.e(TAG, "Verified LineageOS QSHostAdapter missing; native QS disabled");
-            return;
+        Class<?> pipeline = XposedHelpers.findClassIfExists(
+                "com.android.systemui.qs.pipeline.domain.interactor.CurrentTilesInteractorImpl",
+                loader);
+        if (adapter != null) {
+            try {
+                XposedBridge.hookAllConstructors(adapter, new XC_MethodHook() {
+                    @Override protected void afterHookedMethod(MethodHookParam param) {
+                        Object captured = param.thisObject;
+                        host = new WeakReference<>(captured);
+                        MAIN.post(() -> {
+                            for (Session session : new ArrayList<>(sessions)) {
+                                session.bindHost(captured);
+                            }
+                        });
+                        Log.i(TAG, "QSHostAdapter captured");
+                    }
+                });
+                Log.i(TAG, "QSHostAdapter constructor hook installed");
+            } catch (Throwable error) {
+                Log.e(TAG, "QSHostAdapter observer unavailable", error);
+            }
+        } else {
+            Log.w(TAG, "QSHostAdapter class unavailable in this SystemUI build");
         }
-        try {
-            XposedBridge.hookAllConstructors(adapter, new XC_MethodHook() {
-                @Override protected void afterHookedMethod(MethodHookParam param) {
-                    Object newHost = param.thisObject;
-                    host = new WeakReference<>(newHost);
-                    MAIN.post(() -> {
-                        for (Session session : new ArrayList<>(sessions)) {
-                            session.bindHost(newHost);
-                        }
-                    });
-                    Log.i(TAG, "SystemUI QSHostAdapter captured");
+        if (pipeline != null) {
+            try {
+                XposedBridge.hookAllConstructors(pipeline, new XC_MethodHook() {
+                    @Override protected void afterHookedMethod(MethodHookParam param) {
+                        Object captured = param.thisObject;
+                        interactor = new WeakReference<>(captured);
+                        MAIN.post(() -> {
+                            for (Session session : new ArrayList<>(sessions)) {
+                                session.refresh();
+                            }
+                        });
+                        Log.i(TAG, "CurrentTilesInteractorImpl captured");
+                    }
+                });
+                Log.i(TAG, "CurrentTilesInteractorImpl constructor hook installed");
+            } catch (Throwable error) {
+                Log.e(TAG, "Native tile interactor observer unavailable", error);
+            }
+        } else {
+            Log.w(TAG, "CurrentTilesInteractorImpl class unavailable in this SystemUI build");
+        }
+        installed = true;
+    }
+
+    /**
+     * Return tile objects owned by the native QS pipeline. QSHostAdapter and
+     * CurrentTilesInteractor expose the SAME native QSTile objects.
+     * Reading the interactor here is not tile creation or a second backend.
+     */
+    private static Collection<?> currentTiles() {
+        Object capturedHost = host.get();
+        if (capturedHost != null) {
+            try {
+                Object result = XposedHelpers.callMethod(capturedHost, "getTiles");
+                if (result instanceof Collection && !((Collection<?>) result).isEmpty()) {
+                    return (Collection<?>) result;
                 }
-            });
-            installed = true;
-        } catch (Throwable error) {
-            Log.e(TAG, "Cannot observe native QS host", error);
+            } catch (Throwable error) {
+                Log.w(TAG, "QSHostAdapter tile query unavailable", error);
+            }
         }
+        Object capturedInteractor = interactor.get();
+        if (capturedInteractor != null) {
+            try {
+                // Kotlin: CurrentTilesInteractor.currentTiles: StateFlow<List<TileModel>>
+                // Each TileModel carries the SystemUI-owned QSTile instance.
+                Object flow = XposedHelpers.callMethod(capturedInteractor, "getCurrentTiles");
+                Object models = XposedHelpers.callMethod(flow, "getValue");
+                if (models instanceof Collection) {
+                    List<Object> tiles = new ArrayList<>();
+                    for (Object model : (Collection<?>) models) {
+                        if (model != null) {
+                            tiles.add(XposedHelpers.callMethod(model, "getTile"));
+                        }
+                    }
+                    return tiles;
+                }
+            } catch (Throwable error) {
+                Log.w(TAG, "CurrentTilesInteractor tile query unavailable", error);
+            }
+        }
+        return Collections.emptyList();
     }
 
     static boolean activate(String spec, Action action) {
-        Object current = host.get();
-        if (current == null || TextUtils.isEmpty(spec)) return false;
+        if (TextUtils.isEmpty(spec)) return false;
         try {
-            Object item = findTile(current, spec);
+            Object item = findTile(spec);
             if (item == null || !Boolean.TRUE.equals(
                     XposedHelpers.callMethod(item, "isAvailable"))) return false;
             if (action == Action.SECONDARY) {
@@ -137,10 +204,8 @@ final class NativeQuickSettingsTiles {
         }
     }
 
-    private static Object findTile(Object current, String spec) {
-        Object collection = XposedHelpers.callMethod(current, "getTiles");
-        if (!(collection instanceof Collection)) return null;
-        for (Object tile : (Collection<?>) collection) {
+    private static Object findTile(String spec) {
+        for (Object tile : currentTiles()) {
             if (tile != null && spec.equals(
                     XposedHelpers.callMethod(tile, "getTileSpec"))) return tile;
         }
@@ -190,6 +255,17 @@ final class NativeQuickSettingsTiles {
         private Object boundHost;
         private Object hostCallback;
         private boolean active;
+        private int warmupAttempts;
+        private int previousTileCount = -1;
+        private final Runnable warmup = new Runnable() {
+            @Override public void run() {
+                if (!active) return;
+                refresh();
+                if (currentTiles().isEmpty() && ++warmupAttempts < 8) {
+                    MAIN.postDelayed(this, 300);
+                }
+            }
+        };
 
         Session(Context context, Runnable changed) {
             this.context = context;
@@ -200,13 +276,20 @@ final class NativeQuickSettingsTiles {
             if (active) return;
             active = true;
             sessions.add(this);
+            Log.i(TAG, "Native QS session opened: host=" + (host.get() != null)
+                    + " interactor=" + (interactor.get() != null));
             bindHost(host.get());
+            // CurrentTilesInteractor starts its tile collection asynchronously
+            // (scope.launch). Only retry initial loading, not ongoing tile
+            // state; native tile callbacks own steady-state updates.
+            MAIN.postDelayed(warmup, 300);
         }
 
         void stop() {
             if (!active) return;
             active = false;
             sessions.remove(this);
+            MAIN.removeCallbacks(warmup);
             unbind();
         }
 
@@ -228,7 +311,7 @@ final class NativeQuickSettingsTiles {
             if (!active || boundHost == newHost) return;
             unbind();
             if (newHost == null) {
-                changed.run();
+                refresh();
                 return;
             }
             try {
@@ -246,12 +329,17 @@ final class NativeQuickSettingsTiles {
         }
 
         private void refresh() {
-            if (!active || boundHost == null) return;
+            if (!active) return;
             try {
-                Object value = XposedHelpers.callMethod(boundHost, "getTiles");
-                if (!(value instanceof Collection)) return;
+                Collection<?> value = currentTiles();
+                if (value.size() != previousTileCount) {
+                    Log.i(TAG, "Native QS tile count=" + value.size()
+                            + " host=" + (host.get() != null)
+                            + " interactor=" + (interactor.get() != null));
+                    previousTileCount = value.size();
+                }
                 Set<Object> present = Collections.newSetFromMap(new IdentityHashMap<>());
-                for (Object tile : (Collection<?>) value) {
+                for (Object tile : value) {
                     if (tile == null) continue;
                     present.add(tile);
                     if (callbacks.containsKey(tile)) continue;
@@ -281,13 +369,10 @@ final class NativeQuickSettingsTiles {
         }
 
         List<TileInfo> snapshot() {
-            Object current = boundHost;
-            if (!active || current == null) return Collections.emptyList();
+            if (!active) return Collections.emptyList();
             List<TileInfo> result = new ArrayList<>();
             try {
-                Object tiles = XposedHelpers.callMethod(current, "getTiles");
-                if (!(tiles instanceof Collection)) return result;
-                for (Object tile : (Collection<?>) tiles) {
+                for (Object tile : currentTiles()) {
                     if (tile == null) continue;
                     try {
                         boolean available = Boolean.TRUE.equals(
