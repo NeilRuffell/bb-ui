@@ -31,6 +31,7 @@ final class BB6ConnectionsPanel extends FrameLayout {
     private final BB7Theme.Palette palette;
     private final Listener listener;
     private final ShadeUiController navigation;
+    private final boolean lockscreenMode;
     private final LinearLayout[] rows = new LinearLayout[ConnectionControlPolicy.COUNT];
     private final TextView[] labels = new TextView[ConnectionControlPolicy.COUNT];
     private final TextView[] statuses = new TextView[ConnectionControlPolicy.COUNT];
@@ -41,9 +42,20 @@ final class BB6ConnectionsPanel extends FrameLayout {
 
     BB6ConnectionsPanel(Context context, Listener listener,
             ShadeUiController navigation) {
+        this(context, listener, navigation, false);
+    }
+
+    /**
+     * Both screens use the same connection rows and Android state provider.
+     * The locked presentation has no independent status-zone controller,
+     * and cannot navigate into the unlocked shade.
+     */
+    BB6ConnectionsPanel(Context context, Listener listener,
+            ShadeUiController navigation, boolean lockscreenMode) {
         super(context);
         this.listener = listener;
         this.navigation = navigation;
+        this.lockscreenMode = lockscreenMode;
         palette = BB7Theme.palette(context);
         setBackgroundColor(palette.canvas);
         setFocusable(true);
@@ -94,7 +106,7 @@ final class BB6ConnectionsPanel extends FrameLayout {
             row.setClickable(true);
             row.setOnClickListener(view -> listener.onActivate(index));
             row.setOnFocusChangeListener((view, focused) -> {
-                if (focused) navigation.focusContent();
+                if (focused && navigation != null) navigation.focusContent();
                 updateSelection();
             });
             row.setOnKeyListener((view, code, event) -> onRowKey(index, code, event));
@@ -141,13 +153,17 @@ final class BB6ConnectionsPanel extends FrameLayout {
     }
 
     void focusFirst() {
-        navigation.focusContent();
+        if (navigation != null) navigation.focusContent();
         rows[0].requestFocus();
     }
 
     private void enterStatusZone() {
-        requestFocus();
-        navigation.focusStatusBarFromPage(ShadeStatusNavigation.QUICK_SETTINGS);
+        if (lockscreenMode) {
+            listener.onClose();
+        } else {
+            requestFocus();
+            navigation.focusStatusBarFromPage(ShadeStatusNavigation.QUICK_SETTINGS);
+        }
     }
 
     void refresh(NativeConnectionControls.Status snapshot) {
@@ -158,7 +174,8 @@ final class BB6ConnectionsPanel extends FrameLayout {
             marks[i].setChecked(ConnectionControlPolicy.checked(state));
             rows[i].setContentDescription(ConnectionControlPolicy.label(i) + ", "
                     + ConnectionControlPolicy.stateLabel(i, state)
-                    + ", open native connection controls");
+                    + (lockscreenMode ? ", native Quick Settings control"
+                            : ", open native connection controls"));
         }
         updateSelection();
     }
@@ -201,6 +218,9 @@ final class BB6ConnectionsPanel extends FrameLayout {
         if (keyCode == KeyEvent.KEYCODE_DPAD_CENTER || keyCode == KeyEvent.KEYCODE_ENTER
                 || keyCode == KeyEvent.KEYCODE_NUMPAD_ENTER
                 || keyCode == KeyEvent.KEYCODE_SPACE) {
+            // Space is NOT an activation key on the locked panel. The
+            // WindowRootView-level Space-to-password hook runs first.
+            if (lockscreenMode && keyCode == KeyEvent.KEYCODE_SPACE) return true;
             if (event.getAction() == KeyEvent.ACTION_UP) rows[index].performClick();
             return true;
         }
@@ -208,7 +228,7 @@ final class BB6ConnectionsPanel extends FrameLayout {
     }
 
     @Override public boolean dispatchKeyEvent(KeyEvent event) {
-        if (navigation.handleKey(event)) {
+        if (navigation != null && navigation.handleKey(event)) {
             return true;
         }
         if (event.getKeyCode() == KeyEvent.KEYCODE_BACK
