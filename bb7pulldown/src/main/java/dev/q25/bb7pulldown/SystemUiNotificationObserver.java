@@ -3,6 +3,8 @@ package dev.q25.bb7pulldown;
 import android.app.Notification;
 import android.app.NotificationManager;
 import android.app.NotificationChannel;
+import android.content.Context;
+import android.provider.Settings;
 import android.content.pm.ShortcutInfo;
 import android.app.PendingIntent;
 import android.app.RemoteInput;
@@ -48,6 +50,7 @@ final class SystemUiNotificationObserver {
     private static volatile List<NotificationItem> activeItems = Collections.emptyList();
     private static volatile WeakReference<NotificationListenerService> listener =
             new WeakReference<>(null);
+    private static boolean installed;
     private static boolean snapshotLogged;
     private static boolean refreshErrorLogged;
 
@@ -59,7 +62,61 @@ final class SystemUiNotificationObserver {
         return activeItems;
     }
 
-    static void install(ClassLoader loader) {
+    /**
+     * Lock-screen indicators include app identity and count only; no private
+     * notification text or PendingIntent is handed to the lock-screen UI.
+     * Honour the global lock-screen notification toggle and Android's
+     * notification/ranking VISIBILITY_SECRET restrictions.
+     */
+    static Map<String, Integer> lockscreenCountsSnapshot(Context context) {
+        if (context == null) return Collections.emptyMap();
+        try {
+            if (Settings.Secure.getInt(context.getContentResolver(),
+                    "lock_screen_show_notifications", 1) == 0) {
+                return Collections.emptyMap();
+            }
+        } catch (RuntimeException error) {
+            Log.w(TAG, "Could not read lock-screen notification visibility setting");
+            return Collections.emptyMap();
+        }
+
+        List<LockscreenNotificationCounts.Record> records = new ArrayList<>();
+        NotificationListenerService service = listener.get();
+        NotificationListenerService.RankingMap rankings = null;
+        if (service != null) {
+            try { rankings = service.getCurrentRanking(); }
+            catch (RuntimeException ignored) { /* Use notification visibility. */ }
+        }
+        synchronized (LOCK) {
+            for (StatusBarNotification sbn : ACTIVE_SBNS.values()) {
+                if (sbn == null || sbn.getNotification() == null) continue;
+                Notification n = sbn.getNotification();
+                // OS6's indicator strip represents alerts, not persistent
+                // foreground-service/media controls.
+                if ((n.flags & (Notification.FLAG_ONGOING_EVENT
+                        | Notification.FLAG_FOREGROUND_SERVICE)) != 0) continue;
+                if (n.visibility == Notification.VISIBILITY_SECRET) continue;
+                if (rankings != null) {
+                    NotificationListenerService.Ranking rank =
+                            new NotificationListenerService.Ranking();
+                    if (rankings.getRanking(sbn.getKey(), rank)) {
+                        if (rank.getLockscreenVisibilityOverride()
+                                == Notification.VISIBILITY_SECRET
+                                || rank.getImportance() == NotificationManager.IMPORTANCE_NONE) {
+                            continue;
+                        }
+                    }
+                }
+                records.add(new LockscreenNotificationCounts.Record(
+                        sbn.getPackageName(), sbn.getGroupKey(),
+                        (n.flags & Notification.FLAG_GROUP_SUMMARY) != 0, true));
+            }
+        }
+        return LockscreenNotificationCounts.count(records);
+    }
+
+    static synchronized void install(ClassLoader loader) {
+        if (installed) return;
         Class<?> type = XposedHelpers.findClassIfExists(LISTENER, loader);
         if (type == null) {
             Log.i(TAG, "SystemUI notification listener absent in this classloader");
@@ -116,6 +173,7 @@ final class SystemUiNotificationObserver {
                     }
                 }
             });
+            installed = true;
             Log.i(TAG, "SystemUI active-notification listener observer registered");
         } catch (Throwable error) {
             Log.e(TAG, "Unable to register active-notification observer", error);
@@ -293,6 +351,7 @@ final class SystemUiNotificationObserver {
         }
         Log.i(TAG, "Notification summaries updated: entries=" + items.size());
         PullDownHook.onNotificationItemsUpdated();
+        BB6LockScreenHook.onNotificationsUpdated();
     }
 
     private static List<String> packageNames() {
