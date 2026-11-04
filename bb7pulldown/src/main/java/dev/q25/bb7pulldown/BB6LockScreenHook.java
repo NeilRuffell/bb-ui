@@ -41,8 +41,6 @@ public final class BB6LockScreenHook implements IXposedHookLoadPackage {
             "com.android.systemui.shade.NotificationShadeWindowView";
     private static final String PRIMARY =
             "com.android.systemui.bouncer.domain.interactor.PrimaryBouncerInteractor";
-    private static final String MANAGER =
-            "com.android.systemui.statusbar.phone.StatusBarKeyguardViewManager";
     private static final String KEYGUARD_STATE =
             "com.android.systemui.statusbar.policy.KeyguardStateControllerImpl";
     // Verified in the Q25 SystemUI APK: setState(int, boolean), getState().
