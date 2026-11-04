@@ -1,54 +1,39 @@
-# BBOS6-style lock screen (development branch)
+# BBOS6 lock-screen indicators — Vector APK test
 
 **Branch:** `feat/bb6-lockscreen-banner`  
-**APK:** `0.9.41-bb6-aod-layer-crashfix-dev`  
-**Status:** Test build; not merged into `master`.
+**APK:** `0.9.42-bb6-vector-single-clock-dev`  
+**Status:** APK test build, not merged into `master`.
 
-The interactive lock screen uses our BlackBerry 6-inspired operator, date,
-time and per-app notification icon/count row. It reuses SystemUI's native
-notification listener. Counts are active Android notification records, not
-necessarily in-app unread-message totals. Native privacy exclusions apply.
+This remains the **unified BB UI Vector module**. There is no ROM build or
+partition flashing involved. Build/install the APK through the existing
+Gradle and ADB workflow.
 
-## Replacing redundant native lock-screen UI
+## Correction for double clock/date/carrier and prior AOD crash
 
-The old prototype made some native elements transparent or `GONE`. This
-version instead **physically detaches duplicate views from their parents**
-while the BB6 interactive keyguard is active:
+0.9.40 tried detaching native AOD-managed clock/Smartspace views and crashed
+SystemUI because `AodBurnInLayer` still referenced a removed view.
+0.9.41 avoided the crash by leaving unsafe views attached; the added BB6
+clock/date/carrier therefore appeared alongside their Android originals.
 
-- Native lock-screen clock faces (using actual dynamic ClockViewIds / clock
-  controller views, not guessed resource names)
-- Native Smartspace date content, **without deleting its weather/alarm/DND**
-- Native keyguard carrier label, **without removing signal/battery/privacy**
-- Native stock notification icon strip (restored for Always-On Display)
-- The complete native notification stack and its empty-frame container
-- The generic swipe-to-unlock hint is stopped at its indication producer;
-  other native charging, biometric, security and accessibility messages remain
+**0.9.42 deliberately removes the duplicate custom clock, date and TELUS
+label from `BB6LockScreenHeader`.** The native Android clock, Smartspace
+date and operator indicator remain, with a **single** display of each.
+The BB6 header now draws **only** app notification icons followed by counts,
+using the existing SystemUI notification listener. When no alerts exist,
+the custom indicator view is not displayed and has no frame.
 
-**Crash correction (Q25, November 3):** 0.9.40 detached a view which
-`AodBurnInLayer` still tracked via `ConstraintHelper.getReferencedIds()`.
-The next `Layer.transform()` dereferenced a null View and crashed SystemUI.
-0.9.41 verifies the native burn-in references before any detach; if the
-view is referenced, it calls the native `removeView(View)` on the layer
-**before** removing it from the layout, and restores `addView(View)`
-**after** reattachment. A missing/unreadable layer or unresolved child
-reference cancels that removal rather than risking another crash. The
-actual AOD listener and required empty burn-in anchor are untouched.
+The crash-prone `BB6NativeLockscreenComposition` is not invoked or hooked.
+The previously working Space-to-native-credential feature is unchanged.
+The native notification list is temporarily detached on interactive
+keyguard and reattached for the shade/AOD/bouncer; notification data is
+not deleted.
 
-Original view instances, parents and layout positions are retained and
-restored for AOD, password/PIN/pattern bouncer, shade or unlocked state.
-Notification data is never canceled, and the normal Android shade still
-uses the original stack. No new standalone window, credential entry screen,
-input interceptor, polling timer or global View hook is added by this feature.
-The previously verified Space-to-unlock implementation remains unchanged.
+**Important:** This is a stabilization preview, **not** the final BBOS6 clock
+layout. It does not yet reposition or replace Android's clock/date/carrier.
+The eventual rootless LineageOS source integration is separate and cannot
+be installed with an APK. Do not merge until device-verified.
 
-**For ROM integration:** Detached views are a temporary Vector development
-adapter. A rootless LineageOS fork should use a conditional, native keyguard
-blueprint so these stock views **are never built in the BB6 interactive
-composition**. See
-[LineageOS 24 native integration](rom/lineage-24.0/LOCKSCREEN_INTEGRATION.md).
-The full ROM adaptation is documented but not implemented or tested yet.
-
-## Build and test on KDE neon
+## Install on KDE neon
 
 ```sh
 cd ~/Projects/bb-ui
@@ -58,28 +43,16 @@ git pull --ff-only
 gradle :app:assembleDebug :app:testDebugUnitTest &&
 adb push app/build/outputs/apk/debug/app-debug.apk /data/local/tmp/bb-ui.apk &&
 timeout 45s adb shell pm install -r /data/local/tmp/bb-ui.apk &&
+adb shell setprop debug.bb6lockscreen.enabled true &&
 adb shell am crash com.android.systemui
 ```
 
-Review: screen on/off, date/time/carrier duplicates, multiple app notification
-counts, locked/unlocked shade, Space-to-password, incorrect password, AOD,
-charging and native security messages. If a duplicate remains, examine the
-native integration diagnostics rather than masking the element with opacity.
-
-```sh
-adb logcat -d -s 'BB6-LockScreen:V' 'BB6-Keyguard:V' '*:S' | tail -70
-```
-
-Disable the preview without affecting the stable Space feature:
+If SystemUI crashes, disable **only the BB6 lock-screen preview**:
 
 ```sh
 adb shell setprop debug.bb6lockscreen.enabled false
 adb shell am crash com.android.systemui
 ```
-
-Use `adb shell setprop debug.bb6lockscreen.enabled true` followed by the
-SystemUI process restart to re-enable. The rollback restores stock composition
-because the process restarts from the native layout.
 
 
 ---
