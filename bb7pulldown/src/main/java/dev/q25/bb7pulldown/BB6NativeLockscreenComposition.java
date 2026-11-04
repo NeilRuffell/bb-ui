@@ -307,6 +307,12 @@ final class BB6NativeLockscreenComposition {
 
         Slot slot = new Slot(view, group, layer, directReference);
         if (directReference && !removeBurnInReference(layer, view)) {
+            // If reflection changed the layer but failed postcondition
+            // checking, put the reference back while the view is still
+            // attached, then refuse to detach.
+            if (!contains(referencedIds(layer), viewId)) {
+                addBurnInReference(layer, view);
+            }
             Log.e(TAG, "Skipping native view removal: burn-in unregistration "
                     + "failed for ID " + viewId);
             return false;
