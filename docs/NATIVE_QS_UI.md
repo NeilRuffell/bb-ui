@@ -59,6 +59,26 @@ no Xposed imports. Both unlocked and locked surfaces use the same class.
 The old BB6ConnectionsPanel and NativeConnectionControls implementations
 were retired. ConnectionControlPolicy now only defines locked row labels.
 
+## Q25 Bluetooth dialog crash guard
+
+The Q25 LineageOS 24 Bluetooth details dialog uses an AndroidX
+NestedScrollView containing `bluetooth_toggle`. On November 3, 2026, the
+device repeatedly reported:
+
+    IllegalArgumentException: parameter must be a descendant of this view
+    androidx.core.widget.NestedScrollView.isWithinDeltaOfScreen()
+    androidx.core.widget.NestedScrollView.onSizeChanged()
+
+Closing the BB shade before opening the dialog did NOT resolve the crash.
+`NativeBluetoothDialogGuard` hooks only this native AndroidX focus-scroll
+calculation, and returns false only when the focused View is not a
+descendant of the Bluetooth dialog's `scroll_view`. The normal native
+Bluetooth dialog, native QSTile actions, and valid scroll calculations are
+preserved. The guard logs when installed and when it suppresses the
+invalid-focus calculation. This is a temporary Vector-only workaround;
+a future ROM port should address the AndroidX focus defect at its source.
+The workaround requires physical Q25 verification.
+
 ## Still native / not yet replaced
 
 - Android-owned tile dialogs, permission/authentication surfaces and Compose
@@ -89,7 +109,7 @@ replace the Vector adapter, not introduce a second tile backend.
     adb shell setprop debug.bb6lockscreen.qs.enabled true
     adb shell am crash com.android.systemui
 
-Expected version: 0.9.50-native-qs-rom-compat-dev (versionCode 80).
+Expected version: 0.9.52-native-bt-focus-guard-dev (versionCode 82).
 
 Test native tile state changes, edited ordering, installed third-party tiles,
 keyboard focus, Enter, Menu, Back, touch, and all native action dialogs on
