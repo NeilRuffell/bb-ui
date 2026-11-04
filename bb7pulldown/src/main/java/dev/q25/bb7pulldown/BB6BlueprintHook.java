@@ -100,6 +100,7 @@ public final class BB6BlueprintHook implements IXposedHookLoadPackage {
 
         hookAodReferenceConsistency(lp.classLoader);
         hookSmartspaceAodCleanup(lp.classLoader);
+        hookClockAodCleanup(lp.classLoader);
     }
 
     private static void registerBlueprint(Object repository, Class<?> blueprintClass) {
@@ -260,6 +261,69 @@ public final class BB6BlueprintHook implements IXposedHookLoadPackage {
     }
 
     /**
+     * The Q25 native ClockSection owns a clock-view binder which attaches the
+     * small/large clock views. Before the section is removed by the normal
+     * blueprint transition, unregister only those clock-face IDs from the
+     * AOD transform layer; the native binder then removes its own views.
+     */
+    private static void hookClockAodCleanup(ClassLoader loader) {
+        Class<?> section = XposedHelpers.findClassIfExists(CLOCK, loader);
+        if (section == null) return;
+        try {
+            XposedBridge.hookAllMethods(section, "removeViews", new XC_MethodHook() {
+                @Override protected void beforeHookedMethod(MethodHookParam param) {
+                    if (!registered || !eligible() || param.args.length == 0
+                            || !(param.args[0] instanceof ViewGroup)) return;
+                    try {
+                        Object vm = XposedHelpers.getObjectField(
+                                param.thisObject, "keyguardClockViewModel");
+                        Object flow = XposedHelpers.getObjectField(vm, "currentClock");
+                        Object clock = XposedHelpers.callMethod(flow, "getValue");
+                        if (clock == null) return;
+                        ArrayList<Integer> ids = new ArrayList<>();
+                        for (String name : Arrays.asList("getSmallClock", "getLargeClock")) {
+                            Object face = XposedHelpers.callMethod(clock, name);
+                            Object layout = XposedHelpers.callMethod(face, "getLayout");
+                            Object views = XposedHelpers.callMethod(layout, "getViews");
+                            if (!(views instanceof Iterable)) continue;
+                            for (Object candidate : (Iterable<?>) views) {
+                                if (candidate instanceof View) {
+                                    ids.add(((View) candidate).getId());
+                                }
+                            }
+                        }
+                        pruneNativeLayerIds((ViewGroup) param.args[0], ids);
+                    } catch (Throwable error) {
+                        Log.w(TAG, "Native clock AOD pre-removal not available: " + error);
+                    }
+                }
+            });
+        } catch (Throwable error) {
+            Log.w(TAG, "Cannot observe native clock removal: " + error);
+        }
+    }
+
+    private static void pruneNativeLayerIds(ViewGroup root, List<Integer> omitted) {
+        int layerId = root.getResources().getIdentifier(
+                "burn_in_layer", "id", SYSTEMUI);
+        View layer = layerId == 0 ? null : root.findViewById(layerId);
+        if (layer == null || omitted.isEmpty()) return;
+        int[] refs = (int[]) XposedHelpers.callMethod(layer, "getReferencedIds");
+        if (refs == null || refs.length == 0) return;
+        int[] keep = new int[refs.length];
+        int count = 0;
+        for (int value : refs) {
+            if (!omitted.contains(value)) keep[count++] = value;
+        }
+        if (count > 0 && count != refs.length) {
+            XposedHelpers.callMethod(layer, "setReferencedIds",
+                    (Object) Arrays.copyOf(keep, count));
+            Log.i(TAG, "AOD Layer references removed for native sections: "
+                    + (refs.length - count));
+        }
+    }
+
+    /**
      * Stock SmartspaceSection.removeViews removes its date/Smartspace roots
      * without unregistering them from AodBurnInLayer. Remove their native
      * helper references BEFORE the stock section's own lifecycle method
@@ -287,20 +351,7 @@ public final class BB6BlueprintHook implements IXposedHookLoadPackage {
                                 removed.add(((View) item).getId());
                             }
                         }
-                        if (removed.isEmpty()) return;
-                        int[] refs = (int[]) XposedHelpers.callMethod(
-                                helper, "getReferencedIds");
-                        if (refs == null || refs.length == 0) return;
-                        int[] retained = new int[refs.length];
-                        int count = 0;
-                        for (int ref : refs) {
-                            if (!removed.contains(ref)) retained[count++] = ref;
-                        }
-                        if (count != refs.length && count > 0) {
-                            XposedHelpers.callMethod(helper, "setReferencedIds",
-                                    (Object) Arrays.copyOf(retained, count));
-                            Log.i(TAG, "Unregistered removed Smartspace from AOD Layer");
-                        }
+                        pruneNativeLayerIds(root, removed);
                     } catch (Throwable error) {
                         Log.w(TAG, "Native Smartspace cleanup unavailable: " + error);
                     }
