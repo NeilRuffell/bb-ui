@@ -1,11 +1,14 @@
 package dev.q25.bb7pulldown;
 
 import android.app.KeyguardManager;
+import android.bluetooth.BluetoothAdapter;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.os.PowerManager;
+import android.net.wifi.WifiManager;
+import android.telephony.TelephonyManager;
 import android.util.Log;
 import android.view.Gravity;
 import android.view.View;
@@ -67,6 +70,13 @@ public final class BB6LockScreenHook implements IXposedHookLoadPackage {
     private static boolean missingNativeStackLogged;
     private static boolean missingKeyguardStatusBarLogged;
 
+    // This is one compact SystemUI child, not a second overlay window.
+    // Only the lock screen owns this instance. The unlocked shade retains
+    // its existing BB6ConnectionsPanel and controller unchanged.
+    private static BB6ConnectionsPanel lockQuickPanel;
+    private static BroadcastReceiver lockQuickReceiver;
+    private static Context lockQuickReceiverContext;
+
     @Override
     public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lp) {
         if (!PACKAGE.equals(lp.packageName) || !PACKAGE.equals(lp.processName)) return;
@@ -77,6 +87,7 @@ public final class BB6LockScreenHook implements IXposedHookLoadPackage {
 
         // Idempotent; the pull-down component uses this same live listener.
         SystemUiNotificationObserver.install(lp.classLoader);
+        NativeQuickSettingsTiles.install(lp.classLoader);
         // Leave native clock/date/carrier and AOD-managed views intact.
 
         Class<?> rootClass = XposedHelpers.findClassIfExists(ROOT, lp.classLoader);
@@ -183,6 +194,7 @@ public final class BB6LockScreenHook implements IXposedHookLoadPackage {
             requestRefresh();
             return;
         }
+        closeLockscreenQuickSettings(false);
         removeNativeStackWatcher();
         restoreNativeStack();
         // The previous header may still own the native status-bar highlight
@@ -193,6 +205,7 @@ public final class BB6LockScreenHook implements IXposedHookLoadPackage {
         }
         Context context = root.getContext();
         BB6LockScreenHeader header = new BB6LockScreenHeader(context);
+        header.setOnStatusActivation(BB6LockScreenHook::openLockscreenQuickSettings);
         header.setVisibility(View.GONE);
         // The header is a single native focus target for trackpad selection.
         // Its own key policy never handles Space: the existing
@@ -230,6 +243,7 @@ public final class BB6LockScreenHook implements IXposedHookLoadPackage {
         BB6LockScreenHeader header = headerRef.get();
         if (root == null || header == null || header.getParent() != root) return;
         if (!enabled()) {
+            closeLockscreenQuickSettings(false);
             header.setBb6CompositionActive(false);
             header.bindNativeStatusBar(null);
             header.setVisibility(View.GONE);
@@ -256,12 +270,14 @@ public final class BB6LockScreenHook implements IXposedHookLoadPackage {
             Log.i(TAG, "BBOS6 notification strip " + (shown ? "eligible" : "inactive"));
         }
         if (!shown) {
+            closeLockscreenQuickSettings(false);
             header.setBb6CompositionActive(false);
             header.bindNativeStatusBar(null);
             header.setVisibility(View.GONE);
             return;
         }
         boolean ownsKeyguard = BB6BlueprintHook.isApplied();
+        if (!ownsKeyguard) closeLockscreenQuickSettings(false);
         View statusBar = null;
         if (ownsKeyguard) {
             int statusBarId = root.getResources().getIdentifier(
@@ -292,6 +308,168 @@ public final class BB6LockScreenHook implements IXposedHookLoadPackage {
         // the stock clock/date remain the only clock/date on screen.
         header.setVisibility(ownsKeyguard || !counts.isEmpty()
                 ? View.VISIBLE : View.GONE);
+        // The limited QS panel cannot survive a keyguard/bouncer/doze
+        // transition. Re-check the live native state on each refresh.
+        if (lockQuickPanel != null && !mayShowLockscreenQuickSettings(root)) {
+            closeLockscreenQuickSettings(false);
+        }
+    }
+
+    /**
+     * Lock-screen QS runs inside the existing SystemUI window/blueprint.
+     * Do not open the unlocked shade or create a new focusable window.
+     *
+     * A native tile owns its own security/authentication requirements.
+     * There is deliberately NO fallback to Android Settings while locked.
+     */
+    private static boolean mayShowLockscreenQuickSettings(FrameLayout root) {
+        if (root == null || !root.isAttachedToWindow() || !enabled()) return false;
+        Context context = root.getContext();
+        KeyguardManager keyguard = (KeyguardManager)
+                context.getSystemService(Context.KEYGUARD_SERVICE);
+        PowerManager power = (PowerManager)
+                context.getSystemService(Context.POWER_SERVICE);
+        return LockscreenQuickSettingsPolicy.mayShow(
+                keyguard != null && keyguard.isKeyguardLocked(),
+                power != null && power.isInteractive(),
+                isNativeDozing(), isBouncerActive(), BB6BlueprintHook.isApplied(),
+                nativeStatusState());
+    }
+
+    private static void openLockscreenQuickSettings() {
+        FrameLayout root = rootRef.get();
+        BB6LockScreenHeader header = headerRef.get();
+        if (root == null || header == null || header.getParent() != root
+                || !header.isShown() || !mayShowLockscreenQuickSettings(root)) {
+            return;
+        }
+        if (lockQuickPanel != null) {
+            lockQuickPanel.focusFirst();
+            return;
+        }
+
+        Context context = root.getContext();
+        BB6ConnectionsPanel panel = new BB6ConnectionsPanel(context,
+                new BB6ConnectionsPanel.Listener() {
+                    @Override public void onClose() {
+                        closeLockscreenQuickSettings(true);
+                    }
+                    @Override public void onActivate(int kind) {
+                        activateLockscreenQuickSetting(kind);
+                    }
+                }, null, true);
+
+        // Full-size QS remains available ONLY in the existing unlocked shade.
+        // The lock-screen panel is compact, occupying the notification area
+        // below the status + date/time selection.
+        int top = nativeStatusBarHeight(root) + dp(context, 54);
+        int remaining = root.getHeight() - top;
+        if (remaining < dp(context, 198)) {
+            Log.w(TAG, "Not enough lock-screen space for connection controls");
+            return;
+        }
+        FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                Math.min(dp(context, 220), remaining),
+                Gravity.TOP | Gravity.CENTER_HORIZONTAL);
+        params.topMargin = top;
+        panel.setElevation(dp(context, 12));
+        try {
+            root.addView(panel, params);
+            lockQuickPanel = panel;
+            registerLockQuickUpdates(context);
+            panel.focusFirst();
+            Log.i(TAG, "Limited lockscreen QS opened: mobile data, Wi-Fi, Bluetooth");
+        } catch (RuntimeException error) {
+            if (panel.getParent() == root) root.removeView(panel);
+            Log.e(TAG, "Cannot attach limited lockscreen QS", error);
+        }
+    }
+
+    private static void activateLockscreenQuickSetting(int kind) {
+        FrameLayout root = rootRef.get();
+        if (lockQuickPanel == null || !LockscreenQuickSettingsPolicy.mayActivate(
+                kind, mayShowLockscreenQuickSettings(root))) {
+            Log.w(TAG, "Blocked connection activation outside native keyguard");
+            closeLockscreenQuickSettings(false);
+            return;
+        }
+
+        // QSTileHost and individual tiles are shared with the unlocked QS.
+        // The tile's own SystemUI backend enforces any required unlock.
+        // No Settings.Panel ACTION_*, direct radio API, or activity fallback.
+        if (!NativeQuickSettingsTiles.activate(kind)) {
+            Log.w(TAG, "Native lockscreen QS tile missing/unavailable: "
+                    + ConnectionControlPolicy.label(kind)
+                    + "; no external Settings fallback permitted");
+        }
+        BB6ConnectionsPanel current = lockQuickPanel;
+        if (current != null) {
+            current.post(() -> {
+                if (lockQuickPanel == current
+                        && mayShowLockscreenQuickSettings(rootRef.get())) {
+                    current.refresh(NativeConnectionControls.read(current.getContext()));
+                }
+            });
+        }
+    }
+
+    private static void closeLockscreenQuickSettings(boolean restoreHeaderFocus) {
+        BB6ConnectionsPanel panel = lockQuickPanel;
+        lockQuickPanel = null;
+        stopLockQuickUpdates();
+        if (panel != null && panel.getParent() instanceof ViewGroup) {
+            ((ViewGroup) panel.getParent()).removeView(panel);
+        }
+        if (panel != null) {
+            Log.i(TAG, "Limited lockscreen QS closed");
+            if (restoreHeaderFocus) {
+                FrameLayout root = rootRef.get();
+                BB6LockScreenHeader header = headerRef.get();
+                if (root != null && header != null
+                        && mayShowLockscreenQuickSettings(root)) {
+                    header.focusStatusDate();
+                }
+            }
+        }
+    }
+
+    private static void registerLockQuickUpdates(Context context) {
+        stopLockQuickUpdates();
+        IntentFilter filter = new IntentFilter();
+        filter.addAction(WifiManager.WIFI_STATE_CHANGED_ACTION);
+        filter.addAction(BluetoothAdapter.ACTION_STATE_CHANGED);
+        filter.addAction(Intent.ACTION_AIRPLANE_MODE_CHANGED);
+        filter.addAction(TelephonyManager.ACTION_DEFAULT_DATA_SUBSCRIPTION_CHANGED);
+        BroadcastReceiver receiver = new BroadcastReceiver() {
+            @Override public void onReceive(Context ctx, Intent intent) {
+                BB6ConnectionsPanel panel = lockQuickPanel;
+                if (panel != null && mayShowLockscreenQuickSettings(rootRef.get())) {
+                    panel.refresh(NativeConnectionControls.read(panel.getContext()));
+                }
+            }
+        };
+        try {
+            context.registerReceiver(receiver, filter);
+            lockQuickReceiver = receiver;
+            lockQuickReceiverContext = context;
+        } catch (RuntimeException error) {
+            Log.w(TAG, "Locked QS state receiver unavailable", error);
+        }
+    }
+
+    private static void stopLockQuickUpdates() {
+        BroadcastReceiver receiver = lockQuickReceiver;
+        Context context = lockQuickReceiverContext;
+        lockQuickReceiver = null;
+        lockQuickReceiverContext = null;
+        if (receiver != null && context != null) {
+            try {
+                context.unregisterReceiver(receiver);
+            } catch (RuntimeException error) {
+                Log.w(TAG, "Locked QS state receiver cleanup unavailable", error);
+            }
+        }
     }
 
     /**
