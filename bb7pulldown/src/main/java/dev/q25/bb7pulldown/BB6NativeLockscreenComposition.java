@@ -182,8 +182,9 @@ final class BB6NativeLockscreenComposition {
             strippedLogged = false;
             return;
         }
-        // Restore reversed insertion order so nested children reattach only
-        // after their original parent is available.
+        // Restore the original View and then its native AOD Layer membership.
+        // Keep failed slots for a later retry; clearing their references would
+        // permanently lose the system's own clock/date view during a transition.
         ArrayList<Slot> slots = new ArrayList<>(detached.values());
         Collections.reverse(slots);
         for (Slot slot : slots) {
@@ -193,24 +194,31 @@ final class BB6NativeLockscreenComposition {
                     int index = Math.min(slot.index, slot.parent.getChildCount());
                     slot.parent.addView(slot.view, index, slot.layoutParams);
                 }
-                if (slot.wasBurnInReference && slot.view.getParent() == slot.parent) {
-                    // Reinstate the reference only after the view is once
-                    // again a child of its original ConstraintLayout.
-                    if (!addBurnInReference(slot.burnInLayer, slot.view)) {
-                        Log.e(TAG, "Could not restore native burn-in reference for "
-                                + slot.view.getClass().getSimpleName());
-                    }
+                if (slot.view.getParent() != slot.parent) {
+                    Log.w(TAG, "Native keyguard child acquired a different parent");
+                    continue;
                 }
+                if (slot.wasBurnInReference &&
+                        !addBurnInReference(slot.burnInLayer, slot.view)) {
+                    Log.e(TAG, "Native AOD reference restoration incomplete: "
+                            + slot.view.getClass().getSimpleName());
+                    continue;
+                }
+                detached.remove(slot.view);
             } catch (RuntimeException error) {
                 Log.w(TAG, "Could not reattach native keyguard child "
                         + slot.view.getClass().getSimpleName(), error);
             }
         }
-        detached.clear();
-        dateGroupsHandled.clear();
-        active = false;
-        strippedLogged = false;
-        Log.i(TAG, "Native keyguard composition restored");
+        if (detached.isEmpty()) {
+            dateGroupsHandled.clear();
+            active = false;
+            strippedLogged = false;
+            Log.i(TAG, "Native keyguard composition restored");
+        } else {
+            Log.w(TAG, "Native keyguard restoration deferred: "
+                    + detached.size() + " views remaining");
+        }
     }
 
     private static ViewGroup findKeyguardRoot(ViewGroup outer) {
