@@ -1,5 +1,7 @@
 package dev.q25.bb7pulldown;
 
+import java.util.Set;
+
 /**
  * Locked Quick Settings is a presentation/security policy over the SAME
  * Android QSHostAdapter/QSTile backend used by the unlocked native tile page.
@@ -58,6 +60,27 @@ final class LockscreenQuickSettingsPolicy {
                 return "bt".equals(spec);
             default:
                 return false;
+        }
+    }
+
+    /**
+     * Choose only a currently installed, available native tile. The mobile
+     * and Wi-Fi labels may map to the same combined Internet tile.
+     * This is a presentation mapping, not a radio state implementation.
+     */
+    static String selectNativeSpec(int kind, Set<String> availableSpecs) {
+        if (availableSpecs == null) return null;
+        switch (kind) {
+            case ConnectionControlPolicy.MOBILE:
+                if (availableSpecs.contains("cell")) return "cell";
+                return availableSpecs.contains("internet") ? "internet" : null;
+            case ConnectionControlPolicy.WIFI:
+                if (availableSpecs.contains("wifi")) return "wifi";
+                return availableSpecs.contains("internet") ? "internet" : null;
+            case ConnectionControlPolicy.BLUETOOTH:
+                return availableSpecs.contains("bt") ? "bt" : null;
+            default:
+                return null;
         }
     }
 
