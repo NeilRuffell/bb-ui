@@ -352,19 +352,7 @@ public final class BB6KeyguardKeyboardHook implements IXposedHookLoadPackage {
     }
 
     private static boolean signatureMatches(Class<?>[] types, Object[] args) {
-        if (types.length != args.length) return false;
-        for (int i = 0; i < args.length; i++) {
-            if (args[i] == null) {
-                if (types[i].isPrimitive()) return false;
-            } else if (types[i] == boolean.class) {
-                if (!(args[i] instanceof Boolean)) return false;
-            } else if (types[i] == int.class) {
-                if (!(args[i] instanceof Integer)) return false;
-            } else if (!types[i].isInstance(args[i])) {
-                return false;
-            }
-        }
-        return true;
+        return NativeMethodSignature.matches(types, args);
     }
 
     /** A compact one-line method inventory for real-device failures. */
