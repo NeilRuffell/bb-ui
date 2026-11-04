@@ -2,7 +2,7 @@
 
 The **BBOS6 lock screen (0.9.45)** is merged into `master`.
 The limited lock-screen Quick Settings feature is being tested on
-`feat/bb6-lockscreen-quick-settings` as **0.9.46**.
+`feat/bb6-lockscreen-quick-settings` as **0.9.47**.
 It is **not yet merged**.
 
 The locked screen now opens the existing **Manage Connections** panel from
@@ -10,8 +10,10 @@ the combined status/date-time selection (Enter or trackpad click).
 Only **Mobile Network, Wi-Fi and Bluetooth** are shown. All three use the
 same Android native QS tile backend as our unlocked shade. The unlocked
 shade is unchanged and can gain additional items independently.
-Back closes the locked panel; **Space still opens the original Android
-password screen**. No Settings activity is launched as a locked fallback.
+Physical Back and the system navigation/gesture Back both close locked QS
+and return focus to the status/date-time item. **Space still opens the
+original Android password screen**. No Settings activity is launched as
+a locked fallback.
 
 The new panel has an independent rollback property:
 `adb shell setprop debug.bb6lockscreen.qs.enabled false`, followed by
