@@ -41,6 +41,7 @@ final class BB6LockScreenHeader extends LinearLayout {
     private View nativeStatusBar;
     private Drawable nativeStatusBarBackground;
     private boolean nativeStatusBarHighlighted;
+    private Runnable statusActivation;
     private final HorizontalScrollView notificationScroll;
     private final LinearLayout notificationRow;
 
@@ -72,10 +73,21 @@ final class BB6LockScreenHeader extends LinearLayout {
         // of the separate native KeyguardStatusBarView on focus changes.
         clockRow.setFocusable(true);
         clockRow.setFocusableInTouchMode(false);
-        clockRow.setClickable(false);
         clockRow.setDescendantFocusability(FOCUS_BLOCK_DESCENDANTS);
-        clockRow.setOnKeyListener((view, keyCode, event) ->
-                BB6LockScreenSelectionPolicy.isNoopSelectionKey(keyCode));
+        // Same one focus target opens the limited locked QS presentation.
+        // The preexisting WindowRootView hook still intercepts physical
+        // Space before child dispatch; the clock row never consumes it.
+        clockRow.setOnClickListener(view -> activateStatusDate());
+        clockRow.setOnKeyListener((view, keyCode, event) -> {
+            if (!BB6LockScreenSelectionPolicy.isNoopSelectionKey(keyCode)) {
+                return false;
+            }
+            if (event.getAction() == android.view.KeyEvent.ACTION_UP
+                    && event.getRepeatCount() == 0) {
+                activateStatusDate();
+            }
+            return true;
+        });
         clockRow.setOnFocusChangeListener((view, focused) ->
                 updateNativeStatusBarHighlight(focused));
         StateListDrawable clockBackground = new StateListDrawable();
@@ -150,6 +162,22 @@ final class BB6LockScreenHeader extends LinearLayout {
      * BB6 clock/date ONLY when the alternate native blueprint has actually
      * been installed and selected; otherwise use indicator-only fallback.
      */
+    void setOnStatusActivation(Runnable action) {
+        statusActivation = action;
+    }
+
+    void focusStatusDate() {
+        if (clockRow.getVisibility() == VISIBLE && isShown()) {
+            clockRow.requestFocus();
+        }
+    }
+
+    private void activateStatusDate() {
+        if (clockRow.isShown() && statusActivation != null) {
+            statusActivation.run();
+        }
+    }
+
     void setBb6CompositionActive(boolean active) {
         if (!active) {
             // Restores any native background before AOD, shade or bouncer
