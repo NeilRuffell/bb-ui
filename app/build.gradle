@@ -7,8 +7,8 @@ android {
         applicationId 'dev.q25.trackpad'
         minSdk 33
         targetSdk 28
-        versionCode 68
-        versionName '0.9.38-bb6-lockscreen-banner-dev'
+        versionCode 69
+        versionName '0.9.39-bb6-no-native-lock-notifications-dev'
     }
     // Compile legacy feature sources into this one APK. These directories
     // are source roots only; their former application modules are not built.
