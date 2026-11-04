@@ -1,8 +1,40 @@
-# BBOS6 lock-screen native-blueprint Vector preview
+# BB UI — BlackBerry-inspired Vector module
 
-**Branch:** `feat/bb6-lockscreen-banner`  
-**APK:** `0.9.45-bb6-combined-status-date-focus-dev`  
-**Status:** Installable unified BB UI Vector APK. Not merged; requires Q25 test.
+The **BBOS6 lock screen (0.9.45)** is merged into `master`.
+The limited lock-screen Quick Settings feature is being tested on
+`feat/bb6-lockscreen-quick-settings` as **0.9.46**.
+It is **not yet merged**.
+
+The locked screen now opens the existing **Manage Connections** panel from
+the combined status/date-time selection (Enter or trackpad click).
+Only **Mobile Network, Wi-Fi and Bluetooth** are shown. All three use the
+same Android native QS tile backend as our unlocked shade. The unlocked
+shade is unchanged and can gain additional items independently.
+Back closes the locked panel; **Space still opens the original Android
+password screen**. No Settings activity is launched as a locked fallback.
+
+See [Limited Lock-screen Quick Settings](docs/LOCKSCREEN_QUICK_SETTINGS.md)
+for architecture, security checks and device-test instructions.
+
+```sh
+cd ~/Projects/bb-ui
+git fetch origin
+git switch feat/bb6-lockscreen-quick-settings
+git pull --ff-only
+gradle :app:assembleDebug :app:testDebugUnitTest &&
+adb push app/build/outputs/apk/debug/app-debug.apk /data/local/tmp/bb-ui.apk &&
+timeout 45s adb shell pm install -r /data/local/tmp/bb-ui.apk &&
+adb shell setprop debug.bb6lockscreen.enabled true &&
+adb shell setprop debug.bb6lockscreen.blueprint true &&
+adb shell am crash com.android.systemui
+```
+
+---
+
+# Existing BBOS6 lock-screen baseline (merged into master)
+
+**Baseline:** 0.9.45. The historical notes below document the merged
+lock-screen feature, not the new limited QS test branch.
 
 ## Design / source ownership
 
@@ -51,8 +83,10 @@ The **notification icon/count strip is NOT part of this selection**:
 it is a passive row beneath the date/time bar. Its indicators stay
 horizontally centered with symmetric spacing and horizontal overflow.
 
-Trackpad-center and Enter do nothing. Directional keys and Back traverse
-normally. **Space is not consumed by this item** and still enters Android's
+In the merged 0.9.45 baseline, trackpad-center and Enter were
+intentionally inert. **On the 0.9.46 test branch**, they open the limited
+Manage Connections panel. Directional navigation remains native.
+**Space is not consumed by this item** and still enters Android's
 native credential UI through the separately verified
 `BB6KeyguardKeyboardHook` at `WindowRootView.dispatchKeyEvent`.
 No changes were made to that hook or to credential verification.
