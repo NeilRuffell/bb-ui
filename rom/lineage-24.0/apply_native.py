@@ -24,6 +24,8 @@ BLUEPRINTS = SRC / "keyguard/ui/view/layout/blueprints"
 SECTIONS = SRC / "keyguard/ui/view/layout/sections"
 INTERACTOR = SRC / "keyguard/domain/interactor/KeyguardBlueprintInteractor.kt"
 MODULE = BLUEPRINTS / "KeyguardBlueprintModule.kt"
+CLOCK_SECTION = SECTIONS / "ClockSection.kt"
+SMARTSPACE_SECTION = SECTIONS / "SmartspaceSection.kt"
 
 ADD_FILES = (
     BLUEPRINTS / "Bb6KeyguardBlueprint.kt",
@@ -142,6 +144,63 @@ def edit_interactor(text: str) -> str:
         text, original, replacement, "KeyguardBlueprintInteractor blueprintId"
     )
 
+def edit_clock_section(text: str) -> str:
+    if "BB6: finish native clock/AOD registration cleanup" in text:
+        return text
+    old = (
+        "    override fun removeViews(constraintLayout: ConstraintLayout) {\\n"
+        "        disposableHandle?.dispose()\\n"
+        "    }"
+    )
+    new = (
+        "    override fun removeViews(constraintLayout: ConstraintLayout) {\\n"
+        "        // BB6: finish native clock/AOD registration cleanup before\\n"
+        "        // transitioning to a blueprint without ClockSection. The\\n"
+        "        // binder's own cleanup is also idempotent. This prevents\\n"
+        "        // AodBurnInLayer from retaining IDs of missing clock faces.\\n"
+        "        disposableHandle?.dispose()\\n"
+        "        KeyguardClockViewBinder.cleanupClockViews(\\n"
+        "            keyguardClockViewModel.currentClock.value,\\n"
+        "            constraintLayout,\\n"
+        "            keyguardClockViewModel.burnInLayer,\\n"
+        "        )\\n"
+        "    }"
+    )
+    return replace_exact(text, old, new, "ClockSection AOD cleanup")
+
+def edit_smartspace_section(text: str) -> str:
+    if "BB6: unregister date/Smartspace" in text:
+        return text
+    text = replace_exact(
+        text,
+        "import androidx.constraintlayout.widget.ConstraintLayout\\n",
+        "import androidx.constraintlayout.widget.ConstraintLayout\\n"
+        "import androidx.constraintlayout.helper.widget.Layer\\n",
+        "SmartspaceSection Layer import",
+    )
+    text = replace_exact(
+        text,
+        "        val list = listOf(smartspaceView, dateView, dateViewLargeClock)\\n",
+        "        // BB6: unregister date/Smartspace from the persistent native\\n"
+        "        // burn-in helper BEFORE their views are removed. Otherwise\\n"
+        "        // AndroidX Layer.transform dereferences a missing view.\\n"
+        "        disposableHandle?.dispose()\\n"
+        "        constraintLayout.findViewById<Layer>(R.id.burn_in_layer)?.let { layer ->\\n"
+        "            dateView?.let { layer.removeView(it) }\\n"
+        "            smartspaceView?.let { layer.removeView(it) }\\n"
+        "        }\\n"
+        "        val list = listOf(smartspaceView, dateView, dateViewLargeClock)\\n",
+        "SmartspaceSection AOD removal",
+    )
+    text = replace_exact(
+        text,
+        "        keyguardUnlockAnimationController.lockscreenSmartspace = null\\n\\n"
+        "        disposableHandle?.dispose()\\n",
+        "        keyguardUnlockAnimationController.lockscreenSmartspace = null\\n",
+        "SmartspaceSection dispose after cleanup",
+    )
+    return text
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("lineage_root", type=Path)
@@ -160,6 +219,8 @@ def main() -> int:
     for target, editor in (
         (interactor_path, edit_interactor),
         (module_path, edit_module),
+        (frameworks_base / CLOCK_SECTION, edit_clock_section),
+        (frameworks_base / SMARTSPACE_SECTION, edit_smartspace_section),
     ):
         if not target.is_file():
             parser.error(f"Official LineageOS 24 source missing: {target}")
