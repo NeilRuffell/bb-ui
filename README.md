@@ -1,7 +1,7 @@
 # BBOS6 lock-screen native-blueprint Vector preview
 
 **Branch:** `feat/bb6-lockscreen-banner`  
-**APK:** `0.9.44-bb6-centered-focusable-header-dev`  
+**APK:** `0.9.45-bb6-combined-status-date-focus-dev`  
 **Status:** Installable unified BB UI Vector APK. Not merged; requires Q25 test.
 
 ## Design / source ownership
@@ -36,29 +36,39 @@ verified in the supplied APK:
   BB6 keyguard is shown, then reattached for shade and AOD. The native
   credential presentation, keyboard shortcut, and emergency access remain.
 
-## Trackpad focus and centered notifications (0.9.44)
+## One selectable native status bar + BB6 date/time (0.9.45)
 
-The entire BB6 date/time and notification-indicator header is **one selectable
-lock-screen item**. When focus reaches it, the shared BB7 blue gradient
-and border are drawn using Android's native focused state. The app icons
-and counts are passive children, not separate targets.
+**One selection:** The native lock-screen status bar (`keyguard_header`,
+including the carrier/signal/battery indicators) and our adjacent BB6
+date/time row share one selection state. The keyboard focus owner is
+**only the date/time row**, not the whole BB6 header. When that row takes
+focus, both it and the native status bar receive the existing BB7 blue
+selection gradient. Their original native view hierarchy and children
+are untouched; the status bar's previous background is restored as soon
+as focus leaves the selection or the lock-screen presentation ends.
 
-Trackpad-center and Enter are deliberately no-ops. No new activation,
-settings navigation or credential action is introduced. Directional
-keys and Back are not consumed. **Space is never consumed by the header**:
-the existing, device-verified `BB6KeyguardKeyboardHook` still intercepts
-physical Space at `WindowRootView.dispatchKeyEvent` and launches the
-original Android credential interface. No changes were made to that hook.
+The **notification icon/count strip is NOT part of this selection**:
+it is a passive row beneath the date/time bar. Its indicators stay
+horizontally centered with symmetric spacing and horizontal overflow.
 
-The notification row uses a horizontally scrolling container with
-`fillViewport`; its child group centers within the available width for
-a short row. App indicators have equal left/right spacing, and the row
-remains horizontally scrollable when the icons exceed screen width.
+Trackpad-center and Enter do nothing. Directional keys and Back traverse
+normally. **Space is not consumed by this item** and still enters Android's
+native credential UI through the separately verified
+`BB6KeyguardKeyboardHook` at `WindowRootView.dispatchKeyEvent`.
+No changes were made to that hook or to credential verification.
 
-Test: trackpad-select the header, verify the blue highlight, press the
-trackpad/Enter (nothing happens), press Space (native password screen),
-then test Up/Down traversal and a long row with several notification apps.
-Actual device input routing still requires Q25 confirmation.
+The native status bar remains the single source for carrier, signal,
+battery and privacy status. Only its visual background is temporarily
+decorated while the combined selection is focused. The native
+`keyguard_header` ID is resolved from the actual SystemUI root. If the
+status-bar view is missing, no native view is replaced and a diagnostic
+warning is logged.
+
+**Q25 test:** Trackpad to the date/time line and confirm that **both
+the status bar and the date/time line** highlight, but the notification
+icons do not. Press trackpad-center/Enter (no action), then Space (native
+password prompt), then navigate away and confirm both highlights clear.
+Also check AOD/screen-off/on, shade and bouncer transitions.
 
 ## AOD crash prevention
 
