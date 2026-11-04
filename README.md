@@ -1,7 +1,7 @@
 # BBOS6 keyguard Space-to-credential entry
 
 **Branch:** `feat/bb6-keyguard-keyboard-entry` (not merged into `master`).
-**Version:** 0.9.36. Device verification required before merging.
+**Version:** 0.9.37. Device verification required before merging.
 
 ## Requirement
 
@@ -19,13 +19,10 @@ behave normally. The module never attempts to verify or bypass credentials.
 - `KeyguardKeyEventInteractor` treats Space as a confirm key, but handles
   `SHADE_LOCKED` by collapsing the shade rather than opening the
   credential screen.
-- Scene mode invokes `DeviceEntryInteractor.attemptDeviceEntry`
-  (three-argument overload with primary credentials selected).
-  Legacy mode invokes `PrimaryBouncerInteractor.show(true, reason)`
-  directly; these are the native presenters called by the corresponding
-  LineageOS 24 keyguard code. The earlier attempts only invoked
-  `StatusBarKeyguardViewManager`, whose method signatures differ on the Q25.
-  Manager methods are now fallbacks, not the sole entry path.
+- Upstream Scene mode invokes `DeviceEntryInteractor.attemptDeviceEntry`,
+  while upstream legacy mode invokes `StatusBarKeyguardViewManager`,
+  which delegates to `PrimaryBouncerInteractor.show`.
+  **The Q25's actual compiled APK changes these APIs** (see below).
 - In legacy locked-shade mode, `ShadeController.collapseShade(true)`
   explicitly runs registered post-collapse actions even if the shade is
   already collapsed. The earlier `animateCollapseShadeForced()` approach
@@ -38,13 +35,34 @@ just as LineageOS handles confirm keys. This prevents the release from
 entering a newly shown password editor. No synthetic input is generated.
 Native credential editors and an already visible bouncer retain key input.
 
-The live Q25 SystemUI has already shown API differences from the
-upstream LineageOS 24 source. The module now hooks constructors of
-`DeviceEntryInteractor` and `PrimaryBouncerInteractor`, recovering those
-objects independently of the manager or key-event dispatcher. Before invoking
-an entry method it checks the **actual runtime method signature**; failures
-report a short method inventory rather than a full Java stack trace.
-Successful compilation alone does not establish that authentication appears.
+## Actual Q25 APK verification
+
+Inspected the user-provided `Q25-SystemUI.apk`, SHA-256
+`65003bbe5b00146a0e20d8612660426be05e571cce22d244fdcd656a2b3be8c0`.
+The optimized DEX class definitions explicitly declare:
+
+- `classes2.dex`:
+  `StatusBarKeyguardViewManager.showPrimaryBouncer(String, boolean)`
+- `classes.dex`:
+  `PrimaryBouncerInteractor.show(String, boolean)`
+- `classes.dex`:
+  `DeviceEntryInteractor` has no defined `attemptDeviceEntry` method.
+
+This differs from upstream LineageOS, which places the boolean argument
+before the reason string. The Q25 runtime log independently confirmed
+that both native bouncer objects are captured but attempts to invoke the
+*upstream-order* signatures match no method. The module now tries the
+**Q25-confirmed `(reason, true)` signatures first**, with upstream-order
+signatures retained for other ROMs.
+
+The keyguard manager is tried first so it can perform the normal native
+keyguard checks and transitions. The primary-bouncer interactor is the
+fallback. The reflection matcher is covered by unit tests using method
+signatures extracted from this APK. No custom credential input or
+verification is involved.
+
+A successful compile confirms code validity, not actual Q25 lock-screen
+behavior. Do not merge until tested on the phone.
 
 ## Build/install on KDE neon
 
@@ -74,10 +92,10 @@ If there is no response, capture **only** the concise integration logs:
 adb logcat -d -s 'BB6-Keyguard:I' '*:S' | tail -50
 ```
 
-Key messages: `Space UP`, `Native route scene=`,
-`Native DeviceEntryInteractor.attemptDeviceEntry invoked`, or
-`Native PrimaryBouncerInteractor.show invoked`. An invocation log is
-**not** proof that the framework displayed its bouncer; verify the UI.
+Key messages: `Space UP`, `Native route scene=`, and
+`Q25 native primary credential entry invoked via manager` (or its
+bouncer fallback). If no input appears, capture the error lines.
+An invocation log is **not** proof that the interface appeared.
 
 To disable this feature without disabling other BB UI work:
 
