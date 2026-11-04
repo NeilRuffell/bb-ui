@@ -124,6 +124,7 @@ public final class BB6LockScreenHook implements IXposedHookLoadPackage {
                     @Override protected void afterHookedMethod(MethodHookParam param) {
                         if (!Boolean.FALSE.equals(param.getResult())) {
                             bouncerRequested = true;
+                            closeLockscreenQuickSettings(false);
                             BB6BlueprintHook.scheduleSync();
                             requestRefresh();
                         }
@@ -174,6 +175,7 @@ public final class BB6LockScreenHook implements IXposedHookLoadPackage {
             XposedBridge.hookAllMethods(state, "setState", new XC_MethodHook() {
                 @Override protected void afterHookedMethod(MethodHookParam param) {
                     stateControllerRef = new WeakReference<>(param.thisObject);
+                    BB6BlueprintHook.scheduleSync();
                     requestRefresh();
                 }
             });
@@ -639,6 +641,7 @@ public final class BB6LockScreenHook implements IXposedHookLoadPackage {
             @Override public void onReceive(Context ctx, Intent intent) {
                 if (Intent.ACTION_SCREEN_OFF.equals(intent.getAction())) {
                     bouncerRequested = false;
+                    closeLockscreenQuickSettings(false);
                 }
                 BB6BlueprintHook.scheduleSync();
                 requestRefresh();
