@@ -171,12 +171,7 @@ public final class BB6BlueprintHook implements IXposedHookLoadPackage {
     }
 
     private static boolean isDuplicate(String name) {
-        return "ClockSection".equals(name)
-                || "SmartspaceSection".equals(name)
-                || "KeyguardSliceViewSection".equals(name)
-                || "AodNotificationIconsSection".equals(name)
-                || "AodPromotedNotificationSection".equals(name)
-                || "DefaultNotificationStackScrollLayoutSection".equals(name);
+        return BB6BlueprintPolicy.omitStockSection(name);
     }
 
     /** Called by the existing SystemUI-root adapter after native attachment. */
@@ -239,12 +234,12 @@ public final class BB6BlueprintHook implements IXposedHookLoadPackage {
                     context.getSystemService(Context.KEYGUARD_SERVICE);
             PowerManager power = (PowerManager)
                     context.getSystemService(Context.POWER_SERVICE);
-            if (keyguard == null || power == null || !keyguard.isKeyguardLocked()
-                    || !power.isInteractive()) return false;
-            if (BB6LockScreenHook.statusStateForBlueprint()
-                    != LockscreenNativeStackPolicy.KEYGUARD) return false;
-            if (BB6LockScreenHook.isBouncerActive()) return false;
-            return true;
+            if (keyguard == null || power == null) return false;
+            return BB6BlueprintPolicy.enabledForState(
+                    keyguard.isKeyguardLocked(), power.isInteractive(),
+                    BB6LockScreenHook.isNativeDozing(),
+                    BB6LockScreenHook.isBouncerActive(),
+                    BB6LockScreenHook.statusStateForBlueprint());
         } catch (RuntimeException error) {
             Log.w(TAG, "Native state unavailable; preserving default blueprint");
             return false;
