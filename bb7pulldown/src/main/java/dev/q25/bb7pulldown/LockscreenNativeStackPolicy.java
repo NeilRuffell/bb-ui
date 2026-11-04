@@ -1,9 +1,9 @@
 package dev.q25.bb7pulldown;
 
 /**
- * Pure state policy for removing the native notification stack from the BB6
- * lock screen. The same native container is reused by the notification shade,
- * so that container must be restored when entering either shade state.
+ * Keyguard/shade state policy for native lock-screen composition. The same
+ * notification subtree is shared with shade, so it must not be detached
+ * outside the interactive KEYGUARD state.
  */
 final class LockscreenNativeStackPolicy {
     static final int UNKNOWN = -1;
@@ -15,8 +15,8 @@ final class LockscreenNativeStackPolicy {
 
     static boolean hideNativeStack(boolean deviceLocked, int statusBarState) {
         if (!deviceLocked) return false;
-        // Before the native state controller is ready, prefer the BB6 lock
-        // screen; preserve the full shade once an explicit shade is known.
+        // Until the state controller is ready, use the BB6 keyguard only
+        // while Android confirms the device is locked.
         return statusBarState == KEYGUARD || statusBarState == UNKNOWN;
     }
 }
