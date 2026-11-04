@@ -1,3 +1,73 @@
+# BBOS6-style lock screen (development branch)
+
+**Branch:** `feat/bb6-lockscreen-banner` — **APK:** `0.9.38-bb6-lockscreen-banner-dev`.
+Not merged into `master`; physical-device visual verification is still required.
+
+This feature follows the original BlackBerry 6 top banner: wireless operator
+(if available), date, time, and a narrow notification-indicator strip. Each
+indicator is the **real application's icon followed by the number of active
+Android alert notifications**. The counts are per posted notification
+record, not an app's own unread-message total. Group summaries are not
+double-counted when their children exist.
+
+The module reuses SystemUI's own registered `NotificationListenerService`
+and renders only package icons and counts, never notification text or sender
+information. Entries marked `VISIBILITY_SECRET`, hidden by native ranking,
+or excluded by Android's lock-screen-notification setting are not shown.
+Ongoing foreground-service notices are excluded from the alert strip.
+
+## Integration
+
+`BB6LockScreenHook` adds the non-focusable `BB6LockScreenHeader` as a child
+of native `NotificationShadeWindowView`. It creates **no new window** and
+does not own keyboard input, unlocking, credential verification or the
+native status bar. The separate, previously verified Space-to-password
+implementation remains unchanged. On lock-screen bouncer presentation,
+the banner hides and the native clock (when found by its resource ID)
+is restored. On returning to the lock screen, it reappears.
+
+`LockscreenNotificationCounts` is plain Java and independent of SystemUI.
+`SystemUiNotificationObserver` is reused by the notification shade and
+this banner. The observer is installed only once.
+
+**Scope:** the existing unified BB UI Vector module must still have
+`com.android.systemui` enabled. Keep superseded separate modules disabled.
+
+Build/test/install on KDE neon:
+
+```sh
+cd ~/Projects/bb-ui
+git fetch origin
+git switch feat/bb6-lockscreen-banner
+git pull --ff-only
+gradle :app:assembleDebug :app:testDebugUnitTest &&
+adb push app/build/outputs/apk/debug/app-debug.apk /data/local/tmp/bb-ui.apk &&
+timeout 45s adb shell pm install -r /data/local/tmp/bb-ui.apk &&
+adb shell am crash com.android.systemui
+```
+
+Test when locked, with multiple notifications from the same app, while
+notifications arrive or are dismissed, and when invoking Space-to-password.
+The header must **never cover the password input**. Verify normal unlock
+and return-to-lockscreen behavior.
+
+Diagnostic logs:
+
+```sh
+adb logcat -d -s 'BB6-LockScreen:V' 'BB6-Keyguard:V' '*:S' | tail -70
+```
+
+Rollback only the lock-screen styling:
+
+```sh
+adb shell setprop debug.bb6lockscreen.enabled false
+adb shell am crash com.android.systemui
+```
+
+Set the property to `true` and restart SystemUI to re-enable.
+
+---
+
 # BBOS6 keyguard Space-to-credential entry
 
 **Branch:** `feat/bb6-keyguard-keyboard-entry` (not merged into `master`).
