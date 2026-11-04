@@ -92,7 +92,7 @@ class Bb6HeaderSection
             setTextColor(Color.WHITE)
             textSize = 17f
             gravity = Gravity.CENTER_VERTICAL or Gravity.START
-            isSingleLine = true
+            setSingleLine(true)
             isFocusable = false
         }
         val time = TextClock(context).apply {
@@ -202,10 +202,12 @@ class Bb6HeaderSection
             val visibility = entry.ranking.lockscreenVisibilityOverride
             lockscreenUsers.isCurrentProfile(userId) &&
                 lockscreenUsers.userAllowsNotificationsInPublic(userId) &&
-                lockscreenUsers.getRedactionType(entry) !=
-                    NotificationLockscreenUserManager.REDACTION_TYPE_PUBLIC &&
+                (lockscreenUsers.getRedactionType(entry) and
+                    NotificationLockscreenUserManager.REDACTION_TYPE_PUBLIC) == 0 &&
                 notification.visibility != Notification.VISIBILITY_SECRET &&
                 visibility != Notification.VISIBILITY_SECRET &&
+                entry.ranking.channel?.lockscreenVisibility !=
+                    Notification.VISIBILITY_SECRET &&
                 entry.ranking.importance != NotificationManager.IMPORTANCE_NONE &&
                 notification.flags and (
                     Notification.FLAG_ONGOING_EVENT or
