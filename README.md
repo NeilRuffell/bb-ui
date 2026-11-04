@@ -1,7 +1,7 @@
 # BBOS6 lock-screen native-blueprint Vector preview
 
 **Branch:** `feat/bb6-lockscreen-banner`  
-**APK:** `0.9.43-bb6-vector-blueprint-dev`  
+**APK:** `0.9.44-bb6-centered-focusable-header-dev`  
 **Status:** Installable unified BB UI Vector APK. Not merged; requires Q25 test.
 
 ## Design / source ownership
@@ -35,6 +35,30 @@ verified in the supplied APK:
 - The notification-list subtree is detached only while the interactive
   BB6 keyguard is shown, then reattached for shade and AOD. The native
   credential presentation, keyboard shortcut, and emergency access remain.
+
+## Trackpad focus and centered notifications (0.9.44)
+
+The entire BB6 date/time and notification-indicator header is **one selectable
+lock-screen item**. When focus reaches it, the shared BB7 blue gradient
+and border are drawn using Android's native focused state. The app icons
+and counts are passive children, not separate targets.
+
+Trackpad-center and Enter are deliberately no-ops. No new activation,
+settings navigation or credential action is introduced. Directional
+keys and Back are not consumed. **Space is never consumed by the header**:
+the existing, device-verified `BB6KeyguardKeyboardHook` still intercepts
+physical Space at `WindowRootView.dispatchKeyEvent` and launches the
+original Android credential interface. No changes were made to that hook.
+
+The notification row uses a horizontally scrolling container with
+`fillViewport`; its child group centers within the available width for
+a short row. App indicators have equal left/right spacing, and the row
+remains horizontally scrollable when the icons exceed screen width.
+
+Test: trackpad-select the header, verify the blue highlight, press the
+trackpad/Enter (nothing happens), press Space (native password screen),
+then test Up/Down traversal and a long row with several notification apps.
+Actual device input routing still requires Q25 confirmation.
 
 ## AOD crash prevention
 
