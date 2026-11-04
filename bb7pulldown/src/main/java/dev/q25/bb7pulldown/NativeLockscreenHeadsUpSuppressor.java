@@ -86,7 +86,11 @@ final class NativeLockscreenHeadsUpSuppressor {
                         case "getName":
                             return SUPPRESSOR_NAME;
                         case "suppressAwakeHeadsUp":
-                            boolean suppress = BB6LockScreenHook.isInteractiveBb6LockscreenActive();
+                        case "suppressAwakeInterruptions":
+                        case "suppressInterruptions":
+                            boolean suppress = BB6NativeChromePolicy.suppressStockInterruption(
+                                    method.getName(),
+                                    BB6LockScreenHook.isInteractiveBb6LockscreenActive());
                             if (suppress && !suppressionLogged) {
                                 suppressionLogged = true;
                                 Log.i(TAG, "Native heads-up suppressed during BB6 keyguard");
@@ -94,11 +98,6 @@ final class NativeLockscreenHeadsUpSuppressor {
                                 suppressionLogged = false;
                             }
                             return suppress;
-                        case "suppressAwakeInterruptions":
-                        case "suppressInterruptions":
-                            // Do not suppress bubbles, pulses, notification
-                            // delivery or other interruption categories.
-                            return false;
                         default:
                             throw new UnsupportedOperationException(
                                     "Unknown native interruption callback: "
