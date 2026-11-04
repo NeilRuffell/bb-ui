@@ -53,6 +53,7 @@ public final class BB6LockScreenHook implements IXposedHookLoadPackage {
     private static final String STATUS_BAR_STATE =
             "com.android.systemui.statusbar.StatusBarStateControllerImpl";
     private static final String NATIVE_STACK_ID = "shared_notification_container";
+    private static final String NATIVE_SCROLL_ID = "notification_stack_scroller";
     private static final String ENABLE_PROP = "debug.bb6lockscreen.enabled";
 
     private static WeakReference<FrameLayout> rootRef = new WeakReference<>(null);
@@ -70,6 +71,11 @@ public final class BB6LockScreenHook implements IXposedHookLoadPackage {
     private static View detachedStack;
     private static ViewGroup.LayoutParams detachedStackLayoutParams;
     private static int detachedStackIndex = -1;
+    // The stock NotificationStackScrollLayout is also present independently
+    // within status_bar_expanded/notification_panel in LineageOS 24.
+    private static View suppressedNativeScroller;
+    private static int nativeScrollerOriginalVisibility = View.VISIBLE;
+    private static boolean missingNativeScrollerLogged;
     private static boolean missingNativeStackLogged;
     private static boolean missingKeyguardStatusBarLogged;
 
@@ -525,20 +531,26 @@ public final class BB6LockScreenHook implements IXposedHookLoadPackage {
     }
 
     /**
-     * The whole native notification-list subtree is a child of the SystemUI
-     * window root (SharedNotificationContainer in super_notification_shade).
-     * While the BB6 lockscreen owns the screen, DETACH this subtree rather
-     * than setting INVISIBLE/GONE or leaving an empty constraint-frame.
+     * Native LineageOS 24 has TWO notification presentation surfaces:
      *
-     * Reattach the same original instance, at its original child index,
-     * before the normal SHADE, SHADE_LOCKED, bouncer or AOD presentation.
-     * SystemUI keeps its notification listener/pipeline and scroll state.
+     *  1. shared_notification_container in super_notification_shade.xml
+     *  2. notification_stack_scroller in status_bar_expanded.xml, nested in
+     *     notification_panel/notification_container_parent.
+     *
+     * They are NOT redundant backends: they are two native view hosts for
+     * the same Android notification pipeline. Both must stop rendering when
+     * the BB6 interactive keyguard owns the presentation.
+     *
+     * Keep the original instances and native notification pipeline intact.
+     * Restore their original view state for SHADE, SHADE_LOCKED, bouncer, AOD
+     * and unlocked operation.
      */
     private static void updateNativeStack(FrameLayout root, boolean bb6Active) {
         if (!bb6Active) {
             restoreNativeStack();
             return;
         }
+        suppressNativeScroller(root);
         if (detachedStack != null && detachedStack.getParent() == null) return;
 
         int resourceId = root.getResources().getIdentifier(
@@ -594,6 +606,43 @@ public final class BB6LockScreenHook implements IXposedHookLoadPackage {
                 nativeStatusState(), bouncerRequested || nativeBouncerShowing());
     }
 
+    /** Suppress the actual NotificationStackScrollLayout, not just its
+     * optional shared presentation container. Visibility preserves native
+     * view attachment, controller references and notification lifecycle.
+     */
+    private static void suppressNativeScroller(FrameLayout root) {
+        int id = root.getResources().getIdentifier(
+                NATIVE_SCROLL_ID, "id", PACKAGE);
+        View scroller = id == 0 ? null : root.findViewById(id);
+        if (scroller == null) {
+            if (!missingNativeScrollerLogged) {
+                missingNativeScrollerLogged = true;
+                Log.w(TAG, "Native notification_stack_scroller unavailable");
+            }
+            return;
+        }
+        missingNativeScrollerLogged = false;
+        if (suppressedNativeScroller != scroller) {
+            restoreNativeScroller();
+            suppressedNativeScroller = scroller;
+            nativeScrollerOriginalVisibility = scroller.getVisibility();
+            Log.i(TAG, "Native notification list presentation suppressed on BB6 keyguard");
+        }
+        if (scroller.getVisibility() != View.GONE) {
+            scroller.setVisibility(View.GONE);
+        }
+    }
+
+    private static void restoreNativeScroller() {
+        View scroller = suppressedNativeScroller;
+        if (scroller == null) return;
+        suppressedNativeScroller = null;
+        if (scroller.getParent() != null && scroller.getVisibility() == View.GONE) {
+            scroller.setVisibility(nativeScrollerOriginalVisibility);
+            Log.i(TAG, "Native notification list visibility restored");
+        }
+    }
+
     private static int nativeStatusState() {
         Object controller = stateControllerRef.get();
         if (controller == null) return LockscreenNativeStackPolicy.UNKNOWN;
@@ -608,6 +657,9 @@ public final class BB6LockScreenHook implements IXposedHookLoadPackage {
     }
 
     private static void restoreNativeStack() {
+        // The independent NotificationStackScrollLayout must be restored even
+        // when the shared container was never found or already reparented.
+        restoreNativeScroller();
         if (detachedStack == null) return;
         if (detachedStack.getParent() == null && detachedStackParent != null) {
             try {
