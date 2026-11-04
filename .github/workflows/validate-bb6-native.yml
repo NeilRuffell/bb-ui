@@ -1,0 +1,66 @@
+name: Validate native BB6 LineageOS 24 patch
+on:
+  push:
+    branches:
+      - feat/bb6-native-lineage24
+    paths:
+      - 'rom/lineage-24.0/**'
+      - '.github/workflows/validate-bb6-native.yml'
+  workflow_dispatch:
+
+jobs:
+  source-patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check upstream LineageOS 24 integration anchors
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$RUNNER_TEMP/lineage-bb6"
+          BASE="$ROOT/frameworks/base/packages/SystemUI/src/com/android/systemui"
+          for path in \
+            keyguard/domain/interactor/KeyguardBlueprintInteractor.kt \
+            keyguard/ui/view/layout/blueprints/KeyguardBlueprintModule.kt \
+            keyguard/ui/view/layout/sections/ClockSection.kt \
+            keyguard/ui/view/layout/sections/SmartspaceSection.kt; do
+            mkdir -p "$(dirname "$BASE/$path")"
+            curl -fsSL --retry 3 \
+              "https://raw.githubusercontent.com/LineageOS/android_frameworks_base/lineage-24.0/packages/SystemUI/src/com/android/systemui/$path" \
+              -o "$BASE/$path"
+          done
+
+          python3 rom/lineage-24.0/apply_native.py --check "$ROOT"
+          python3 rom/lineage-24.0/apply_native.py "$ROOT"
+          python3 rom/lineage-24.0/apply_native.py --check "$ROOT"
+          python3 rom/lineage-24.0/apply_native.py "$ROOT"
+
+          python3 - "$ROOT" <<'PY'
+          from pathlib import Path
+          import sys
+          root = Path(sys.argv[1]) / "frameworks/base/packages/SystemUI/src/com/android/systemui"
+          bp = (root / "keyguard/ui/view/layout/blueprints/Bb6KeyguardBlueprint.kt").read_text()
+          interactor = (root / "keyguard/domain/interactor/KeyguardBlueprintInteractor.kt").read_text()
+          clock = (root / "keyguard/ui/view/layout/sections/ClockSection.kt").read_text()
+          smartspace = (root / "keyguard/ui/view/layout/sections/SmartspaceSection.kt").read_text()
+          module = (root / "keyguard/ui/view/layout/blueprints/KeyguardBlueprintModule.kt").read_text()
+          header = (root / "keyguard/ui/view/layout/sections/Bb6HeaderSection.kt").read_text()
+
+          assert "Bb6KeyguardBlueprint.ID" in interactor
+          assert "keyguardInteractor.isDozing" in interactor
+          assert "powerInteractor.isInteractive" in interactor
+          assert "keyguardInteractor.primaryBouncerShowing" in interactor
+          assert "bindBb6Blueprint" in module
+          assert "aodBurnInSection," in bp
+          assert "bb6HeaderSection," in bp
+          for forbidden in (
+              "clockSection,", "smartspaceSection,", "keyguardSliceViewSection,",
+              "aodNotificationIconsSection,", "defaultNotificationStackScrollLayoutSection,"
+          ):
+              assert forbidden not in bp, forbidden
+          assert "KeyguardClockViewBinder.cleanupClockViews" in clock
+          assert "layer.removeView(it)" in smartspace
+          assert "NotificationLockscreenUserManager" in header
+          assert "notifPipeline.allNotifs" in header
+          print("PASS: native blueprint selection, no duplicate sections, AOD lifecycle, notification privacy")
+          PY
