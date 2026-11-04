@@ -79,7 +79,7 @@ final class BB6LockScreenHeader extends LinearLayout {
         // Space before child dispatch; the clock row never consumes it.
         clockRow.setOnClickListener(view -> activateStatusDate());
         clockRow.setOnKeyListener((view, keyCode, event) -> {
-            if (!BB6LockScreenSelectionPolicy.isNoopSelectionKey(keyCode)) {
+            if (!BB6LockScreenSelectionPolicy.isActivationKey(keyCode)) {
                 return false;
             }
             if (event.getAction() == android.view.KeyEvent.ACTION_UP
