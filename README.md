@@ -13,6 +13,11 @@ shade is unchanged and can gain additional items independently.
 Back closes the locked panel; **Space still opens the original Android
 password screen**. No Settings activity is launched as a locked fallback.
 
+The new panel has an independent rollback property:
+`adb shell setprop debug.bb6lockscreen.qs.enabled false`, followed by
+`adb shell am crash com.android.systemui`. This disables only limited QS,
+leaving the merged BBOS6 lock screen and Space shortcut enabled.
+
 See [Limited Lock-screen Quick Settings](docs/LOCKSCREEN_QUICK_SETTINGS.md)
 for architecture, security checks and device-test instructions.
 
@@ -26,6 +31,7 @@ adb push app/build/outputs/apk/debug/app-debug.apk /data/local/tmp/bb-ui.apk &&
 timeout 45s adb shell pm install -r /data/local/tmp/bb-ui.apk &&
 adb shell setprop debug.bb6lockscreen.enabled true &&
 adb shell setprop debug.bb6lockscreen.blueprint true &&
+adb shell setprop debug.bb6lockscreen.qs.enabled true &&
 adb shell am crash com.android.systemui
 ```
 
