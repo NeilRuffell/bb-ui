@@ -292,16 +292,32 @@ public final class BB6KeyguardKeyboardHook implements IXposedHookLoadPackage {
     }
 
     private static boolean requestPrimaryBouncer(NativeTargets t, String reason) {
-        if (invokeNative(t.primaryBouncer, "show", true, reason)) {
-            Log.i(TAG, "Native PrimaryBouncerInteractor.show invoked");
+        // Verified against the Q25 SystemUI APK (classes2.dex, classes.dex):
+        //   StatusBarKeyguardViewManager.showPrimaryBouncer(String, boolean)
+        //   PrimaryBouncerInteractor.show(String, boolean)
+        // R8 reordered these parameters compared with LineageOS 24 source.
+        // Prefer the native manager so it performs its normal keyguard checks
+        // and state updates before delegating to the primary credential UI.
+        if (invokeNative(t.manager, "showPrimaryBouncer", reason, true)) {
+            Log.i(TAG, "Q25 native primary credential entry invoked via manager");
             return true;
         }
+        if (invokeNative(t.primaryBouncer, "show", reason, true)) {
+            Log.i(TAG, "Q25 native PrimaryBouncerInteractor.show invoked");
+            return true;
+        }
+        // Keep source-compatible order for other LineageOS variants.
         if (invokeNative(t.manager, "showPrimaryBouncer", true, reason)) {
-            Log.i(TAG, "Native manager primary bouncer invoked");
+            Log.i(TAG, "Source-order native primary credential entry invoked");
             return true;
         }
-        if (invokeNative(t.manager, "showBouncer", true, reason)) {
-            Log.i(TAG, "Native manager bouncer invoked");
+        if (invokeNative(t.primaryBouncer, "show", true, reason)) {
+            Log.i(TAG, "Source-order PrimaryBouncerInteractor.show invoked");
+            return true;
+        }
+        if (invokeNative(t.manager, "showBouncer", reason, true)
+                || invokeNative(t.manager, "showBouncer", true, reason)) {
+            Log.i(TAG, "Native manager bouncer fallback invoked");
             return true;
         }
         return false;
