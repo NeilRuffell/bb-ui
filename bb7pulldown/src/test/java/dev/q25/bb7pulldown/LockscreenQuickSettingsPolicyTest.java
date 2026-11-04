@@ -4,6 +4,9 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 import org.junit.Test;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.Collections;
 
 public class LockscreenQuickSettingsPolicyTest {
     @Test public void onlyInteractiveBb6KeyguardMayShow() {
@@ -57,6 +60,32 @@ public class LockscreenQuickSettingsPolicyTest {
             assertFalse(LockscreenQuickSettingsPolicy.mayActivate(kind, false));
         }
         assertFalse(LockscreenQuickSettingsPolicy.mayActivate(3, true));
+    }
+
+    @Test public void choosesOnlyInstalledNativeSpecsWithSplitTilePreference() {
+        java.util.Set<String> combined = new HashSet<>(
+                Arrays.asList("internet", "bt", "flashlight"));
+        assertTrue("internet".equals(LockscreenQuickSettingsPolicy.selectNativeSpec(
+                ConnectionControlPolicy.MOBILE, combined)));
+        assertTrue("internet".equals(LockscreenQuickSettingsPolicy.selectNativeSpec(
+                ConnectionControlPolicy.WIFI, combined)));
+        assertTrue("bt".equals(LockscreenQuickSettingsPolicy.selectNativeSpec(
+                ConnectionControlPolicy.BLUETOOTH, combined)));
+
+        java.util.Set<String> split = new HashSet<>(
+                Arrays.asList("internet", "cell", "wifi", "bt"));
+        assertTrue("cell".equals(LockscreenQuickSettingsPolicy.selectNativeSpec(
+                ConnectionControlPolicy.MOBILE, split)));
+        assertTrue("wifi".equals(LockscreenQuickSettingsPolicy.selectNativeSpec(
+                ConnectionControlPolicy.WIFI, split)));
+        assertTrue(LockscreenQuickSettingsPolicy.selectNativeSpec(
+                ConnectionControlPolicy.MOBILE, Collections.singleton("bt")) == null);
+        assertTrue(LockscreenQuickSettingsPolicy.selectNativeSpec(
+                ConnectionControlPolicy.BLUETOOTH, Collections.singleton("internet")) == null);
+        assertTrue(LockscreenQuickSettingsPolicy.selectNativeSpec(
+                -1, combined) == null);
+        assertTrue(LockscreenQuickSettingsPolicy.selectNativeSpec(
+                ConnectionControlPolicy.WIFI, null) == null);
     }
 
     @Test public void nativeSpecsAreConstrainedToTheirLockedRows() {
