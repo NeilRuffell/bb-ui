@@ -29,8 +29,8 @@ import de.robv.android.xposed.callbacks.XC_LoadPackage;
 /**
  * BBOS6-style lock-screen information banner.
  *
- * Appends a noninteractive view INSIDE the native SystemUI window. It never
- * creates a new window, changes key dispatch, handles passwords, or modifies
+ * Appends one selectable, nonactivating header INSIDE the native SystemUI window.
+ * It never creates a new window, changes key dispatch, handles passwords, or modifies
  * native lock-screen credentials. This can later be adapted to a ROM's
  * SystemUI without changing the banner/notification-count model.
  */
@@ -187,9 +187,9 @@ public final class BB6LockScreenHook implements IXposedHookLoadPackage {
         Context context = root.getContext();
         BB6LockScreenHeader header = new BB6LockScreenHeader(context);
         header.setVisibility(View.GONE);
-        // Remain outside all trackpad/keyboard focus traversal.
-        header.setFocusable(false);
-        header.setClickable(false);
+        // The header is a single native focus target for trackpad selection.
+        // Its own key policy never handles Space: the existing
+        // WindowRootView hook still owns Space-to-credential.
         header.setElevation(dp(context, 8));
 
         FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(
