@@ -325,7 +325,8 @@ public final class BB6LockScreenHook implements IXposedHookLoadPackage {
      * There is deliberately NO fallback to Android Settings while locked.
      */
     private static boolean mayShowLockscreenQuickSettings(FrameLayout root) {
-        if (root == null || !root.isAttachedToWindow() || !enabled()) return false;
+        if (root == null || !root.isAttachedToWindow()
+                || !enabled() || !lockscreenQsEnabled()) return false;
         Context context = root.getContext();
         KeyguardManager keyguard = (KeyguardManager)
                 context.getSystemService(Context.KEYGUARD_SERVICE);
@@ -673,6 +674,19 @@ public final class BB6LockScreenHook implements IXposedHookLoadPackage {
 
     private static int dp(Context context, int value) {
         return (int) (context.getResources().getDisplayMetrics().density * value + 0.5f);
+    }
+
+    /** Separate rollback: disable only locked QS, not the BBOS6 lock screen. */
+    private static boolean lockscreenQsEnabled() {
+        try {
+            Class<?> properties = XposedHelpers.findClass(
+                    "android.os.SystemProperties", null);
+            return !"false".equals(XposedHelpers.callStaticMethod(
+                    properties, "get", "debug.bb6lockscreen.qs.enabled", "true"));
+        } catch (Throwable error) {
+            Log.w(TAG, "Cannot read locked QS enable property: " + brief(error));
+            return false;
+        }
     }
 
     private static boolean enabled() {
