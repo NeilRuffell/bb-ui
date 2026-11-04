@@ -13,8 +13,9 @@ No ROM rebuild, reflash, or new application is involved.
   **Bluetooth**. The panel uses our existing `BB6ConnectionsPanel`.
 - Up/Down selects a row; Enter/trackpad center invokes that row's native
   SystemUI QS tile. Left/Right do not change rows.
-- Back (or Up from the first row) closes the compact panel and returns
-  focus to the combined status/date-time item.
+- Physical **Back**, the system navigation/gesture Back button,
+  Escape, or Up from the first row all close the compact panel and
+  return focus to the combined status/date-time item.
 - Physical **Space** is never a QS activation key while locked. The
   unchanged `BB6KeyguardKeyboardHook` intercepts it at
   `WindowRootView.dispatchKeyEvent` to open Android's native credential UI.
@@ -60,6 +61,16 @@ Bluetooth, telephony, or mobile-data mutators are not used.
 The panel closes on screen-off and on native password/PIN/pattern
 presentation, and is removed when the keyguard, bouncer, blueprint or
 lock-screen mode changes. Its broadcast receiver is unregistered on close.
+
+**Back routing (0.9.47):** The panel's own `dispatchKeyEvent` was not
+sufficient for navigation/gesture Back. The SystemUI window now registers
+an `OnBackInvokedCallback` at overlay priority **only while this locked
+QS panel is visible**. It is unregistered before the panel is detached.
+Physical `KEYCODE_BACK` / Escape is also handled before child dispatch
+at the existing `WindowRootView.dispatchKeyEvent` entry point. This
+consumes the paired DOWN/UP events and closes on UP, but only if the
+native interactive keyguard is still eligible. Other keys and native
+Back behavior outside the panel are untouched.
 It is a child of SystemUI's existing native window, not an additional
 focusable `WindowManager` overlay.
 
