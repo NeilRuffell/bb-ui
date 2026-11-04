@@ -99,6 +99,7 @@ public final class BB6BlueprintHook implements IXposedHookLoadPackage {
         }
 
         hookAodReferenceConsistency(lp.classLoader);
+        hookSmartspaceAodCleanup(lp.classLoader);
     }
 
     private static void registerBlueprint(Object repository, Class<?> blueprintClass) {
@@ -255,6 +256,58 @@ public final class BB6BlueprintHook implements IXposedHookLoadPackage {
                     props, "get", "debug.bb6lockscreen.blueprint", "true"));
         } catch (Throwable e) {
             return false;
+        }
+    }
+
+    /**
+     * Stock SmartspaceSection.removeViews removes its date/Smartspace roots
+     * without unregistering them from AodBurnInLayer. Remove their native
+     * helper references BEFORE the stock section's own lifecycle method
+     * runs. This is part of the blueprint transition, not an overlay hack.
+     */
+    private static void hookSmartspaceAodCleanup(ClassLoader loader) {
+        Class<?> section = XposedHelpers.findClassIfExists(SMARTSPACE, loader);
+        if (section == null) return;
+        try {
+            XposedBridge.hookAllMethods(section, "removeViews", new XC_MethodHook() {
+                @Override protected void beforeHookedMethod(MethodHookParam param) {
+                    if (!registered || !eligible() || param.args.length == 0
+                            || !(param.args[0] instanceof ViewGroup)) return;
+                    ViewGroup root = (ViewGroup) param.args[0];
+                    int id = root.getResources().getIdentifier(
+                            "burn_in_layer", "id", SYSTEMUI);
+                    View helper = id == 0 ? null : root.findViewById(id);
+                    if (helper == null) return;
+                    try {
+                        List<Integer> removed = new ArrayList<>();
+                        for (String field : Arrays.asList(
+                                "smartspaceView", "dateView", "dateViewLargeClock")) {
+                            Object item = XposedHelpers.getObjectField(param.thisObject, field);
+                            if (item instanceof View && ((View) item).getId() != View.NO_ID) {
+                                removed.add(((View) item).getId());
+                            }
+                        }
+                        if (removed.isEmpty()) return;
+                        int[] refs = (int[]) XposedHelpers.callMethod(
+                                helper, "getReferencedIds");
+                        if (refs == null || refs.length == 0) return;
+                        int[] retained = new int[refs.length];
+                        int count = 0;
+                        for (int ref : refs) {
+                            if (!removed.contains(ref)) retained[count++] = ref;
+                        }
+                        if (count != refs.length && count > 0) {
+                            XposedHelpers.callMethod(helper, "setReferencedIds",
+                                    (Object) Arrays.copyOf(retained, count));
+                            Log.i(TAG, "Unregistered removed Smartspace from AOD Layer");
+                        }
+                    } catch (Throwable error) {
+                        Log.w(TAG, "Native Smartspace cleanup unavailable: " + error);
+                    }
+                }
+            });
+        } catch (Throwable error) {
+            Log.w(TAG, "Cannot observe native Smartspace removal: " + error);
         }
     }
 
