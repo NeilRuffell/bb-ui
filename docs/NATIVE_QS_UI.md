@@ -31,12 +31,23 @@ Inspected the following LineageOS sources on branch lineage-24.0:
 - https://github.com/LineageOS/android_frameworks_base/blob/lineage-24.0/packages/SystemUI/src/com/android/systemui/qs/pipeline/domain/interactor/CurrentTilesInteractor.kt
 - https://github.com/LineageOS/android_frameworks_base/blob/lineage-24.0/packages/SystemUI/plugin/src/com/android/systemui/plugins/qs/QSTile.java
 
-For the native pipeline, the Vector bridge also observes the verified
-CurrentTilesInteractorImpl directly if QSHostAdapter has not yet supplied
-tiles. This is the same native tile collection, not a duplicated controller.
-Native tile loading can be asynchronous; a brief startup-only retry checks
-for the first populated collection. Logs include host/interactor presence and
-the tile count under the BB6-NativeQS tag.
+The Q25 Pro LineageOS 24 SystemUI binary was verified by device logcat to
+throw NoSuchMethodError for both QSHostAdapter.getTiles() and
+CurrentTilesInteractorImpl.getCurrentTiles(). These source-level method names
+must not be assumed to survive ROM compilation.
+
+The bridge now reads the native CurrentTilesInteractor's existing StateFlow
+through runtime-verified type information and extracts the QSTile references
+from TileModel fields by their native interface type. It does not instantiate
+or manage a separate tile backend. QSHostAdapter.getTiles() is used only if
+that method actually exists in the installed runtime. Native tile loading can
+be asynchronous; a brief startup-only retry checks for the first populated
+collection. Logs include host/interactor presence and tile count under the
+BB6-NativeQS tag.
+
+The structural adapter needs device testing to verify that the actual ROM's
+QSTile methods and fields remain accessible. A successful Gradle build alone
+does not prove successful runtime access.
 
 The old QSTileHost constructor hook is not appropriate for the inspected
 LineageOS source; QSHostAdapter now fronts the QS pipeline.
@@ -78,7 +89,7 @@ replace the Vector adapter, not introduce a second tile backend.
     adb shell setprop debug.bb6lockscreen.qs.enabled true
     adb shell am crash com.android.systemui
 
-Expected version: 0.9.49-native-qs-pipeline-dev (versionCode 79).
+Expected version: 0.9.50-native-qs-rom-compat-dev (versionCode 80).
 
 Test native tile state changes, edited ordering, installed third-party tiles,
 keyboard focus, Enter, Menu, Back, touch, and all native action dialogs on
