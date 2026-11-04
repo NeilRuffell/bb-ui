@@ -8,7 +8,7 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.os.PowerManager;
 import android.net.wifi.WifiManager;
-import android.telephony.TelephonyManager;
+import android.telephony.SubscriptionManager;
 import android.util.Log;
 import android.view.Gravity;
 import android.view.View;
@@ -440,7 +440,7 @@ public final class BB6LockScreenHook implements IXposedHookLoadPackage {
         filter.addAction(WifiManager.WIFI_STATE_CHANGED_ACTION);
         filter.addAction(BluetoothAdapter.ACTION_STATE_CHANGED);
         filter.addAction(Intent.ACTION_AIRPLANE_MODE_CHANGED);
-        filter.addAction(TelephonyManager.ACTION_DEFAULT_DATA_SUBSCRIPTION_CHANGED);
+        filter.addAction(SubscriptionManager.ACTION_DEFAULT_SUBSCRIPTION_CHANGED);
         BroadcastReceiver receiver = new BroadcastReceiver() {
             @Override public void onReceive(Context ctx, Intent intent) {
                 BB6ConnectionsPanel panel = lockQuickPanel;
@@ -450,7 +450,7 @@ public final class BB6LockScreenHook implements IXposedHookLoadPackage {
             }
         };
         try {
-            context.registerReceiver(receiver, filter);
+            context.registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED);
             lockQuickReceiver = receiver;
             lockQuickReceiverContext = context;
         } catch (RuntimeException error) {
