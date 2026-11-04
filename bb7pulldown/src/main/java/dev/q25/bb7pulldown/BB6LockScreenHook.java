@@ -11,12 +11,15 @@ import android.net.wifi.WifiManager;
 import android.telephony.SubscriptionManager;
 import android.util.Log;
 import android.view.Gravity;
+import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowInsets;
 import android.view.ViewTreeObserver;
 import android.view.ViewParent;
 import android.widget.FrameLayout;
+import android.window.OnBackInvokedCallback;
+import android.window.OnBackInvokedDispatcher;
 
 import java.lang.ref.WeakReference;
 import java.lang.reflect.Method;
@@ -76,6 +79,10 @@ public final class BB6LockScreenHook implements IXposedHookLoadPackage {
     private static BB6ConnectionsPanel lockQuickPanel;
     private static BroadcastReceiver lockQuickReceiver;
     private static Context lockQuickReceiverContext;
+    // Window-scoped predictive/navigation Back ownership. Registered only
+    // while the compact locked QS panel is attached, then unregistered.
+    private static OnBackInvokedDispatcher lockQuickBackDispatcher;
+    private static OnBackInvokedCallback lockQuickBackCallback;
 
     @Override
     public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lp) {
@@ -88,6 +95,7 @@ public final class BB6LockScreenHook implements IXposedHookLoadPackage {
         // Idempotent; the pull-down component uses this same live listener.
         SystemUiNotificationObserver.install(lp.classLoader);
         NativeQuickSettingsTiles.install(lp.classLoader);
+        installLockQuickBackKeyHandler(lp.classLoader);
         // Leave native clock/date/carrier and AOD-managed views intact.
 
         Class<?> rootClass = XposedHelpers.findClassIfExists(ROOT, lp.classLoader);
@@ -380,6 +388,7 @@ public final class BB6LockScreenHook implements IXposedHookLoadPackage {
         try {
             root.addView(panel, params);
             lockQuickPanel = panel;
+            registerLockQuickBackCallback(root);
             registerLockQuickUpdates(context);
             panel.focusFirst();
             Log.i(TAG, "Limited lockscreen QS opened: mobile data, Wi-Fi, Bluetooth");
@@ -420,6 +429,7 @@ public final class BB6LockScreenHook implements IXposedHookLoadPackage {
     private static void closeLockscreenQuickSettings(boolean restoreHeaderFocus) {
         BB6ConnectionsPanel panel = lockQuickPanel;
         lockQuickPanel = null;
+        unregisterLockQuickBackCallback();
         stopLockQuickUpdates();
         if (panel != null && panel.getParent() instanceof ViewGroup) {
             ((ViewGroup) panel.getParent()).removeView(panel);
@@ -434,6 +444,98 @@ public final class BB6LockScreenHook implements IXposedHookLoadPackage {
                     header.focusStatusDate();
                 }
             }
+        }
+    }
+
+    /**
+     * Physical Back/Escape can be handled by SystemUI before the focused
+     * BB6ConnectionsPanel sees dispatchKeyEvent(). Observe the same declaring
+     * WindowRootView used by our existing Space-to-password hook, but match
+     * ONLY Back/Escape while this specific lock-screen QS panel is attached.
+     *
+     * Space-to-password, native bouncer, and unlocked shade remain untouched.
+     */
+    private static void installLockQuickBackKeyHandler(ClassLoader loader) {
+        Class<?> windowRoot = XposedHelpers.findClassIfExists(
+                "com.android.systemui.scene.ui.view.WindowRootView", loader);
+        if (windowRoot == null) {
+            Log.w(TAG, "WindowRootView unavailable; predictive Back callback retained");
+            return;
+        }
+        try {
+            XposedHelpers.findAndHookMethod(windowRoot, "dispatchKeyEvent",
+                    KeyEvent.class, new XC_MethodHook() {
+                @Override protected void beforeHookedMethod(MethodHookParam param) {
+                    if (!(param.args[0] instanceof KeyEvent)) return;
+                    BB6ConnectionsPanel panel = lockQuickPanel;
+                    FrameLayout root = rootRef.get();
+                    if (panel == null || root == null || panel.getParent() != root
+                            || !root.isAttachedToWindow()) return;
+                    KeyEvent event = (KeyEvent) param.args[0];
+                    int decision = LockscreenBackPolicy.route(
+                            event.getKeyCode(), event.getAction(),
+                            true, mayShowLockscreenQuickSettings(root));
+                    if (decision == LockscreenBackPolicy.CLOSE) {
+                        closeLockscreenQuickSettings(true);
+                    } else if (decision == LockscreenBackPolicy.PASS) {
+                        if (!mayShowLockscreenQuickSettings(root)) {
+                            // Never intercept native Back from a newly opened
+                            // bouncer or a transitioning SystemUI state.
+                            closeLockscreenQuickSettings(false);
+                        }
+                        return;
+                    }
+                    // Consume both DOWN and UP; the native keyguard must not
+                    // receive a half-delivered physical Back press.
+                    param.setResult(true);
+                }
+            });
+            Log.i(TAG, "Lockscreen QS physical Back routing installed");
+        } catch (Throwable error) {
+            Log.w(TAG, "Native Back key routing unavailable", error);
+        }
+    }
+
+    /**
+     * Android 13+ gesture/navigation Back is dispatched through this
+     * window-level callback rather than necessarily as KEYCODE_BACK.
+     * Use overlay priority only while our compact panel is the topmost
+     * interactive lock-screen surface; unregister before removing it.
+     */
+    private static void registerLockQuickBackCallback(FrameLayout root) {
+        unregisterLockQuickBackCallback();
+        try {
+            OnBackInvokedDispatcher dispatcher = root.findOnBackInvokedDispatcher();
+            if (dispatcher == null) {
+                Log.w(TAG, "Native Back dispatcher unavailable for locked QS");
+                return;
+            }
+            OnBackInvokedCallback callback = () -> {
+                BB6ConnectionsPanel panel = lockQuickPanel;
+                if (panel == null || panel.getParent() != root) return;
+                boolean eligible = mayShowLockscreenQuickSettings(root);
+                closeLockscreenQuickSettings(eligible);
+            };
+            dispatcher.registerOnBackInvokedCallback(
+                    OnBackInvokedDispatcher.PRIORITY_OVERLAY, callback);
+            lockQuickBackDispatcher = dispatcher;
+            lockQuickBackCallback = callback;
+            Log.i(TAG, "Lockscreen QS gesture/navigation Back callback registered");
+        } catch (RuntimeException error) {
+            Log.w(TAG, "Lockscreen QS Back callback registration unavailable", error);
+        }
+    }
+
+    private static void unregisterLockQuickBackCallback() {
+        OnBackInvokedDispatcher dispatcher = lockQuickBackDispatcher;
+        OnBackInvokedCallback callback = lockQuickBackCallback;
+        lockQuickBackDispatcher = null;
+        lockQuickBackCallback = null;
+        if (dispatcher == null || callback == null) return;
+        try {
+            dispatcher.unregisterOnBackInvokedCallback(callback);
+        } catch (RuntimeException error) {
+            Log.w(TAG, "Lockscreen QS Back callback cleanup unavailable", error);
         }
     }
 
