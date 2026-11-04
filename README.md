@@ -1,7 +1,7 @@
 # BBOS6 keyguard Space-to-credential entry
 
 **Branch:** `feat/bb6-keyguard-keyboard-entry` (not merged into `master`).
-**Version:** 0.9.35. Device verification required before merging.
+**Version:** 0.9.36. Device verification required before merging.
 
 ## Requirement
 
@@ -19,12 +19,13 @@ behave normally. The module never attempts to verify or bypass credentials.
 - `KeyguardKeyEventInteractor` treats Space as a confirm key, but handles
   `SHADE_LOCKED` by collapsing the shade rather than opening the
   credential screen.
-- The native credential API for Scene mode is
-  `DeviceEntryInteractor.attemptDeviceEntry(reason, null, true)`;
-  the `true` argument requests the primary credential path rather than
-  the alternate biometric bouncer. In legacy mode the existing
-  `StatusBarKeyguardViewManager.showPrimaryBouncer(true, reason)`
-  initiates PIN/password/pattern entry.
+- Scene mode invokes `DeviceEntryInteractor.attemptDeviceEntry`
+  (three-argument overload with primary credentials selected).
+  Legacy mode invokes `PrimaryBouncerInteractor.show(true, reason)`
+  directly; these are the native presenters called by the corresponding
+  LineageOS 24 keyguard code. The earlier attempts only invoked
+  `StatusBarKeyguardViewManager`, whose method signatures differ on the Q25.
+  Manager methods are now fallbacks, not the sole entry path.
 - In legacy locked-shade mode, `ShadeController.collapseShade(true)`
   explicitly runs registered post-collapse actions even if the shade is
   already collapsed. The earlier `animateCollapseShadeForced()` approach
@@ -37,10 +38,13 @@ just as LineageOS handles confirm keys. This prevents the release from
 entering a newly shown password editor. No synthetic input is generated.
 Native credential editors and an already visible bouncer retain key input.
 
-The live Q25 SystemUI has already shown one API difference from the
-upstream LineageOS 24 source (`primaryBouncerIsShowing()` missing).
-Therefore upstream code review and successful compilation alone do not
-establish that authentication appears on this device.
+The live Q25 SystemUI has already shown API differences from the
+upstream LineageOS 24 source. The module now hooks constructors of
+`DeviceEntryInteractor` and `PrimaryBouncerInteractor`, recovering those
+objects independently of the manager or key-event dispatcher. Before invoking
+an entry method it checks the **actual runtime method signature**; failures
+report a short method inventory rather than a full Java stack trace.
+Successful compilation alone does not establish that authentication appears.
 
 ## Build/install on KDE neon
 
@@ -70,10 +74,10 @@ If there is no response, capture **only** the concise integration logs:
 adb logcat -d -s 'BB6-Keyguard:I' '*:S' | tail -50
 ```
 
-Key messages: `Space UP`, `Entry route: scene=`,
-`Native scene credential entry requested`,
-`Native primary credential bouncer requested`, and any errors.
-A "requested" log is **not** proof that the framework displayed a bouncer.
+Key messages: `Space UP`, `Native route scene=`,
+`Native DeviceEntryInteractor.attemptDeviceEntry invoked`, or
+`Native PrimaryBouncerInteractor.show invoked`. An invocation log is
+**not** proof that the framework displayed its bouncer; verify the UI.
 
 To disable this feature without disabling other BB UI work:
 
