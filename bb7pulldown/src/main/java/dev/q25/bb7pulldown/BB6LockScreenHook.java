@@ -48,14 +48,6 @@ public final class BB6LockScreenHook implements IXposedHookLoadPackage {
             "com.android.systemui.statusbar.StatusBarStateControllerImpl";
     private static final String NATIVE_STACK_ID = "shared_notification_container";
     private static final String ENABLE_PROP = "debug.bb6lockscreen.enabled";
-    private static final String CLOCK_BINDER =
-            "com.android.systemui.keyguard.ui.binder.KeyguardClockViewBinder";
-    private static final String CLOCK_IDS =
-            "com.android.systemui.plugins.keyguard.ui.clocks.ClockViewIds";
-    private static final String INDICATION_CONTROLLER =
-            "com.android.systemui.statusbar.KeyguardIndicationController";
-    private static final BB6NativeLockscreenComposition NATIVE_CHROME =
-            new BB6NativeLockscreenComposition();
 
     private static WeakReference<FrameLayout> rootRef = new WeakReference<>(null);
     private static WeakReference<BB6LockScreenHeader> headerRef =
@@ -84,8 +76,7 @@ public final class BB6LockScreenHook implements IXposedHookLoadPackage {
 
         // Idempotent; the pull-down component uses this same live listener.
         SystemUiNotificationObserver.install(lp.classLoader);
-        observeNativeClockComposition(lp.classLoader);
-        suppressRedundantSwipePrompt(lp.classLoader);
+        // Leave native clock/date/carrier and AOD-managed views intact.
 
         Class<?> rootClass = XposedHelpers.findClassIfExists(ROOT, lp.classLoader);
         if (rootClass == null) {
@@ -177,84 +168,6 @@ public final class BB6LockScreenHook implements IXposedHookLoadPackage {
         }
     }
 
-    /**
-     * ClockViewIds are generated dynamically by the plugin, not Android
-     * resource IDs. Use the native ClockViewIds singleton and collect every
-     * view from KeyguardClockViewBinder instead of guessing resource names.
-     */
-    private static void observeNativeClockComposition(ClassLoader loader) {
-        try {
-            Class<?> ids = XposedHelpers.findClassIfExists(CLOCK_IDS, loader);
-            if (ids != null) {
-                Object instance = XposedHelpers.getStaticObjectField(ids, "INSTANCE");
-                int small = (Integer) XposedHelpers.callMethod(
-                        instance, "getLOCKSCREEN_CLOCK_VIEW_SMALL");
-                int large = (Integer) XposedHelpers.callMethod(
-                        instance, "getLOCKSCREEN_CLOCK_VIEW_LARGE");
-                NATIVE_CHROME.setClockRootIds(small, large);
-                Log.i(TAG, "Native dynamic clock IDs captured");
-            }
-        } catch (Throwable error) {
-            Log.w(TAG, "Dynamic clock ID access unavailable: " + brief(error));
-        }
-
-        Class<?> binder = XposedHelpers.findClassIfExists(CLOCK_BINDER, loader);
-        if (binder == null) {
-            Log.w(TAG, "Native clock binder unavailable on this build");
-            return;
-        }
-        try {
-            XposedBridge.hookAllMethods(binder, "addClockViews", new XC_MethodHook() {
-                @Override protected void afterHookedMethod(MethodHookParam param) {
-                    if (param.args.length == 0) return;
-                    NATIVE_CHROME.captureClockController(param.args[0]);
-                    requestRefresh();
-                }
-            });
-            Log.i(TAG, "Native clock-face composition observer registered");
-        } catch (Throwable error) {
-            Log.w(TAG, "Cannot observe native clock views: " + brief(error));
-        }
-    }
-
-    /**
-     * Do not create the redundant stock swipe-to-unlock instruction.
-     * Intercept only the default keyguard_unlock message, without a biometric
-     * source, follow-up or success indication. Preserve other security,
-     * biometric, charging and accessibility messages and the real swipe.
-     */
-    private static void suppressRedundantSwipePrompt(ClassLoader loader) {
-        Class<?> type = XposedHelpers.findClassIfExists(INDICATION_CONTROLLER, loader);
-        if (type == null) return;
-        try {
-            XposedBridge.hookAllMethods(type, "showBiometricMessage",
-                    new XC_MethodHook() {
-                @Override protected void beforeHookedMethod(MethodHookParam param) {
-                    if (param.args.length != 4 || !NATIVE_CHROME.isActive()
-                            || param.args[0] == null || param.args[1] != null
-                            || param.args[2] != null
-                            || Boolean.TRUE.equals(param.args[3])) return;
-                    BB6LockScreenHeader header = headerRef.get();
-                    if (header == null) return;
-                    Context context = header.getContext();
-                    int resId = context.getResources().getIdentifier(
-                            "keyguard_unlock", "string", PACKAGE);
-                    if (resId == 0) return;
-                    String defaultPrompt = context.getString(resId);
-                    if (BB6NativeChromePolicy.redundantSwipeHint(true,
-                            param.args[0].toString(), defaultPrompt, false, false)) {
-                        // Stop the redundant message before the indication
-                        // controller schedules it; preserve its host view.
-                        param.setResult(null);
-                        Log.i(TAG, "Redundant stock swipe instruction omitted");
-                    }
-                }
-            });
-        } catch (Throwable error) {
-            Log.w(TAG, "Cannot intercept stock swipe hint: " + brief(error));
-        }
-    }
-
     static void onNotificationsUpdated() {
         requestRefresh();
     }
@@ -268,7 +181,6 @@ public final class BB6LockScreenHook implements IXposedHookLoadPackage {
         }
         removeNativeStackWatcher();
         restoreNativeStack();
-        NATIVE_CHROME.restore();
         Context context = root.getContext();
         BB6LockScreenHeader header = new BB6LockScreenHeader(context);
         header.setVisibility(View.GONE);
@@ -308,7 +220,6 @@ public final class BB6LockScreenHook implements IXposedHookLoadPackage {
         if (root == null || header == null || header.getParent() != root) return;
         if (!enabled()) {
             header.setVisibility(View.GONE);
-            NATIVE_CHROME.restore();
             restoreNativeStack();
             return;
         }
@@ -322,20 +233,19 @@ public final class BB6LockScreenHook implements IXposedHookLoadPackage {
         boolean shown = BB6NativeChromePolicy.useBb6Composition(
                 locked, power != null && power.isInteractive(),
                 nativeStatusState(), bouncerRequested || nativeBouncerShowing());
-        // Structural removal, not alpha=0 or GONE. Native clock/date/carrier
-        // and duplicate icons are physically detached while BB6 owns the UI.
-        // AOD, shade and authentication reattach the same original views.
+        // Stock clock/date/carrier views are left native and unduplicated.
+        // Only the notification-list subtree is temporarily removed.
         updateNativeStack(root, shown);
-        NATIVE_CHROME.sync(root, shown);
+
 
         if (shown != lastVisible) {
             lastVisible = shown;
-            header.setVisibility(shown ? View.VISIBLE : View.GONE);
-            Log.i(TAG, "BBOS6 banner " + (shown ? "visible" : "hidden"));
-            if (shown) header.refreshNetwork();
+            Log.i(TAG, "BBOS6 notification strip " + (shown ? "eligible" : "inactive"));
         }
-        if (!shown) return;
-
+        if (!shown) {
+            header.setVisibility(View.GONE);
+            return;
+        }
         Map<String, Integer> counts =
                 SystemUiNotificationObserver.lockscreenCountsSnapshot(context);
         if (!counts.equals(lastCounts)) {
@@ -343,6 +253,8 @@ public final class BB6LockScreenHook implements IXposedHookLoadPackage {
             header.showCounts(counts);
             Log.i(TAG, "Lock-screen notification indicators: apps=" + counts.size());
         }
+        // No empty notification indicator frame when there are no alerts.
+        header.setVisibility(counts.isEmpty() ? View.GONE : View.VISIBLE);
     }
 
     /**
@@ -451,7 +363,7 @@ public final class BB6LockScreenHook implements IXposedHookLoadPackage {
                         locked, pm != null && pm.isInteractive(), nativeStatusState(),
                         bouncerRequested || nativeBouncerShowing());
                 updateNativeStack(root, compose);
-                NATIVE_CHROME.sync(root, compose);
+    
             });
         };
         observerRootRef = new WeakReference<>(root);
