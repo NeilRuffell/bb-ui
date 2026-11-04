@@ -1,39 +1,57 @@
-# BBOS6 lock-screen indicators — Vector APK test
+# BBOS6 lock-screen native-blueprint Vector preview
 
 **Branch:** `feat/bb6-lockscreen-banner`  
-**APK:** `0.9.42-bb6-vector-single-clock-dev`  
-**Status:** APK test build, not merged into `master`.
+**APK:** `0.9.43-bb6-vector-blueprint-dev`  
+**Status:** Installable unified BB UI Vector APK. Not merged; requires Q25 test.
 
-This remains the **unified BB UI Vector module**. There is no ROM build or
-partition flashing involved. Build/install the APK through the existing
-Gradle and ADB workflow.
+## Design / source ownership
 
-## Correction for double clock/date/carrier and prior AOD crash
+This remains the existing **root/Vector workflow**. NO ROM checkout,
+`repo sync`, system image rebuild, or flashing is required.
 
-0.9.40 tried detaching native AOD-managed clock/Smartspace views and crashed
-SystemUI because `AodBurnInLayer` still referenced a removed view.
-0.9.41 avoided the crash by leaving unsafe views attached; the added BB6
-clock/date/carrier therefore appeared alongside their Android originals.
+The previous 0.9.42 build incorrectly removed our BB6 clock/date while
+leaving the stock versions. This version restores the BB6 clock/date, but
+**only when our alternate native keyguard blueprint is actually selected**.
+If the blueprint adapter cannot attach safely, the feature falls back to
+notification indicators only rather than duplicating stock clocks.
 
-**0.9.42 deliberately removes the duplicate custom clock, date and TELUS
-label from `BB6LockScreenHeader`.** The native Android clock, Smartspace
-date and operator indicator remain, with a **single** display of each.
-The BB6 header now draws **only** app notification icons followed by counts,
-using the existing SystemUI notification listener. When no alerts exist,
-the custom indicator view is not displayed and has no frame.
+`BB6BlueprintHook` uses the **actual Q25 SystemUI** classes and fields
+verified in the supplied APK:
 
-The crash-prone `BB6NativeLockscreenComposition` is not invoked or hooked.
-The previously working Space-to-native-credential feature is unchanged.
-The native notification list is temporarily detached on interactive
-keyguard and reattached for the shade/AOD/bouncer; notification data is
-not deleted.
+- `KeyguardBlueprintRepository.blueprintIdMap` maps blueprint names to
+  instances of the native `KeyguardBlueprint` interface (methods
+  `getId()` and `getSections()`).
+- It registers an alternate `bb6-interactive` blueprint and delegates
+  the View lifecycle and constraints to Android's own
+  `KeyguardBlueprint` machinery.
+- In this interactive blueprint, stock `ClockSection`, `SmartspaceSection`,
+  `KeyguardSliceViewSection`, native notification icons, promoted
+  notification area and notification placeholder are **not constructed
+  or bound**. The original `DefaultKeyguardBlueprint` remains available.
+- **Native status-bar/carrier section remains**: one TELUS label and real
+  signal/battery/privacy icons. We don't duplicate the carrier label.
+- Existing `BB6LockScreenHeader` shows BB6 date/time plus real application
+  notification icons and active counts, inside the existing SystemUI root.
+- The notification-list subtree is detached only while the interactive
+  BB6 keyguard is shown, then reattached for shade and AOD. The native
+  credential presentation, keyboard shortcut, and emergency access remain.
 
-**Important:** This is a stabilization preview, **not** the final BBOS6 clock
-layout. It does not yet reposition or replace Android's clock/date/carrier.
-The eventual rootless LineageOS source integration is separate and cannot
-be installed with an APK. Do not merge until device-verified.
+## AOD crash prevention
 
-## Install on KDE neon
+0.9.40 crashed because the AndroidX AOD burn-in layer still referenced
+views that were detached. 0.9.43 does not directly detach native
+clock/Smartspace View children. The native blueprint transition invokes
+the stock section lifecycle; before that lifecycle removes clock/date
+views the Vector adapter unregisters their native AOD reference IDs.
+It additionally validates AOD Layer references before native
+`transform()`/`updatePostLayout()` calls and prunes only IDs provably
+missing from the native parent. The AOD anchor and default blueprint remain.
+
+**This is not yet proven on a real Q25.** APK compilation and unit tests
+cannot certify native lock-screen/AOD runtime transitions. The feature
+remains on this branch, with a direct rollback control.
+
+## Install / recover (KDE neon)
 
 ```sh
 cd ~/Projects/bb-ui
@@ -44,15 +62,34 @@ gradle :app:assembleDebug :app:testDebugUnitTest &&
 adb push app/build/outputs/apk/debug/app-debug.apk /data/local/tmp/bb-ui.apk &&
 timeout 45s adb shell pm install -r /data/local/tmp/bb-ui.apk &&
 adb shell setprop debug.bb6lockscreen.enabled true &&
+adb shell setprop debug.bb6lockscreen.blueprint true &&
 adb shell am crash com.android.systemui
 ```
 
-If SystemUI crashes, disable **only the BB6 lock-screen preview**:
+If the native blueprint is unsupported or malfunctions, turn it off
+without affecting the working Space-to-password implementation:
+
+```sh
+adb shell setprop debug.bb6lockscreen.blueprint false
+adb shell am crash com.android.systemui
+```
+
+To disable the entire BB6 lock-screen preview:
 
 ```sh
 adb shell setprop debug.bb6lockscreen.enabled false
 adb shell am crash com.android.systemui
 ```
+
+Diagnostics:
+
+```sh
+adb logcat -d -s 'BB6-Blueprint:V' 'BB6-LockScreen:V' 'AndroidRuntime:E' '*:S' | tail -120
+```
+
+**ROM future:** There is a separate native source implementation documented
+under `rom/lineage-24.0` on its own branch, but the current test is the
+ordinary BB UI Vector APK.
 
 
 ---
