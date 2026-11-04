@@ -1,8 +1,10 @@
 package dev.q25.bb7pulldown;
 
 /**
- * BBOS6-style presentation categories mapped to Android's existing QS controls.
- * Android 12+ manages Wi-Fi and mobile data through the shared Internet tile.
+ * BBOS6 locked connection-row presentation categories only.
+ *
+ * Native tile specs and state are resolved from SystemUI's actual QSHost
+ * by BB6NativeQsPanel. This policy does not control platform radios.
  */
 final class ConnectionControlPolicy {
     static final int MOBILE = 0;
@@ -17,28 +19,6 @@ final class ConnectionControlPolicy {
             case BLUETOOTH: return "Bluetooth";
             default: throw new IllegalArgumentException("Unknown connection control");
         }
-    }
-
-    static String tileSpec(int kind) {
-        switch (kind) {
-            case MOBILE:
-            case WIFI:
-                return "internet";
-            case BLUETOOTH:
-                return "bt";
-            default:
-                throw new IllegalArgumentException("Unknown connection control");
-        }
-    }
-
-    static String stateLabel(int kind, Boolean enabled) {
-        if (enabled == null) return "Unknown";
-        if (kind == MOBILE) return enabled ? "Data on" : "Data off";
-        return enabled ? "On" : "Off";
-    }
-
-    static boolean checked(Boolean enabled) {
-        return Boolean.TRUE.equals(enabled);
     }
 
     private ConnectionControlPolicy() {}
