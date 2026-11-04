@@ -78,9 +78,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
     private static UnifiedShadeHost shadeHost;
     private static TwoColumnPanel panel;
     private static NativeMediaSessions mediaSessions;
-    private static BB6ConnectionsPanel quickPanel;
-    private static BroadcastReceiver quickStateReceiver;
-    private static Context quickReceiverContext;
+    private static BB6NativeQsPanel quickPanel;
     private static FavoritesRules activeFavorites = new FavoritesRules();
     private static ContentObserver favoritesObserver;
     private static Context favoritesObserverContext;
@@ -436,8 +434,6 @@ public final class PullDownHook implements IXposedHookLoadPackage {
             FavoritesClient.reportObserved(context, activeFavorites,
                     SystemUiNotificationObserver.itemsSnapshot());
             if (mediaSessions != null) mediaSessions.refresh();
-        } else if (quickPanel != null) {
-            quickPanel.refresh(NativeConnectionControls.read(context));
         }
         NAVIGATION.onPageChanged(next);
         root.setPage(next);
@@ -446,63 +442,21 @@ public final class PullDownHook implements IXposedHookLoadPackage {
         Log.i(TAG, "Unified shade switched page=" + next + " without animation");
     }
 
-    private static void activateQuickConnection(int kind) {
-        BB6ConnectionsPanel root = quickPanel;
+    /** Invoke ONLY the selected installed native SystemUI QS tile. */
+    private static void activateQuickTile(String spec, int ignoredKind,
+            NativeQuickSettingsTiles.Action action) {
+        BB6NativeQsPanel root = quickPanel;
         if (root == null || !quickSettingsPageActive()) return;
-        Context context = root.getContext();
-        if (locked(context)) {
+        if (locked(root.getContext())) {
             dismissShadeImmediately();
             return;
         }
-        // Remove our overlay before native SystemUI displays its Internet/BT UI.
+        // Preserve the existing overlay/dialog stacking behavior for native
+        // tile actions. SystemUI itself owns any dialog/unlock flow.
         dismissShadeImmediately();
-        if (!NativeQuickSettingsTiles.activate(kind)
-                && !NativeConnectionControls.openNativeSettings(context, kind)) {
-            // Final compatibility path: never strand the user without working QS.
-            try {
-                Object statusbar = context.getSystemService("statusbar");
-                if (statusbar != null) {
-                    XposedHelpers.callMethod(statusbar, "expandSettingsPanel");
-                }
-            } catch (Throwable error) {
-                Log.e(TAG, "Unable to open any native connectivity controls", error);
-            }
-        }
-    }
-
-    private static void registerQuickConnectionStateReceiver(Context context) {
-        stopQuickConnectionStateReceiver();
-        IntentFilter filter = new IntentFilter();
-        filter.addAction(WifiManager.WIFI_STATE_CHANGED_ACTION);
-        filter.addAction(BluetoothAdapter.ACTION_STATE_CHANGED);
-        filter.addAction(Intent.ACTION_AIRPLANE_MODE_CHANGED);
-        filter.addAction(SubscriptionManager.ACTION_DEFAULT_SUBSCRIPTION_CHANGED);
-        BroadcastReceiver receiver = new BroadcastReceiver() {
-            @Override public void onReceive(Context caller, Intent intent) {
-                BB6ConnectionsPanel root = quickPanel;
-                if (root != null && quickSettingsPageActive()) {
-                    root.refresh(NativeConnectionControls.read(root.getContext()));
-                }
-            }
-        };
-        try {
-            // Source extras are not trusted; every refresh re-reads system managers.
-            context.registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED);
-            quickStateReceiver = receiver;
-            quickReceiverContext = context;
-        } catch (RuntimeException error) {
-            Log.w(TAG, "Quick Settings state listener unavailable", error);
-        }
-    }
-
-    private static void stopQuickConnectionStateReceiver() {
-        BroadcastReceiver receiver = quickStateReceiver;
-        Context context = quickReceiverContext;
-        quickStateReceiver = null;
-        quickReceiverContext = null;
-        if (receiver != null && context != null) {
-            try { context.unregisterReceiver(receiver); }
-            catch (IllegalArgumentException ignored) { }
+        if (!NativeQuickSettingsTiles.activate(spec, action)) {
+            Log.w(TAG, "Installed native QS tile refused action: " + spec
+                    + " (" + action + ")");
         }
     }
 
@@ -691,15 +645,16 @@ public final class PullDownHook implements IXposedHookLoadPackage {
                         return sendNotificationReply(key, index, reply);
                     }
                 }, NAVIGATION, nativeMedia::send);
-        BB6ConnectionsPanel connections = new BB6ConnectionsPanel(context,
-                new BB6ConnectionsPanel.Listener() {
+        BB6NativeQsPanel connections = new BB6NativeQsPanel(context,
+                new BB6NativeQsPanel.Listener() {
                     @Override public void onClose() {
                         dismissShade();
                     }
-                    @Override public void onActivate(int kind) {
-                        activateQuickConnection(kind);
+                    @Override public void onAction(String spec, int kind,
+                            NativeQuickSettingsTiles.Action action) {
+                        activateQuickTile(spec, kind, action);
                     }
-                }, NAVIGATION);
+                }, NAVIGATION, false);
         notifications.setFavorites(activeFavorites);
         notifications.setNotifications(SystemUiNotificationObserver.itemsSnapshot());
 
@@ -731,7 +686,6 @@ public final class PullDownHook implements IXposedHookLoadPackage {
             quickPanel = connections;
             NAVIGATION.onShadeOpened(initialPage);
             registerScreenOffReceiver(context);
-            registerQuickConnectionStateReceiver(context);
             mediaSessions = nativeMedia;
             nativeMedia.start();
             registerFavoritesObserver(context, notifications);
@@ -849,7 +803,6 @@ public final class PullDownHook implements IXposedHookLoadPackage {
             Log.w(TAG, "Unable to remove unified shade window", error);
         } finally {
             stopFavoritesObserver();
-            stopQuickConnectionStateReceiver();
             stopMediaSessions();
             unregisterScreenOffReceiver();
             panel = null;
