@@ -92,6 +92,7 @@ public final class BB6LockScreenHook implements IXposedHookLoadPackage {
 
         // Idempotent; the pull-down component uses this same live listener.
         SystemUiNotificationObserver.install(lp.classLoader);
+        NativeLockscreenHeadsUpSuppressor.install(lp.classLoader);
         NativeQuickSettingsTiles.install(lp.classLoader);
         installLockQuickBackKeyHandler(lp.classLoader);
         // Leave native clock/date/carrier and AOD-managed views intact.
@@ -262,12 +263,10 @@ public final class BB6LockScreenHook implements IXposedHookLoadPackage {
         Context context = root.getContext();
         KeyguardManager keyguard = (KeyguardManager)
                 context.getSystemService(Context.KEYGUARD_SERVICE);
-        PowerManager power = (PowerManager) context.getSystemService(Context.POWER_SERVICE);
-        boolean locked = keyguard != null && keyguard.isKeyguardLocked();
-        if (!locked) bouncerRequested = false;
-        boolean shown = BB6NativeChromePolicy.useBb6Composition(
-                locked, power != null && power.isInteractive(),
-                nativeStatusState(), bouncerRequested || nativeBouncerShowing());
+        if (keyguard == null || !keyguard.isKeyguardLocked()) {
+            bouncerRequested = false;
+        }
+        boolean shown = isInteractiveBb6LockscreenActive();
         // The native blueprint owns stock clock/date construction.
         // Our single status/date-time focus target leaves icons passive.
         updateNativeStack(root, shown);
@@ -574,6 +573,27 @@ public final class BB6LockScreenHook implements IXposedHookLoadPackage {
         }
     }
 
+    /**
+     * Single presentation owner decision for the interactive lock screen.
+     * Used by both the stock-stack removal and the stock heads-up suppressor.
+     * The native SHADE, SHADE_LOCKED, bouncer, and AOD stay platform-owned.
+     */
+    static boolean isInteractiveBb6LockscreenActive() {
+        FrameLayout root = rootRef.get();
+        BB6LockScreenHeader header = headerRef.get();
+        if (root == null || header == null || header.getParent() != root
+                || !root.isAttachedToWindow() || !enabled()) return false;
+        Context context = root.getContext();
+        KeyguardManager keyguard = (KeyguardManager)
+                context.getSystemService(Context.KEYGUARD_SERVICE);
+        PowerManager power = (PowerManager)
+                context.getSystemService(Context.POWER_SERVICE);
+        return BB6NativeChromePolicy.useBb6Composition(
+                keyguard != null && keyguard.isKeyguardLocked(),
+                power != null && power.isInteractive(),
+                nativeStatusState(), bouncerRequested || nativeBouncerShowing());
+    }
+
     private static int nativeStatusState() {
         Object controller = stateControllerRef.get();
         if (controller == null) return LockscreenNativeStackPolicy.UNKNOWN;
@@ -622,15 +642,7 @@ public final class BB6LockScreenHook implements IXposedHookLoadPackage {
             root.post(() -> {
                 if (!enabled() || rootRef.get() != root
                         || !root.isAttachedToWindow()) return;
-                KeyguardManager km = (KeyguardManager)
-                        root.getContext().getSystemService(Context.KEYGUARD_SERVICE);
-                boolean locked = km != null && km.isKeyguardLocked();
-                PowerManager pm = (PowerManager)
-                        root.getContext().getSystemService(Context.POWER_SERVICE);
-                boolean compose = BB6NativeChromePolicy.useBb6Composition(
-                        locked, pm != null && pm.isInteractive(), nativeStatusState(),
-                        bouncerRequested || nativeBouncerShowing());
-                updateNativeStack(root, compose);
+                updateNativeStack(root, isInteractiveBb6LockscreenActive());
     
             });
         };
