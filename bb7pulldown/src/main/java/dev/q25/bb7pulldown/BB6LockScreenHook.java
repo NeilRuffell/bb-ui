@@ -11,6 +11,7 @@ import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowInsets;
+import android.view.ViewTreeObserver;
 import android.widget.FrameLayout;
 
 import java.lang.ref.WeakReference;
@@ -43,6 +44,10 @@ public final class BB6LockScreenHook implements IXposedHookLoadPackage {
             "com.android.systemui.statusbar.phone.StatusBarKeyguardViewManager";
     private static final String KEYGUARD_STATE =
             "com.android.systemui.statusbar.policy.KeyguardStateControllerImpl";
+    // Verified in the Q25 SystemUI APK: setState(int, boolean), getState().
+    private static final String STATUS_BAR_STATE =
+            "com.android.systemui.statusbar.StatusBarStateControllerImpl";
+    private static final String NATIVE_STACK_ID = "shared_notification_container";
     private static final String ENABLE_PROP = "debug.bb6lockscreen.enabled";
 
     private static WeakReference<FrameLayout> rootRef = new WeakReference<>(null);
@@ -55,6 +60,13 @@ public final class BB6LockScreenHook implements IXposedHookLoadPackage {
     private static boolean lastVisible;
     private static Map<String, Integer> lastCounts = Collections.emptyMap();
     private static BroadcastReceiver screenReceiver;
+    private static WeakReference<Object> stateControllerRef = new WeakReference<>(null);
+    private static WeakReference<View> nativeStackRef = new WeakReference<>(null);
+    private static ViewTreeObserver.OnGlobalLayoutListener stackLayoutObserver;
+    private static WeakReference<FrameLayout> observerRootRef = new WeakReference<>(null);
+    private static int originalStackVisibility = View.VISIBLE;
+    private static boolean stackHiddenByUs;
+    private static boolean missingNativeStackLogged;
 
     @Override
     public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lp) {
@@ -115,6 +127,7 @@ public final class BB6LockScreenHook implements IXposedHookLoadPackage {
                 Log.w(TAG, "Could not observe native bouncer: " + brief(error));
             }
         }
+        installStateObserver(lp.classLoader);
         Class<?> keyguard = XposedHelpers.findClassIfExists(KEYGUARD_STATE, lp.classLoader);
         if (keyguard != null) {
             try {
@@ -130,6 +143,32 @@ public final class BB6LockScreenHook implements IXposedHookLoadPackage {
         }
     }
 
+    /** Recheck when native keyguard/shade mode changes; restore unlocked shade. */
+    private static void installStateObserver(ClassLoader loader) {
+        Class<?> state = XposedHelpers.findClassIfExists(STATUS_BAR_STATE, loader);
+        if (state == null) {
+            Log.w(TAG, "Native status bar state controller unavailable");
+            return;
+        }
+        try {
+            XposedBridge.hookAllConstructors(state, new XC_MethodHook() {
+                @Override protected void afterHookedMethod(MethodHookParam param) {
+                    stateControllerRef = new WeakReference<>(param.thisObject);
+                    requestRefresh();
+                }
+            });
+            XposedBridge.hookAllMethods(state, "setState", new XC_MethodHook() {
+                @Override protected void afterHookedMethod(MethodHookParam param) {
+                    stateControllerRef = new WeakReference<>(param.thisObject);
+                    requestRefresh();
+                }
+            });
+            Log.i(TAG, "Native status state transitions observed");
+        } catch (Throwable error) {
+            Log.e(TAG, "Native state observer registration failed: " + brief(error));
+        }
+    }
+
     static void onNotificationsUpdated() {
         requestRefresh();
     }
@@ -141,6 +180,8 @@ public final class BB6LockScreenHook implements IXposedHookLoadPackage {
             requestRefresh();
             return;
         }
+        removeNativeStackWatcher();
+        restoreNativeStack();
         restoreNativeClock();
         Context context = root.getContext();
         BB6LockScreenHeader header = new BB6LockScreenHeader(context);
@@ -162,6 +203,7 @@ public final class BB6LockScreenHook implements IXposedHookLoadPackage {
         }
         rootRef = new WeakReference<>(root);
         headerRef = new WeakReference<>(header);
+        registerNativeStackWatcher(root);
         lastCounts = Collections.emptyMap();
         lastVisible = false;
         registerScreenEvents(context);
@@ -181,6 +223,7 @@ public final class BB6LockScreenHook implements IXposedHookLoadPackage {
         if (!enabled()) {
             header.setVisibility(View.GONE);
             restoreNativeClock();
+            restoreNativeStack();
             return;
         }
 
@@ -189,6 +232,7 @@ public final class BB6LockScreenHook implements IXposedHookLoadPackage {
                 context.getSystemService(Context.KEYGUARD_SERVICE);
         PowerManager power = (PowerManager) context.getSystemService(Context.POWER_SERVICE);
         boolean locked = keyguard != null && keyguard.isKeyguardLocked();
+        updateNativeStack(root, locked);
         if (!locked) bouncerRequested = false;
         boolean shown = locked && power != null && power.isInteractive()
                 && !bouncerRequested && !nativeBouncerShowing();
@@ -209,6 +253,100 @@ public final class BB6LockScreenHook implements IXposedHookLoadPackage {
             header.showCounts(counts);
             Log.i(TAG, "Lock-screen notification indicators: apps=" + counts.size());
         }
+    }
+
+    /**
+     * Native LineageOS layout: super_notification_shade.xml places the whole
+     * SharedNotificationContainer directly under NotificationShadeWindowView.
+     * Its child is NotificationStackScrollLayout (including all rows, shelf,
+     * empty-shade artwork and any native notification background). GONE
+     * removes that entire subtree from layout; INVISIBLE would leave space.
+     *
+     * The container itself is never removed or its rows canceled: the same
+     * instance remains available for SHADE / SHADE_LOCKED.
+     */
+    private static void updateNativeStack(FrameLayout root, boolean locked) {
+        int state = nativeStatusState();
+        boolean hide = LockscreenNativeStackPolicy.hideNativeStack(locked, state);
+        View stack = nativeStackRef.get();
+        if (stack == null || stack.getRootView() != root.getRootView()) {
+            restoreNativeStack();
+            int resourceId = root.getResources().getIdentifier(
+                    NATIVE_STACK_ID, "id", PACKAGE);
+            stack = resourceId == 0 ? null : root.findViewById(resourceId);
+            if (stack == null) {
+                if (!missingNativeStackLogged) {
+                    missingNativeStackLogged = true;
+                    Log.w(TAG, "Native shared notification container not found; "
+                            + "not changing notification pipeline");
+                }
+                return;
+            }
+            nativeStackRef = new WeakReference<>(stack);
+        }
+
+        if (hide) {
+            if (!stackHiddenByUs && stack.getVisibility() != View.GONE) {
+                originalStackVisibility = stack.getVisibility();
+                stackHiddenByUs = true;
+            }
+            if (stack.getVisibility() != View.GONE) {
+                stack.setVisibility(View.GONE);
+                Log.i(TAG, "Native lockscreen notification container GONE "
+                        + "(no cards, shelf, or reserved frame)");
+            }
+        } else {
+            restoreNativeStack();
+        }
+    }
+
+    private static int nativeStatusState() {
+        Object controller = stateControllerRef.get();
+        if (controller == null) return LockscreenNativeStackPolicy.UNKNOWN;
+        try {
+            Object value = XposedHelpers.callMethod(controller, "getState");
+            return value instanceof Integer
+                    ? (Integer) value : LockscreenNativeStackPolicy.UNKNOWN;
+        } catch (Throwable error) {
+            Log.w(TAG, "Cannot read native shade state: " + brief(error));
+            return LockscreenNativeStackPolicy.UNKNOWN;
+        }
+    }
+
+    private static void restoreNativeStack() {
+        View stack = nativeStackRef.get();
+        if (stackHiddenByUs && stack != null && stack.getVisibility() == View.GONE) {
+            stack.setVisibility(originalStackVisibility);
+            Log.i(TAG, "Native notification container restored for shade");
+        }
+        stackHiddenByUs = false;
+    }
+
+    /**
+     * SystemUI's native view binder can reapply visibility on a layout pass.
+     * Use its existing ViewTreeObserver event rather than polling or hooking
+     * android.view.View globally. Only change state if it actually differs.
+     */
+    private static void registerNativeStackWatcher(FrameLayout root) {
+        removeNativeStackWatcher();
+        stackLayoutObserver = () -> {
+            if (!enabled() || rootRef.get() != root || !root.isAttachedToWindow()) return;
+            KeyguardManager km = (KeyguardManager)
+                    root.getContext().getSystemService(Context.KEYGUARD_SERVICE);
+            updateNativeStack(root, km != null && km.isKeyguardLocked());
+        };
+        observerRootRef = new WeakReference<>(root);
+        root.getViewTreeObserver().addOnGlobalLayoutListener(stackLayoutObserver);
+    }
+
+    private static void removeNativeStackWatcher() {
+        FrameLayout previous = observerRootRef.get();
+        if (previous != null && stackLayoutObserver != null
+                && previous.getViewTreeObserver().isAlive()) {
+            previous.getViewTreeObserver().removeOnGlobalLayoutListener(stackLayoutObserver);
+        }
+        stackLayoutObserver = null;
+        observerRootRef = new WeakReference<>(null);
     }
 
     private static boolean nativeBouncerShowing() {
