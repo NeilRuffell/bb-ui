@@ -18,6 +18,8 @@ import android.widget.TextView;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
+import java.util.HashSet;
 
 import dev.q25.trackpad.theme.BB7Theme;
 
@@ -153,8 +155,12 @@ final class BB6NativeQsPanel extends FrameLayout {
         list.removeAllViews();
         rows.clear();
         if (lockscreenMode) {
+            Set<String> available = new HashSet<>();
+            for (NativeQuickSettingsTiles.TileInfo tile : nativeTiles) {
+                if (tile.available) available.add(tile.spec);
+            }
             for (int kind : LockscreenQuickSettingsPolicy.visibleKinds()) {
-                String spec = allowedSpecForKind(kind, nativeTiles);
+                String spec = LockscreenQuickSettingsPolicy.selectNativeSpec(kind, available);
                 NativeQuickSettingsTiles.TileInfo tile = find(nativeTiles, spec);
                 addRow("locked:" + kind, spec, kind, tile,
                         ConnectionControlPolicy.label(kind));
@@ -189,25 +195,6 @@ final class BB6NativeQsPanel extends FrameLayout {
         if (spec == null) return null;
         for (NativeQuickSettingsTiles.TileInfo tile : tiles) {
             if (spec.equals(tile.spec) && tile.available) return tile;
-        }
-        return null;
-    }
-
-    /**
-     * Android 17 may use the combined "internet" tile or separate
-     * "wifi" / "cell" specs. Select only INSTALLED native tiles;
-     * never synthesize separate radio backends or new QS tile instances.
-     */
-    private static String allowedSpecForKind(int kind,
-            List<NativeQuickSettingsTiles.TileInfo> tiles) {
-        if (kind == ConnectionControlPolicy.MOBILE) {
-            if (find(tiles, "cell") != null) return "cell";
-            if (find(tiles, "internet") != null) return "internet";
-        } else if (kind == ConnectionControlPolicy.WIFI) {
-            if (find(tiles, "wifi") != null) return "wifi";
-            if (find(tiles, "internet") != null) return "internet";
-        } else if (kind == ConnectionControlPolicy.BLUETOOTH) {
-            if (find(tiles, "bt") != null) return "bt";
         }
         return null;
     }
