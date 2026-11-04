@@ -31,6 +31,13 @@ Inspected the following LineageOS sources on branch lineage-24.0:
 - https://github.com/LineageOS/android_frameworks_base/blob/lineage-24.0/packages/SystemUI/src/com/android/systemui/qs/pipeline/domain/interactor/CurrentTilesInteractor.kt
 - https://github.com/LineageOS/android_frameworks_base/blob/lineage-24.0/packages/SystemUI/plugin/src/com/android/systemui/plugins/qs/QSTile.java
 
+For the native pipeline, the Vector bridge also observes the verified
+CurrentTilesInteractorImpl directly if QSHostAdapter has not yet supplied
+tiles. This is the same native tile collection, not a duplicated controller.
+Native tile loading can be asynchronous; a brief startup-only retry checks
+for the first populated collection. Logs include host/interactor presence and
+the tile count under the BB6-NativeQS tag.
+
 The old QSTileHost constructor hook is not appropriate for the inspected
 LineageOS source; QSHostAdapter now fronts the QS pipeline.
 
@@ -71,7 +78,7 @@ replace the Vector adapter, not introduce a second tile backend.
     adb shell setprop debug.bb6lockscreen.qs.enabled true
     adb shell am crash com.android.systemui
 
-Expected version: 0.9.48-native-qs-ui-dev (versionCode 78).
+Expected version: 0.9.49-native-qs-pipeline-dev (versionCode 79).
 
 Test native tile state changes, edited ordering, installed third-party tiles,
 keyboard focus, Enter, Menu, Back, touch, and all native action dialogs on
