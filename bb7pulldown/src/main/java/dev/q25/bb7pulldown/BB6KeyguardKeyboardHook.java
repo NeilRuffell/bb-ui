@@ -8,6 +8,7 @@ import android.view.View;
 
 import java.lang.ref.WeakReference;
 import java.lang.reflect.Method;
+import java.lang.reflect.InvocationTargetException;
 
 import de.robv.android.xposed.IXposedHookLoadPackage;
 import de.robv.android.xposed.XC_MethodHook;
@@ -41,6 +42,15 @@ public final class BB6KeyguardKeyboardHook implements IXposedHookLoadPackage {
 
     private static final KeyguardSpacePolicy SPACE_POLICY = new KeyguardSpacePolicy();
     private static WeakReference<Object> nativeManager = new WeakReference<>(null);
+    private static WeakReference<Object> nativeKeyguardInteractor = new WeakReference<>(null);
+    private static WeakReference<Object> nativeDeviceEntry = new WeakReference<>(null);
+    private static WeakReference<Object> nativePrimaryBouncer = new WeakReference<>(null);
+    private static final String KEYGUARD_INTERACTOR =
+            "com.android.systemui.keyguard.domain.interactor.KeyguardKeyEventInteractor";
+    private static final String DEVICE_ENTRY =
+            "com.android.systemui.deviceentry.domain.interactor.DeviceEntryInteractor";
+    private static final String PRIMARY_BOUNCER =
+            "com.android.systemui.bouncer.domain.interactor.PrimaryBouncerInteractor";
     private static ClassLoader systemUiLoader;
 
     @Override
@@ -66,6 +76,10 @@ public final class BB6KeyguardKeyboardHook implements IXposedHookLoadPackage {
             }
         }
 
+        capturePresenter(KEYGUARD_INTERACTOR, lp.classLoader, 0);
+        capturePresenter(DEVICE_ENTRY, lp.classLoader, 1);
+        capturePresenter(PRIMARY_BOUNCER, lp.classLoader, 2);
+
         Class<?> root = XposedHelpers.findClassIfExists(WINDOW_ROOT, lp.classLoader);
         if (root == null) {
             Log.e(TAG, "SystemUI window root absent, cannot intercept Space");
@@ -88,6 +102,34 @@ public final class BB6KeyguardKeyboardHook implements IXposedHookLoadPackage {
         }
     }
 
+    // Constructors are registered before SystemUI creates its Dagger singletons.
+    // Capturing the actual presenters avoids depending on a vendor manager's
+    // public convenience methods, which are absent on the tested Q25 ROM.
+    private static void capturePresenter(String className, ClassLoader cl, int kind) {
+        Class<?> c = XposedHelpers.findClassIfExists(className, cl);
+        if (c == null) {
+            Log.w(TAG, "Native presenter class absent: " + className);
+            return;
+        }
+        try {
+            XposedBridge.hookAllConstructors(c, new XC_MethodHook() {
+                @Override protected void afterHookedMethod(MethodHookParam param) {
+                    if (kind == 0) {
+                        nativeKeyguardInteractor = new WeakReference<>(param.thisObject);
+                    } else if (kind == 1) {
+                        nativeDeviceEntry = new WeakReference<>(param.thisObject);
+                    } else {
+                        nativePrimaryBouncer = new WeakReference<>(param.thisObject);
+                    }
+                    Log.i(TAG, "Captured " + c.getSimpleName());
+                }
+            });
+        } catch (Throwable e) {
+            Log.e(TAG, "Native presenter capture failed: "
+                    + c.getSimpleName() + " " + brief(e));
+        }
+    }
+
     private static boolean interceptSpace(View window, KeyEvent event) {
         if (event.getKeyCode() != KeyEvent.KEYCODE_SPACE || !enabled()) return false;
 
@@ -101,7 +143,7 @@ public final class BB6KeyguardKeyboardHook implements IXposedHookLoadPackage {
         View focused = window.findFocus();
         boolean editing = focused != null && focused.onCheckIsTextEditor();
         NativeTargets targets = getNativeTargets(window);
-        boolean visible = locked && isBouncerShowing(targets.manager);
+        boolean visible = locked && isBouncerShowing(targets);
         int decision = SPACE_POLICY.route(event.getAction(), event.getDownTime(),
                 event.getRepeatCount(), locked, visible, editing);
 
@@ -114,7 +156,9 @@ public final class BB6KeyguardKeyboardHook implements IXposedHookLoadPackage {
         String focusName = focused == null ? "none" : focused.getClass().getSimpleName();
         Log.i(TAG, "Space UP: locked=" + locked + " focus=" + focusName
                 + " manager=" + (targets.manager != null)
-                + " keyguardInteractor=" + (targets.keyguardInteractor != null));
+                + " keyguardInteractor=" + (targets.keyguardInteractor != null)
+                + " deviceEntry=" + (targets.deviceEntry != null)
+                + " primaryBouncer=" + (targets.primaryBouncer != null));
         requestDeviceEntry(window, targets, keyguard);
         return true;
     }
@@ -122,6 +166,8 @@ public final class BB6KeyguardKeyboardHook implements IXposedHookLoadPackage {
     private static final class NativeTargets {
         Object manager;
         Object keyguardInteractor;
+        Object deviceEntry;
+        Object primaryBouncer;
     }
 
     /** Recover native objects from the same dependency graph as SystemUI's
@@ -130,14 +176,19 @@ public final class BB6KeyguardKeyboardHook implements IXposedHookLoadPackage {
     private static NativeTargets getNativeTargets(View root) {
         NativeTargets targets = new NativeTargets();
         targets.manager = nativeManager.get();
+        targets.keyguardInteractor = nativeKeyguardInteractor.get();
+        targets.deviceEntry = nativeDeviceEntry.get();
+        targets.primaryBouncer = nativePrimaryBouncer.get();
         try {
             Object handler = XposedHelpers.getObjectField(root,
                     "windowRootViewKeyEventHandler");
             Object lazy = XposedHelpers.getObjectField(handler,
                     "sysUIKeyEventHandlerLazy");
             Object dispatcher = XposedHelpers.callMethod(lazy, "get");
-            targets.keyguardInteractor = XposedHelpers.getObjectField(dispatcher,
-                    "keyguardKeyEventInteractor");
+            if (targets.keyguardInteractor == null) {
+                targets.keyguardInteractor = XposedHelpers.getObjectField(
+                        dispatcher, "keyguardKeyEventInteractor");
+            }
             if (targets.manager == null) {
                 targets.manager = XposedHelpers.getObjectField(
                         targets.keyguardInteractor, "statusBarKeyguardViewManager");
@@ -150,99 +201,183 @@ public final class BB6KeyguardKeyboardHook implements IXposedHookLoadPackage {
                 Log.e(TAG, "Cannot locate native keyguard dependencies", error);
             }
         }
+        if (targets.keyguardInteractor != null) {
+            if (targets.deviceEntry == null) {
+                targets.deviceEntry = optionalField(
+                        targets.keyguardInteractor, "deviceEntryInteractor");
+            }
+            if (targets.manager == null) {
+                targets.manager = optionalField(
+                        targets.keyguardInteractor, "statusBarKeyguardViewManager");
+            }
+        }
+        if (targets.manager != null) {
+            if (targets.deviceEntry == null) {
+                targets.deviceEntry = resolveLazyField(
+                        targets.manager, "mDeviceEntryInteractorLazy");
+            }
+            if (targets.primaryBouncer == null) {
+                targets.primaryBouncer = optionalField(
+                        targets.manager, "mPrimaryBouncerInteractor");
+            }
+        }
         return targets;
     }
 
-    private static void requestDeviceEntry(View root, NativeTargets targets,
+    private static Object optionalField(Object owner, String field) {
+        if (owner == null) return null;
+        try { return XposedHelpers.getObjectField(owner, field); }
+        catch (Throwable ignored) { return null; }
+    }
+
+    private static Object resolveLazyField(Object owner, String field) {
+        Object lazy = optionalField(owner, field);
+        if (lazy == null) return null;
+        try { return XposedHelpers.callMethod(lazy, "get"); }
+        catch (Throwable ignored) { return null; }
+    }
+
+    private static void requestDeviceEntry(View root, NativeTargets t,
             KeyguardManager keyguard) {
         Boolean scene = isSceneEnabled();
-        Log.i(TAG, "Entry route: scene=" + scene
-                + " manager=" + (targets.manager != null));
+        Log.i(TAG, "Native route scene=" + scene
+                + " deviceEntry=" + (t.deviceEntry != null)
+                + " primaryBouncer=" + (t.primaryBouncer != null)
+                + " manager=" + (t.manager != null));
         String reason = "BB UI physical Space";
 
-        if (Boolean.TRUE.equals(scene)) {
-            Object deviceEntry = null;
-            try {
-                if (targets.keyguardInteractor != null) {
-                    deviceEntry = XposedHelpers.getObjectField(
-                            targets.keyguardInteractor, "deviceEntryInteractor");
-                } else if (targets.manager != null) {
-                    Object lazy = XposedHelpers.getObjectField(
-                            targets.manager, "mDeviceEntryInteractorLazy");
-                    deviceEntry = XposedHelpers.callMethod(lazy, "get");
-                }
-                if (deviceEntry != null) {
-                    // Kotlin @JvmOverloads in LineageOS 24 exposes the
-                    // (String, IKeyguardDismissCallback, boolean) overload.
-                    // true forces the PRIMARY credential challenge, not
-                    // alternate fingerprint bouncer.
-                    try {
-                        XposedHelpers.callMethod(deviceEntry,
-                                "attemptDeviceEntry", reason, null, true);
-                    } catch (NoSuchMethodError missingOverload) {
-                        XposedHelpers.callMethod(deviceEntry,
-                                "attemptDeviceEntry", reason);
-                    }
-                    Log.i(TAG, "Native scene credential entry requested");
-                    return;
-                }
-                Log.e(TAG, "Scene enabled but DeviceEntryInteractor unavailable");
-            } catch (Throwable error) {
-                Log.e(TAG, "Native scene credential entry failed", error);
-            }
-            // The native manager is the compatibility fallback.
-        }
-
-        if (targets.manager == null) {
-            Log.e(TAG, "No native credential entry component available");
+        // DeviceEntryInteractor is the real Scene-mode entry point. If the
+        // vendor has inlined the scene flag, try this when mode is unknown too.
+        if (!Boolean.FALSE.equals(scene) && invokeDeviceEntry(t.deviceEntry, reason)) {
             return;
         }
 
-        int state = readNativeStatusBarState(targets);
-        // Legacy locked shade needs to finish collapsing before showing
-        // the bouncer. ShadeController.collapseShade(true) runs pending
-        // actions even if no collapse is necessary.
-        if (state == SHADE_LOCKED && !Boolean.TRUE.equals(scene)) {
-            try {
-                Object shadeController = targets.keyguardInteractor != null
-                        ? XposedHelpers.getObjectField(
-                            targets.keyguardInteractor, "shadeController")
-                        : XposedHelpers.callMethod(XposedHelpers.getObjectField(
-                            targets.manager, "mShadeController"), "get");
-                Object manager = targets.manager;
-                Runnable displayCredentials = () -> {
-                    if (keyguard.isKeyguardLocked()
-                            && !isBouncerShowing(manager)) {
-                        showLegacyPrimaryBouncer(manager, "BB UI Space after shade collapse");
-                    }
+        int state = readNativeStatusBarState(t);
+        if (state == SHADE_LOCKED && Boolean.FALSE.equals(scene)) {
+            Object shade = t.keyguardInteractor != null
+                    ? optionalField(t.keyguardInteractor, "shadeController")
+                    : resolveLazyField(t.manager, "mShadeController");
+            if (shade != null) {
+                Runnable displayAfterCollapse = () -> {
+                    if (keyguard.isKeyguardLocked()) requestPrimaryBouncer(t, reason);
                 };
-                XposedHelpers.callMethod(shadeController, "addPostCollapseAction",
-                        displayCredentials);
-                XposedHelpers.callMethod(shadeController, "collapseShade", true);
-                Log.i(TAG, "Legacy locked shade collapse + native bouncer queued");
-                return;
-            } catch (Throwable error) {
-                Log.e(TAG, "Legacy locked shade collapse failed", error);
+                if (invokeNative(shade, "addPostCollapseAction", displayAfterCollapse)
+                        && invokeNative(shade, "collapseShade", true)) {
+                    Log.i(TAG, "Native locked shade collapse and bouncer queued");
+                    return;
+                }
             }
         }
 
-        showLegacyPrimaryBouncer(targets.manager, reason);
+        if (requestPrimaryBouncer(t, reason)) return;
+        if (Boolean.FALSE.equals(scene) && invokeDeviceEntry(t.deviceEntry, reason)) {
+            return;
+        }
+        Log.e(TAG, "Native credential API unavailable. deviceEntry="
+                + methods(t.deviceEntry) + " primary=" + methods(t.primaryBouncer)
+                + " manager=" + methods(t.manager));
     }
 
-    private static void showLegacyPrimaryBouncer(Object manager, String reason) {
-        try {
-            XposedHelpers.callMethod(manager, "showPrimaryBouncer", true, reason);
-            Log.i(TAG, "Native primary credential bouncer requested");
-        } catch (Throwable primaryError) {
-            Log.w(TAG, "Primary bouncer entry unavailable; trying native showBouncer",
-                    primaryError);
-            try {
-                XposedHelpers.callMethod(manager, "showBouncer", true, reason);
-                Log.i(TAG, "Native bouncer requested");
-            } catch (Throwable error) {
-                Log.e(TAG, "Unable to request native bouncer", error);
+    private static boolean invokeDeviceEntry(Object target, String reason) {
+        if (target == null) return false;
+        if (invokeNative(target, "attemptDeviceEntry", reason, null, true)) {
+            Log.i(TAG, "Native DeviceEntryInteractor.attemptDeviceEntry invoked");
+            return true;
+        }
+        if (invokeNative(target, "attemptDeviceEntry", reason)) {
+            Log.i(TAG, "Native DeviceEntryInteractor one-argument entry invoked");
+            return true;
+        }
+        return false;
+    }
+
+    private static boolean requestPrimaryBouncer(NativeTargets t, String reason) {
+        if (invokeNative(t.primaryBouncer, "show", true, reason)) {
+            Log.i(TAG, "Native PrimaryBouncerInteractor.show invoked");
+            return true;
+        }
+        if (invokeNative(t.manager, "showPrimaryBouncer", true, reason)) {
+            Log.i(TAG, "Native manager primary bouncer invoked");
+            return true;
+        }
+        if (invokeNative(t.manager, "showBouncer", true, reason)) {
+            Log.i(TAG, "Native manager bouncer invoked");
+            return true;
+        }
+        return false;
+    }
+
+    /** Reflect the exact runtime method, not an assumed XposedHelpers match.
+     * Q25's SystemUI exposes a different method set from upstream LineageOS.
+     */
+    private static boolean invokeNative(Object instance, String name, Object... args) {
+        if (instance == null) return false;
+        for (Class<?> c = instance.getClass(); c != null; c = c.getSuperclass()) {
+            for (Method method : c.getDeclaredMethods()) {
+                if (!method.getName().equals(name)
+                        || !signatureMatches(method.getParameterTypes(), args)) continue;
+                try {
+                    method.setAccessible(true);
+                    Object result = method.invoke(instance, args);
+                    if (result instanceof Boolean && !((Boolean) result)) {
+                        Log.w(TAG, name + " returned false on "
+                                + instance.getClass().getSimpleName());
+                        return false;
+                    }
+                    return true;
+                } catch (Throwable error) {
+                    Log.e(TAG, name + " failed on " + instance.getClass().getSimpleName()
+                            + ": " + brief(error));
+                    return false;
+                }
             }
         }
+        return false;
+    }
+
+    private static boolean signatureMatches(Class<?>[] types, Object[] args) {
+        if (types.length != args.length) return false;
+        for (int i = 0; i < args.length; i++) {
+            if (args[i] == null) {
+                if (types[i].isPrimitive()) return false;
+            } else if (types[i] == boolean.class) {
+                if (!(args[i] instanceof Boolean)) return false;
+            } else if (types[i] == int.class) {
+                if (!(args[i] instanceof Integer)) return false;
+            } else if (!types[i].isInstance(args[i])) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** A compact one-line method inventory for real-device failures. */
+    private static String methods(Object instance) {
+        if (instance == null) return "not captured";
+        StringBuilder summary = new StringBuilder(
+                instance.getClass().getSimpleName()).append('[');
+        int count = 0;
+        for (Class<?> c = instance.getClass(); c != null && count < 12;
+                c = c.getSuperclass()) {
+            for (Method method : c.getDeclaredMethods()) {
+                String name = method.getName().toLowerCase(java.util.Locale.ROOT);
+                if (name.contains("show") || name.contains("bouncer")
+                        || name.contains("entry")) {
+                    if (count++ > 0) summary.append(',');
+                    summary.append(method.getName()).append('(')
+                            .append(method.getParameterTypes().length).append(')');
+                    if (count >= 12) break;
+                }
+            }
+        }
+        return summary.append(']').toString();
+    }
+
+    private static String brief(Throwable error) {
+        if (error instanceof InvocationTargetException && error.getCause() != null) {
+            error = error.getCause();
+        }
+        return error.getClass().getSimpleName() + ": " + error.getMessage();
     }
 
     private static Boolean isSceneEnabled() {
@@ -285,7 +420,16 @@ public final class BB6KeyguardKeyboardHook implements IXposedHookLoadPackage {
                             "statusBarStateController")
                     : XposedHelpers.getObjectField(targets.manager,
                             "mStatusBarStateController");
-            Object state = XposedHelpers.callMethod(controller, "getState");
+            Object state = null;
+            if (controller != null) {
+                for (Method m : controller.getClass().getMethods()) {
+                    if (m.getName().equals("getState")
+                            && m.getParameterTypes().length == 0) {
+                        state = m.invoke(controller);
+                        break;
+                    }
+                }
+            }
             return state instanceof Integer ? (Integer) state : -1;
         } catch (Throwable error) {
             Log.w(TAG, "Could not read native status bar state", error);
@@ -293,7 +437,14 @@ public final class BB6KeyguardKeyboardHook implements IXposedHookLoadPackage {
         }
     }
 
-    private static boolean isBouncerShowing(Object manager) {
+    private static boolean isBouncerShowing(NativeTargets t) {
+        if (t.primaryBouncer != null) {
+            Boolean primary = queryBoolean(t.primaryBouncer, "isFullyShowing");
+            if (Boolean.TRUE.equals(primary)) return true;
+            primary = queryBoolean(t.primaryBouncer, "isInTransit");
+            if (Boolean.TRUE.equals(primary)) return true;
+        }
+        Object manager = t.manager;
         if (manager == null) return false;
         for (String method : new String[] {
                 "isBouncerShowing", "primaryBouncerIsOrWillBeShowing",
@@ -311,10 +462,12 @@ public final class BB6KeyguardKeyboardHook implements IXposedHookLoadPackage {
                 continue;
             }
             try {
-                Object value = XposedHelpers.callMethod(instance, name);
+                method.setAccessible(true);
+                Object value = method.invoke(instance);
                 return value instanceof Boolean ? (Boolean) value : null;
             } catch (Throwable error) {
-                Log.w(TAG, "Native state query failed: " + name, error);
+                Log.w(TAG, "Native state query failed: " + name
+                        + " " + brief(error));
                 return null;
             }
         }
