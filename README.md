@@ -1,3 +1,25 @@
+# Native BBOS6 lock-screen ROM integration (experimental)
+
+**Branch:** `feat/bb6-native-lineage24` — separate from the Vector APK
+and from `master`.
+
+The native rootless LineageOS 24 source integration is under
+[`rom/lineage-24.0/`](rom/lineage-24.0/README.md).
+It introduces an interactive-only `Bb6KeyguardBlueprint`, SystemUI-owned
+time/date and live per-app notification counters, and explicit native
+AOD reference cleanup. The original status bar remains the only carrier,
+battery and signal display. Stock clock/date/notification sections are
+**not constructed** in the BB6 blueprint; AOD and the native shade switch
+back to their existing original blueprint.
+
+The source patcher was checked against the official LineageOS 24 files
+through GitHub Actions. **No full Q25 ROM compilation or device test has
+yet been performed.** The previously working APK implementation of
+Space-to-unlock stays on `master` unchanged. Do not merge this development
+branch or flash a ROM based only on source-validation tests.
+
+---
+
 # BBOS6 keyguard Space-to-credential entry
 
 **Branch:** `feat/bb6-keyguard-keyboard-entry` (not merged into `master`).
