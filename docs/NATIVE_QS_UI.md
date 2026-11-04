@@ -59,6 +59,38 @@ no Xposed imports. Both unlocked and locked surfaces use the same class.
 The old BB6ConnectionsPanel and NativeConnectionControls implementations
 were retired. ConnectionControlPolicy now only defines locked row labels.
 
+## Single native notification presentation on BB6 lock screen
+
+LineageOS 24's `super_notification_shade.xml` has
+`shared_notification_container`, but its `status_bar_expanded.xml` also
+includes an independent `notification_stack_scroller` inside
+`notification_panel/notification_container_parent`. The previous code
+detached only the shared container, leaving the actual stock notification list
+capable of drawing behind the BB6 lock-screen header.
+
+`BB6LockScreenHook` now disables presentation of both native hosts only during
+the interactive BB6 keyguard. The standalone native stack scroller stays
+attached (visibility GONE rather than removing its controller-owned View) and
+its previous visibility is restored on exit. The original shared container
+continues to be restored at its original parent/index on keyguard exit.
+
+Native heads-up banners are not owned by either stack host. The bridge also
+registers a normal `NotificationInterruptSuppressor` through LineageOS's
+`VisualInterruptionDecisionProviderImpl` extension. It returns true ONLY for
+`suppressAwakeHeadsUp` during active BB6 keyguard composition. Other
+interruptions, bubbles, calls/alarms, notification delivery, ranking, native
+notification actions, locked security, and the unlocked shade are not directly
+suppressed. The extension is dynamically looked up and explicitly logs when
+unavailable in a specific ROM.
+
+Both decisions use `BB6LockScreenHook.isInteractiveBb6LockscreenActive()` to
+avoid state drift. This is a single Android notification pipeline with separate
+native/BB presentations, never a second notification backend.
+
+Hardware verification is still required; Gradle test success does not prove
+Q25 rendering or interception. Useful log tags: `BB6-LockScreen` and
+`BB6-NativeQS`.
+
 ## Q25 Bluetooth dialog crash guard
 
 The Q25 LineageOS 24 Bluetooth details dialog uses an AndroidX
@@ -109,7 +141,7 @@ replace the Vector adapter, not introduce a second tile backend.
     adb shell setprop debug.bb6lockscreen.qs.enabled true
     adb shell am crash com.android.systemui
 
-Expected version: 0.9.52-native-bt-focus-guard-dev (versionCode 82).
+Expected version: 0.9.53-lockscreen-native-notif-ownership-dev (versionCode 83).
 
 Test native tile state changes, edited ordering, installed third-party tiles,
 keyboard focus, Enter, Menu, Back, touch, and all native action dialogs on
