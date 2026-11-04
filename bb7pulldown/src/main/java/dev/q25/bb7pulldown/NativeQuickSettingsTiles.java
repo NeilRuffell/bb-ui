@@ -90,6 +90,9 @@ final class NativeQuickSettingsTiles {
     }
 
     static synchronized void install(ClassLoader loader) {
+        // Install the narrowly scoped ROM crash guard independently of
+        // which QS pipeline source is available.
+        NativeBluetoothDialogGuard.install(loader);
         if (installed) return;
         // Both types are present in inspected LineageOS 24 sources.
         // The Compose QS grid reads CurrentTilesInteractor directly; it must
