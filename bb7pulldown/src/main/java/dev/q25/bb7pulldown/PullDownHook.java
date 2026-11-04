@@ -451,10 +451,12 @@ public final class PullDownHook implements IXposedHookLoadPackage {
             dismissShadeImmediately();
             return;
         }
-        // Preserve the existing overlay/dialog stacking behavior for native
-        // tile actions. SystemUI itself owns any dialog/unlock flow.
+        // Dispatch while the native listening session is still active.
+        // Then remove this custom shade so any SystemUI-owned dialog is not
+        // covered by the BB window; no local tile or radio action is created.
+        boolean accepted = NativeQuickSettingsTiles.activate(spec, action);
         dismissShadeImmediately();
-        if (!NativeQuickSettingsTiles.activate(spec, action)) {
+        if (!accepted) {
             Log.w(TAG, "Installed native QS tile refused action: " + spec
                     + " (" + action + ")");
         }
