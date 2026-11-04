@@ -16,8 +16,10 @@ import de.robv.android.xposed.XposedHelpers;
 final class NativeQuickSettingsTiles {
     private static final String TAG = "BB6-Connections";
     private static volatile WeakReference<Object> host = new WeakReference<>(null);
+    private static boolean installed;
 
-    static void install(ClassLoader loader) {
+    static synchronized void install(ClassLoader loader) {
+        if (installed) return;
         Class<?> type = XposedHelpers.findClassIfExists(
                 "com.android.systemui.qs.QSTileHost", loader);
         if (type == null) {
@@ -31,6 +33,7 @@ final class NativeQuickSettingsTiles {
                     Log.i(TAG, "Native QS tile host captured");
                 }
             });
+            installed = true;
         } catch (Throwable error) {
             Log.w(TAG, "Cannot observe native QS tile host", error);
         }
