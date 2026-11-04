@@ -1,7 +1,7 @@
 # BBOS6-style lock screen (development branch)
 
 **Branch:** `feat/bb6-lockscreen-banner`  
-**APK:** `0.9.40-bb6-native-chrome-composition-dev`  
+**APK:** `0.9.41-bb6-aod-layer-crashfix-dev`  
 **Status:** Test build; not merged into `master`.
 
 The interactive lock screen uses our BlackBerry 6-inspired operator, date,
@@ -23,6 +23,16 @@ while the BB6 interactive keyguard is active:
 - The complete native notification stack and its empty-frame container
 - The generic swipe-to-unlock hint is stopped at its indication producer;
   other native charging, biometric, security and accessibility messages remain
+
+**Crash correction (Q25, November 3):** 0.9.40 detached a view which
+`AodBurnInLayer` still tracked via `ConstraintHelper.getReferencedIds()`.
+The next `Layer.transform()` dereferenced a null View and crashed SystemUI.
+0.9.41 verifies the native burn-in references before any detach; if the
+view is referenced, it calls the native `removeView(View)` on the layer
+**before** removing it from the layout, and restores `addView(View)`
+**after** reattachment. A missing/unreadable layer or unresolved child
+reference cancels that removal rather than risking another crash. The
+actual AOD listener and required empty burn-in anchor are untouched.
 
 Original view instances, parents and layout positions are retained and
 restored for AOD, password/PIN/pattern bouncer, shade or unlocked state.
