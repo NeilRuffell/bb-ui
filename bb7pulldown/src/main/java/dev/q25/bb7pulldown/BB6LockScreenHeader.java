@@ -12,19 +12,23 @@ import android.view.ViewGroup;
 import android.widget.HorizontalScrollView;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.TextClock;
 import android.widget.TextView;
 
 import java.util.Map;
 
 /**
- * BBOS6 notification indicator strip. Date, time and carrier come from the
- * native SystemUI keyguard and are NOT duplicated in this display-only view.
+ * BBOS6-inspired, display-only banner in the existing SystemUI keyguard view.
+ * Date/time and notification icons/counts on the native keyguard. The
+ * native status bar remains sole owner of carrier and system status.
  *
- * Future native ROM implementation will replace the keyguard blueprint
- * construction; the Vector prototype must not detach native clock/AOD views.
+ * No password field, custom window, tap handler or keyboard focus is added.
+ * The native status bar keeps ownership of radios and battery indications.
  */
 final class BB6LockScreenHeader extends LinearLayout {
     private static final int WHITE = Color.WHITE;
+    private static final int RULE = 0x75ffffff;
+    private final LinearLayout clockRow;
     private final HorizontalScrollView notificationScroll;
     private final LinearLayout notificationRow;
 
@@ -39,6 +43,46 @@ final class BB6LockScreenHeader extends LinearLayout {
         setPadding(dp(12), dp(4), dp(12), dp(5));
         setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
                 new int[]{0xdf111821, 0xbe131b25, 0x99131b25}));
+
+        clockRow = new LinearLayout(context);
+        clockRow.setOrientation(HORIZONTAL);
+        clockRow.setGravity(Gravity.CENTER_VERTICAL);
+        clockRow.setFocusable(false);
+        addView(clockRow, new LinearLayout.LayoutParams(
+                LayoutParams.MATCH_PARENT, dp(49)));
+
+        TextClock date = new TextClock(context);
+        date.setFormat12Hour("EEE, MMM d");
+        date.setFormat24Hour("EEE, MMM d");
+        date.setTextSize(17f);
+        date.setTypeface(Typeface.DEFAULT, Typeface.NORMAL);
+        date.setTextColor(WHITE);
+        date.setSingleLine(true);
+        date.setEllipsize(TextUtils.TruncateAt.END);
+        date.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
+        date.setFocusable(false);
+        date.setShadowLayer(dp(2), 0, dp(1), 0x99000000);
+        clockRow.addView(date, new LinearLayout.LayoutParams(
+                0, LayoutParams.MATCH_PARENT, 1f));
+
+        TextClock clock = new TextClock(context);
+        clock.setFormat12Hour("h:mm");
+        clock.setFormat24Hour("HH:mm");
+        clock.setTextSize(34f);
+        clock.setTypeface(Typeface.DEFAULT, Typeface.NORMAL);
+        clock.setTextColor(WHITE);
+        clock.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
+        clock.setSingleLine(true);
+        clock.setFocusable(false);
+        clock.setShadowLayer(dp(2), 0, dp(1), 0x99000000);
+        clockRow.addView(clock, new LinearLayout.LayoutParams(
+                LayoutParams.WRAP_CONTENT, LayoutParams.MATCH_PARENT));
+
+        View line = new View(context);
+        line.setBackgroundColor(RULE);
+        line.setFocusable(false);
+        addView(line, new LinearLayout.LayoutParams(
+                LayoutParams.MATCH_PARENT, dp(1)));
 
         notificationScroll = new HorizontalScrollView(context);
         notificationScroll.setHorizontalScrollBarEnabled(false);
@@ -57,6 +101,18 @@ final class BB6LockScreenHeader extends LinearLayout {
         addView(notificationScroll, new LinearLayout.LayoutParams(
                 LayoutParams.MATCH_PARENT, dp(31)));
         notificationScroll.setVisibility(GONE);
+        clockRow.setVisibility(GONE);
+    }
+
+    /**
+     * The SystemUI blueprint owns the stock clock/date sections. Show our
+     * BB6 clock/date ONLY when the alternate native blueprint has actually
+     * been installed and selected; otherwise use indicator-only fallback.
+     */
+    void setBb6CompositionActive(boolean active) {
+        clockRow.setVisibility(active ? VISIBLE : GONE);
+        // No second carrier name: native KeyguardStatusBarView owns the
+        // sole network operator, signal, battery and privacy indicators.
     }
 
     void showCounts(Map<String, Integer> counts) {
@@ -91,14 +147,9 @@ final class BB6LockScreenHeader extends LinearLayout {
             }
             indicator.addView(icon, new LinearLayout.LayoutParams(dp(20), dp(20)));
 
-            TextView number = new TextView(context);
-            number.setTextSize(14f);
-            number.setTextColor(WHITE);
+            TextView number = text(14f, WHITE);
             number.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
             number.setGravity(Gravity.CENTER_VERTICAL);
-            number.setIncludeFontPadding(false);
-            number.setFocusable(false);
-            number.setClickable(false);
             number.setText(entry.getValue() > 99 ? "99+" : String.valueOf(entry.getValue()));
             LinearLayout.LayoutParams numberParams = new LinearLayout.LayoutParams(
                     LayoutParams.WRAP_CONTENT, LayoutParams.MATCH_PARENT);
@@ -108,6 +159,16 @@ final class BB6LockScreenHeader extends LinearLayout {
         }
         notificationScroll.setVisibility(
                 notificationRow.getChildCount() == 0 ? GONE : VISIBLE);
+    }
+
+    private TextView text(float sp, int color) {
+        TextView value = new TextView(getContext());
+        value.setTextSize(sp);
+        value.setTextColor(color);
+        value.setFocusable(false);
+        value.setClickable(false);
+        value.setIncludeFontPadding(false);
+        return value;
     }
 
     private int dp(float value) {
