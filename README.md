@@ -1,6 +1,6 @@
 # BBOS6-style lock screen (development branch)
 
-**Branch:** `feat/bb6-lockscreen-banner` — **APK:** `0.9.38-bb6-lockscreen-banner-dev`.
+**Branch:** `feat/bb6-lockscreen-banner` — **APK:** `0.9.39-bb6-no-native-lock-notifications-dev`.
 Not merged into `master`; physical-device visual verification is still required.
 
 This feature follows the original BlackBerry 6 top banner: wireless operator
@@ -15,6 +15,32 @@ and renders only package icons and counts, never notification text or sender
 information. Entries marked `VISIBILITY_SECRET`, hidden by native ranking,
 or excluded by Android's lock-screen-notification setting are not shown.
 Ongoing foreground-service notices are excluded from the alert strip.
+
+## Native lock-screen notification removal
+
+**BB6 lock screen:** Native Android notification cards, notification shelves,
+empty-shade artwork and the stock notification list's entire frame are removed
+from layout. The native `shared_notification_container` is set to
+`View.GONE`, **not** `View.INVISIBLE`, so it reserves no space and neither
+displays nor accepts focus from its notification descendants.
+
+**Android notification shade:** The container is the same one SystemUI uses
+after unlocking. It is retained, never deleted, never unregistered, and
+restored for `StatusBarState.SHADE` (unlocked) and
+`StatusBarState.SHADE_LOCKED` (expanded shade while still locked).
+The app-icon/count row in our BB6 header continues receiving live
+notifications from SystemUI's existing listener.
+
+The state transitions are observed at Q25's verified
+`StatusBarStateControllerImpl.setState(int, boolean)` method.
+A lightweight native layout callback reasserts `GONE` only when the
+SystemUI binder has reset visibility, avoiding a global View hook or
+a timer/polling loop. All stock notifications and the bouncer remain
+registered and untouched internally; only lock-screen presentation changes.
+
+Test the lockscreen (with both zero and multiple notifications), unlocked
+shade, locked expanded shade, Space-to-password, and returning to lockscreen
+after unlocking. There must be **no blank native notification rectangle**.
 
 ## Integration
 
