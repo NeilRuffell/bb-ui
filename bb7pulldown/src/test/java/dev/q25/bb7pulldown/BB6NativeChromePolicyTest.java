@@ -19,6 +19,17 @@ public class BB6NativeChromePolicyTest {
                 true, true, LockscreenNativeStackPolicy.KEYGUARD, true));
     }
 
+    @Test public void suppressesOnlyDuplicateAwakeHeadsUpDuringBb6Lockscreen() {
+        assertTrue(BB6NativeChromePolicy.suppressStockInterruption(
+                "suppressAwakeHeadsUp", true));
+        assertFalse(BB6NativeChromePolicy.suppressStockInterruption(
+                "suppressAwakeHeadsUp", false));
+        assertFalse(BB6NativeChromePolicy.suppressStockInterruption(
+                "suppressAwakeInterruptions", true));
+        assertFalse(BB6NativeChromePolicy.suppressStockInterruption(
+                "suppressInterruptions", true));
+    }
+
     @Test public void suppressesOnlyPlainDefaultSwipeInstruction() {
         String nativePrompt = "Swipe up to unlock";
         assertTrue(BB6NativeChromePolicy.redundantSwipeHint(
