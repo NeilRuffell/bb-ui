@@ -13,6 +13,15 @@ final class BB6NativeChromePolicy {
                 && LockscreenNativeStackPolicy.hideNativeStack(locked, statusBarState);
     }
 
+    /**
+     * Only native awake heads-up interruptions duplicate the interactive
+     * BB6 lock-screen presentation. Never block bubbles, pulses, or the
+     * underlying notification pipeline.
+     */
+    static boolean suppressStockInterruption(String callback, boolean bb6Active) {
+        return bb6Active && "suppressAwakeHeadsUp".equals(callback);
+    }
+
     /** Suppress only the stock generic swipe instruction at its producer.
      * Charging, accessibility, biometric state and security alerts pass.
      */
