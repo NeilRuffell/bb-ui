@@ -9,7 +9,19 @@ package dev.q25.bb7pulldown;
  * showing, and there is NEVER a Settings activity fallback while locked.
  */
 final class LockscreenQuickSettingsPolicy {
+    // Explicit separate view allowlist. Increasing the full QS COUNT in the
+    // future must not silently expand the locked screen's capabilities.
+    private static final int[] LOCKED_KINDS = {
+            ConnectionControlPolicy.MOBILE,
+            ConnectionControlPolicy.WIFI,
+            ConnectionControlPolicy.BLUETOOTH
+    };
+
     private LockscreenQuickSettingsPolicy() {}
+
+    static int[] visibleKinds() {
+        return LOCKED_KINDS.clone();
+    }
 
     static boolean mayShow(boolean locked, boolean interactive, boolean dozing,
             boolean bouncerShowing, boolean bb6BlueprintApplied, int statusBarState) {
@@ -19,9 +31,10 @@ final class LockscreenQuickSettingsPolicy {
     }
 
     static boolean isAllowedControl(int kind) {
-        return kind == ConnectionControlPolicy.MOBILE
-                || kind == ConnectionControlPolicy.WIFI
-                || kind == ConnectionControlPolicy.BLUETOOTH;
+        for (int allowed : LOCKED_KINDS) {
+            if (kind == allowed) return true;
+        }
+        return false;
     }
 
     static boolean mayActivate(int kind, boolean mayShowPanel) {
