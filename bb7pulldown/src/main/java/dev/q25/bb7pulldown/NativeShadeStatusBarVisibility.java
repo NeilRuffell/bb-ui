@@ -34,6 +34,9 @@ final class NativeShadeStatusBarVisibility {
     private static volatile boolean bbMounted;
     private static volatile Boolean lastNativeVisible;
     private static volatile boolean loggedOverride;
+    // Distinguish a direct BB UI policy write from a real native Flow
+    // emission, so rollback can restore the original native decision.
+    private static final ThreadLocal<Boolean> ownWrite = new ThreadLocal<>();
     private static boolean installed;
 
     private NativeShadeStatusBarVisibility() {}
@@ -53,7 +56,9 @@ final class NativeShadeStatusBarVisibility {
                     if (param.args.length < 1 || !(param.args[0] instanceof Boolean)
                             || param.thisObject != targetState.get()) return;
                     boolean nativeVisible = (Boolean) param.args[0];
-                    lastNativeVisible = nativeVisible;
+                    if (!Boolean.TRUE.equals(ownWrite.get())) {
+                        lastNativeVisible = nativeVisible;
+                    }
                     if (bbMounted) {
                         param.args[0] = NativeStatusBarVisibilityPolicy.isStockShadeVisible(
                                 nativeVisible, true);
@@ -90,7 +95,7 @@ final class NativeShadeStatusBarVisibility {
             Object current = XposedHelpers.callMethod(state, "getValue");
             if (current instanceof Boolean) lastNativeVisible = (Boolean) current;
             Log.i(TAG, "Captured actual native status-bar visibility StateFlow");
-            if (bbMounted) XposedHelpers.callMethod(state, "setValue", Boolean.FALSE);
+            if (bbMounted) writeValue(state, Boolean.FALSE);
         } catch (Throwable error) {
             Log.w(TAG, "Unable to capture native visibility state", error);
         }
@@ -123,6 +128,15 @@ final class NativeShadeStatusBarVisibility {
         return null;
     }
 
+    private static void writeValue(Object state, Boolean value) {
+        ownWrite.set(Boolean.TRUE);
+        try {
+            XposedHelpers.callMethod(state, "setValue", value);
+        } finally {
+            ownWrite.remove();
+        }
+    }
+
     static void onBbShadeMountChanged(boolean mounted) {
         bbMounted = mounted;
         Object state = targetState.get();
@@ -136,13 +150,13 @@ final class NativeShadeStatusBarVisibility {
                 // enable the native status bar above BB UI.
                 Object value = XposedHelpers.callMethod(state, "getValue");
                 if (value instanceof Boolean) lastNativeVisible = (Boolean) value;
-                XposedHelpers.callMethod(state, "setValue", Boolean.FALSE);
+                writeValue(state, Boolean.FALSE);
             } else {
                 // Do not leave SystemUI's statusbar visibility altered after
                 // closing BB UI, screen-off, or a failed native attach.
                 Boolean original = lastNativeVisible;
                 if (original != null) {
-                    XposedHelpers.callMethod(state, "setValue", original);
+                    writeValue(state, original);
                 }
             }
         } catch (Throwable error) {
