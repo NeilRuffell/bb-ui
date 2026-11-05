@@ -139,6 +139,12 @@ public final class PullDownHook implements IXposedHookLoadPackage {
     @Override
     public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lp) {
         if (!PACKAGE.equals(lp.packageName) || !PACKAGE.equals(lp.processName)) return;
+        // Capture the native status-bar visibility interactor as early as
+        // possible during SystemUI startup. Installing this only after the
+        // other BB hooks missed Q25's already constructed flow instance.
+        if (NativeShadeHostBridge.requested()) {
+            NativeShadeStatusBarVisibility.install(lp.classLoader);
+        }
         // Colour icons have their own independent rollback property, even when
         // the custom BB7 shade is disabled.
         NativeStatusBarColorIcons.install(lp.classLoader);
