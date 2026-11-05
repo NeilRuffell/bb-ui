@@ -101,6 +101,8 @@ public final class PullDownHook implements IXposedHookLoadPackage {
     private static final ShadeUiController NAVIGATION = new ShadeUiController(
             new ShadeUiController.Listener() {
                 @Override public void onStatusFocusChanged(int zone) {
+                    TwoColumnPanel activePanel = panel;
+                    if (activePanel != null) activePanel.refreshAppIconFocus();
                     updateStatusAppearance();
                 }
 
