@@ -361,3 +361,54 @@ The above states are test targets, not guaranteed until device verified.
 
 Rollback remains: set debug.bb7pulldown.native_shade.enabled=false
 and restart com.android.systemui. Never merge until Q25 verified.
+
+## Native status-bar content decision without StateFlow capture — 0.9.82
+
+Q25 screenshot and repeated runtime logs on 0.9.81 confirmed that the
+39-pixel status-bar band and BB blue focus styling were correct but the real
+clock, notification icons and network indicators were still invisible:
+
+    BB7-StatusBar: Native status-bar visibility flow NOT CAPTURED
+
+The previous native visibility hook was therefore nonfunctional. Remove its
+StateFlow instance-capture logic rather than adding another workaround.
+
+The actual Q25 SystemUI APK (classes2.dex) defines both compiled Kotlin
+visibility combiners below, with invokeSuspend(Object): Object returning
+boxed Boolean (confirmed by reading their compiled method instructions):
+
+    StatusBarVisibilityInteractor$isHomeScreenStatusBarAllowedLegacy$1
+    StatusBarVisibilityInteractor$isHomeStatusBarAllowedByScene$1
+
+NativeShadeStatusBarVisibility now hooks those exact compiled Boolean
+availability decisions. Only when the BB host is actually mounted in the
+native NotificationShadeWindowView is a false home-status-bar decision
+converted to true. Both the legacy and scene-based paths are covered.
+All other system status bar visibility logic, including clock placement,
+notification icon filtering, status icon policies and keyguard controls,
+remains stock SystemUI. When the BB host is removed, the hooks leave
+native decisions unmodified. **No Flow object mutation or capture is
+necessary.** The same policy should be implemented directly in
+StatusBarVisibilityInteractor when porting BB UI into the ROM.
+
+### Q25 runtime verification
+
+    adb -s 202512003630 logcat -d -s \
+      'BB7-StatusBar:V' 'BB7-NativeShade:V' '*:S' | tail -80
+
+Expected registration:
+
+    Q25 native status-bar content decisions hooked (legacy and scene; no StateFlow capture)
+
+Expected after opening a BB shade:
+
+    Retained genuine home status-bar content in legacy shade
+
+Or the corresponding scene shade message. The previous
+'visibility flow NOT CAPTURED' warning should no longer appear.
+Test notification and QS pages, trackpad-selected status-bar focus,
+full status icon contents, Home, lock/unlock and shade close. CI compilation
+is not evidence of runtime visual success.
+
+Rollback remains debug.bb7pulldown.native_shade.enabled=false with SystemUI
+restart. This is a separate test branch; do not merge until verified.
