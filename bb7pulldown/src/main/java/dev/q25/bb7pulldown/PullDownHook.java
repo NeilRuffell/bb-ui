@@ -144,6 +144,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
         NativeStatusBarColorIcons.install(lp.classLoader);
         // Popup presentation only; BB shade and its notification actions are untouched.
         NativeSimpleHeadsUp.install(lp.classLoader);
+        NativeSquareHeadsUpCorners.install(lp.classLoader);
 
         if (!enabled()) {
             Log.i(TAG, "Disabled by " + ENABLE_PROP + "; stock status bar retained");

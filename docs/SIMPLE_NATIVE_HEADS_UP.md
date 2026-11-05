@@ -94,3 +94,48 @@ Existing BB shade and native full-colour status-bar icons remain enabled.
 6. Notification updates and successive popups do not restore removed controls.
 7. Locked BB6 screen, AOD, media notifications, app-provided custom RemoteViews and multiple notification groups retain native stability.
 8. Switch property false and restart SystemUI: stock popup controls return.
+
+
+## Square popup corners (version 0.9.73)
+
+The `NativeSquareHeadsUpCorners` Vector hook removes the corner radius of
+**pinned native heads-up popups only**. It is independent of reply/action
+simplification. Ordinary notification shade rows and BB UI's custom shade
+are not altered.
+
+The Q25 compiled APK exposes:
+
+- `ActivatableNotificationView.getClipPath(boolean): Path`, used by the
+  native heads-up outline/clip
+- `NotificationBackgroundView.setRadius(float, float)`, controlling
+  its background/blur drawable corners
+- `ExpandableNotificationRow.isPinned()`, identifying the popup
+- `ExpandableNotificationRow.applyRoundnessAndInvalidate()`, for
+  updating the background when SystemUI recalculates its roundness
+
+When a row is pinned, the hook retains the bounds of the native clip path
+but replaces rounded edges with a rectangle, and sets the popup
+background's top/bottom radii to zero. Non-pinned rows run stock code.
+No notification action, gesture, dismissal or shade implementation changes.
+
+### Independent rollback (stock rounded popup corners)
+
+```sh
+adb -s 202512003630 shell setprop debug.bb7pulldown.headsup_square.enabled false
+adb -s 202512003630 shell am crash com.android.systemui
+```
+
+This property defaults to true. The native popup simplification and the BB
+shade remain unaffected.
+
+### Test
+
+Install the APK as described above from this branch, then confirm:
+1. Pinned popup has four square corners.
+2. Popup tap/swipe interactions and notification updates work normally.
+3. BB notification shade remains unchanged.
+4. After unpin/dismiss, normal notification-row roundness is restored.
+
+Diagnostic lines use `BB7-HeadsUp`, including
+`Native popup-only square-corner hooks registered` and
+`Applied square corners to first pinned heads-up popup`.
