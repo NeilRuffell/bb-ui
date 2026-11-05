@@ -3,7 +3,7 @@
 **Status:** Phase 1 complete in source; Q25 hardware test pending.
 **Branch:** feat/native-bb-shade-host (not merged)
 **Base:** feat/q25-simple-heads-up-notifications, commit 590a6d2
-**Version:** 0.9.77-native-window-root-shade-q25-dev
+**Version:** 0.9.78-native-shade-statusbar-q25-dev
 
 ## Objective
 
@@ -188,3 +188,58 @@ clicks, in-shade reply/actions, QS, trackpad, Home and lock/unlock.
 If touch or keyguard interaction regresses, use the existing independent
 `debug.bb7pulldown.native_shade.enabled false` property and restart
 `com.android.systemui`. The tested prior BB overlay stays available.
+
+## Original status-bar visibility, version 0.9.78
+
+### Device observation
+With BB-UI v0.9.77 mounted above the native stack, the top reserved
+status-bar area remained but its clock/icons were invisible during the shade.
+The BB content itself and trackpad interaction worked.
+
+### Verified cause and native fix
+LineageOS 24 StatusBarVisibilityInteractor intentionally hides its
+normal status bar once shade expansion reaches 40%:
+shadeInteractor.anyExpansion.map { it >= 0.4 }.
+
+This is independent of BB-UI's opaque root background. The v0.9.77
+integration uses setExpandedFraction(1f) to make the native shade
+fully expanded, which activates the native status-bar hide policy.
+
+Q25 SystemUI classes2.dex declares
+StatusBarVisibilityInteractor.isShadeVisibleOnAnyDisplay as a
+ReadonlyStateFlow. The v0.9.78 Vector bridge observes its actual backing
+StateFlowImpl, temporarily forces isShadeVisibleOnAnyDisplay to false
+only while the BB shade is mounted, then restores the native value when
+the BB child detaches. This retains native clock/icon lifecycle, control,
+updates and keyguard conditions. Other StateFlows are not intercepted.
+
+The BB root's top status-bar band is now transparent rather than
+being covered by its opaque window-wide background. Notification and
+QS pages retain their backgrounds below the inset. No clock, battery,
+network, or notification icon views are cloned or reparented.
+
+### Diagnostic and verification
+
+After installing and opening the shade:
+
+    adb -s 202512003630 logcat -d -s \
+      'BB7-StatusBar:V' 'BB7-NativeShade:V' \
+      'AndroidRuntime:E' '*:S' | tail -90
+
+Look for:
+- Native Q25 status-bar visibility policy hook registered
+- Captured actual native status-bar visibility StateFlow
+- Native status-bar region left transparent; original icons retained
+- Native status-bar visibility retained during BB shade
+
+Visually verify both notifications and QS pages, touch and BB-button opens,
+the native status bar while BB is displayed, after closing, when the
+device locks/unlocks, and when returning from Recents.
+
+ROM port: implement the same exception directly in
+StatusBarVisibilityInteractor, driven by native BB shade state, rather
+than carrying the temporary Vector StateFlow hook. This is a native
+SystemUI visibility-policy change, not a second status-bar implementation.
+
+Rollback still uses debug.bb7pulldown.native_shade.enabled=false
+and a SystemUI process restart. No change to master.
