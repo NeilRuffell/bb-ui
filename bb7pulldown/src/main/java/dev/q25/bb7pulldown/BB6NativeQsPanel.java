@@ -389,7 +389,7 @@ final class BB6NativeQsPanel extends FrameLayout {
         secondary.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
         secondary.setEllipsize(TextUtils.TruncateAt.END);
         secondary.setMaxWidth(Math.max(dp(65),
-                (int) (getResources().getDisplayMetrics().widthPixels * 0.38f)));
+                (int) (getResources().getDisplayMetrics().widthPixels * 0.33f)));
         LinearLayout.LayoutParams statusParams = new LinearLayout.LayoutParams(
                 LayoutParams.WRAP_CONTENT, LayoutParams.MATCH_PARENT);
         statusParams.leftMargin = dp(7);
