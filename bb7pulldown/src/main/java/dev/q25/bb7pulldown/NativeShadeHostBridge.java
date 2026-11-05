@@ -116,10 +116,22 @@ final class NativeShadeHostBridge {
                 if (root != null && root.getParent() == prior) {
                     int topMargin = root.getLayoutParams() instanceof FrameLayout.LayoutParams
                             ? ((FrameLayout.LayoutParams) root.getLayoutParams()).topMargin : 0;
-                    detach(root);
-                    if (!attach(root, topMargin)) {
-                        Log.w(TAG, "Could not reattach BB child after native view recreation");
-                    }
+                    // Re-inflation can happen before the new panel has its
+                    // window token. Wait until it is attached before moving
+                    // the BB host, or it would be stranded on the old panel.
+                    nativePanel.post(() -> {
+                        if (panelRef.get() != nativePanel
+                                || mountedRef.get() != root) return;
+                        if (root.getParent() == prior) {
+                            detach(root);
+                            if (!attach(root, topMargin)) {
+                                Log.e(TAG, "Could not reattach BB host after native reinflation");
+                                PullDownHook.onNativeShadeHostUnavailable();
+                            }
+                        } else if (root.getParent() == null) {
+                            PullDownHook.onNativeShadeHostUnavailable();
+                        }
+                    });
                 }
             }
         } catch (Throwable error) {
@@ -162,6 +174,11 @@ final class NativeShadeHostBridge {
             Log.i(TAG, "BB UI mounted inside native NotificationPanelView; one shade window");
             return true;
         } catch (Throwable error) {
+            ViewParent parent = root.getParent();
+            if (parent instanceof ViewGroup) {
+                try { ((ViewGroup) parent).removeView(root); }
+                catch (Throwable ignored) { }
+            }
             restoreAccessibility();
             Log.e(TAG, "Could not mount BB UI in native shade", error);
             return false;
@@ -169,7 +186,9 @@ final class NativeShadeHostBridge {
     }
 
     static boolean isMounted(UnifiedShadeHost root) {
-        return root != null && mountedRef.get() == root && root.getParent() != null;
+        // Keep ownership when the native parent is unexpectedly detached;
+        // cleanup must still release the BB session and its media observers.
+        return root != null && mountedRef.get() == root;
     }
 
     static void detach(UnifiedShadeHost root) {
