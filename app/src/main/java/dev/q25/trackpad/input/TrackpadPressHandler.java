@@ -18,13 +18,14 @@ public final class TrackpadPressHandler {
     private final TrackpadPressState state = new TrackpadPressState();
     private final Runnable click;
     private final Runnable longClick;
-    private final Runnable timeout = () -> {
-        if (state.fireLongPress()) longClick.run();
-    };
+    private final Runnable timeout;
 
     public TrackpadPressHandler(Runnable click, Runnable longClick) {
         this.click = click;
         this.longClick = longClick;
+        this.timeout = () -> {
+            if (state.fireLongPress()) this.longClick.run();
+        };
     }
 
     public static boolean isConfirmKey(int keyCode) {
