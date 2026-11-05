@@ -75,6 +75,9 @@ public final class PullDownHook implements IXposedHookLoadPackage {
     private static final int STATUS_BAR_SUB_PANEL_WINDOW_TYPE = 2017;
     private static final Map<View, SwipeState> SWIPES =
             Collections.synchronizedMap(new WeakHashMap<>());
+    // Non-null ONLY while creating the native shade from an active finger
+    // gesture on the real Android status bar. Never stored in BB view state.
+    private static SwipeState pendingNativeTouchOpen;
     private static WindowManager windowManager;
     private static UnifiedShadeHost shadeHost;
     private static TwoColumnPanel panel;
@@ -333,7 +336,8 @@ public final class PullDownHook implements IXposedHookLoadPackage {
             if (!enabled() || shadeHost != null || openingOrClosing || locked(view.getContext())
                     || event.getPointerCount() != 1
                     || event.getToolType(0) != MotionEvent.TOOL_TYPE_FINGER) return false;
-            SwipeState state = new SwipeState(event.getRawY(), event.getRawX());
+            SwipeState state = new SwipeState(
+                    event.getRawY(), event.getRawX(), event.getEventTime());
             SWIPES.put(view, state);
             return true;
         }
@@ -343,28 +347,70 @@ public final class PullDownHook implements IXposedHookLoadPackage {
             case MotionEvent.ACTION_MOVE:
                 float deltaY = event.getRawY() - state.startY;
                 float deltaX = Math.abs(event.getRawX() - state.startX);
-                int thresholdPx = dp(view.getContext(), 48);
-                if (!state.opened && deltaY >= thresholdPx && deltaY > deltaX) {
+                int thresholdPx = dp(view.getContext(), 20);
+                if (!state.opened && deltaY >= thresholdPx && deltaY > deltaX
+                        && event.getPointerCount() == 1) {
                     state.opened = true;
-                    showPanel(view.getContext());
+                    if (NativeShadeHostBridge.requested()
+                            && NativeShadeSlideAnimator.touchEnabled()) {
+                        pendingNativeTouchOpen = state;
+                        try {
+                            showPanel(view.getContext());
+                        } finally {
+                            pendingNativeTouchOpen = null;
+                        }
+                    } else {
+                        showPanel(view.getContext());
+                    }
+                }
+                if (state.opened && NativeShadeSlideAnimator.isTouchOpening()) {
+                    NativeShadeSlideAnimator.updateTouchOpen(deltaY);
                 }
                 return true;
             case MotionEvent.ACTION_UP:
-                if (!state.opened && Math.abs(event.getRawY() - state.startY)
+                if (state.opened && NativeShadeSlideAnimator.isTouchOpening()) {
+                    finishStatusBarDrag(event, state, false);
+                } else if (!state.opened && Math.abs(event.getRawY() - state.startY)
                         < dp(view.getContext(), 12)
                         && Math.abs(event.getRawX() - state.startX)
                         < dp(view.getContext(), 12)) {
+                    // A tap retains the ordinary animated shade opening.
                     showPanel(view.getContext());
                 }
                 SWIPES.remove(view);
                 return true;
             case MotionEvent.ACTION_CANCEL:
             case MotionEvent.ACTION_POINTER_DOWN:
+                if (state.opened && NativeShadeSlideAnimator.isTouchOpening()) {
+                    finishStatusBarDrag(event, state, true);
+                }
                 SWIPES.remove(view);
                 return true;
             default:
                 return true;
         }
+    }
+
+    private static void finishStatusBarDrag(MotionEvent event, SwipeState state,
+            boolean canceled) {
+        UnifiedShadeHost root = shadeHost;
+        if (root == null) {
+            NativeShadeSlideAnimator.restore();
+            return;
+        }
+        long elapsed = Math.max(1L, event.getEventTime() - state.downTime);
+        float velocityY = (event.getRawY() - state.startY) * 1000f / elapsed;
+        boolean started = NativeShadeSlideAnimator.finishTouchOpen(velocityY, canceled,
+                () -> {
+                    if (shadeHost == root) {
+                        openingOrClosing = false;
+                        root.focusContent();
+                    }
+                },
+                () -> {
+                    if (shadeHost == root) dismissShadeImmediately();
+                });
+        if (!started && shadeHost == root) dismissShadeImmediately();
     }
 
     static void onNotificationItemsUpdated() {
@@ -652,9 +698,40 @@ public final class PullDownHook implements IXposedHookLoadPackage {
      */
     static boolean onNativeSystemBackRequested() {
         UnifiedShadeHost current = shadeHost;
-        if (current == null || openingOrClosing
-                || !NativeShadeHostBridge.isMounted(current)) return false;
+        if (current == null || !NativeShadeHostBridge.isMounted(current)) return false;
+        if (openingOrClosing) {
+            // A second native Back must NOT start Android's competing collapse.
+            // Back during the opening slide reverses it immediately.
+            if (NativeShadeSlideAnimator.isOpening()) dismissShade();
+            return true;
+        }
         return current.handleNativeBack();
+    }
+
+    /** A SystemUI root reinflation interrupted entrance motion. Remount without animation. */
+    static void onNativeShadeSlideInterrupted() {
+        UnifiedShadeHost current = shadeHost;
+        if (current == null) return;
+        openingOrClosing = false;
+        current.post(() -> {
+            if (shadeHost == current) current.focusContent();
+        });
+    }
+
+    /** Existing native shade root, not a second touch or notification system. */
+    static void onNativeShadeTouchCloseStarted() {
+        if (shadeHost != null) openingOrClosing = true;
+    }
+
+    static void onNativeShadeTouchCloseSettled(boolean closed) {
+        UnifiedShadeHost root = shadeHost;
+        if (root == null) return;
+        if (closed) {
+            dismissShadeImmediately();
+        } else {
+            openingOrClosing = false;
+            root.focusContent();
+        }
     }
 
     static void onNativeShadeExpansionChanged(boolean expanded) {
@@ -769,11 +846,16 @@ public final class PullDownHook implements IXposedHookLoadPackage {
         }
         root.setTranslationY(nativeMode ? 0f : -height);
         boolean attached = false;
+        boolean nativeSlidePrepared = false;
         try {
             if (nativeMode) {
                 if (!NativeShadeHostBridge.attach(root, nativeStatusBarHeight(context))) {
                     throw new IllegalStateException("Cannot mount BB UI in Q25 native shade");
                 }
+                // Move the EXISTING native shade window, not a second BB overlay
+                // and not just its foreground child (which would expose stock QS).
+                nativeSlidePrepared = NativeShadeSlideAnimator.prepareOpen(
+                        NativeShadeHostBridge.shadeWindow(), pendingNativeTouchOpen != null);
             } else {
                 manager.addView(root, params);
             }
@@ -791,15 +873,36 @@ public final class PullDownHook implements IXposedHookLoadPackage {
 
             if (nativeMode) {
                 Log.i(TAG, "BB UI session attached inside native shade: page=" + initialPage);
-                openingOrClosing = false;
                 if (!NativeShadeHostBridge.requestNativeOpen()) {
                     Log.e(TAG, "Native shade controller refused expansion; releasing BB UI host");
                     dismissShadeImmediately();
                     return;
                 }
-                root.post(() -> {
-                    if (shadeHost == root) root.focusContent();
-                });
+                if (nativeSlidePrepared) {
+                    if (NativeShadeSlideAnimator.isTouchOpening()) {
+                        // Status-bar MOVE/UP owns the window translation until
+                        // release. No competing timed entrance animation.
+                        Log.i(TAG, "Native shade opening under finger control");
+                    } else {
+                        root.post(() -> {
+                            if (shadeHost != root || !NativeShadeSlideAnimator.isOpening()) return;
+                            if (!NativeShadeSlideAnimator.animateOpen(() -> {
+                                if (shadeHost == root && !NativeShadeSlideAnimator.isClosing()) {
+                                    openingOrClosing = false;
+                                    root.focusContent();
+                                }
+                            }) && shadeHost == root) {
+                                openingOrClosing = false;
+                                root.focusContent();
+                            }
+                        });
+                    }
+                } else {
+                    openingOrClosing = false;
+                    root.post(() -> {
+                        if (shadeHost == root) root.focusContent();
+                    });
+                }
             } else {
                 Log.i(TAG, "Unified shade window attached: initialPage=" + initialPage
                         + " heightPx=" + height);
@@ -841,10 +944,18 @@ public final class PullDownHook implements IXposedHookLoadPackage {
 
     private static void dismissShade() {
         UnifiedShadeHost root = shadeHost;
-        if (root == null || openingOrClosing) return;
+        if (root == null || (openingOrClosing && !NativeShadeSlideAnimator.isOpening())) {
+            return;
+        }
         if (NativeShadeHostBridge.isMounted(root)) {
-            // Native SystemUI controls shade state; do not invent a second
-            // window-translation animation for its child.
+            openingOrClosing = true;
+            root.clearStatusBarFocus();
+            // The native WINDOW itself slides up, keeping the BB child and
+            // native backdrop together. Only after the slide do we collapse
+            // the SystemUI panel and release its child.
+            if (NativeShadeSlideAnimator.animateClose(() -> {
+                if (shadeHost == root) dismissShadeImmediately();
+            })) return;
             dismissShadeImmediately();
             return;
         }
@@ -919,8 +1030,10 @@ public final class PullDownHook implements IXposedHookLoadPackage {
             current.clearStatusBarFocus();
             current.animate().cancel();
             if (nativeMount) {
-                // Collapse before unmounting to avoid exposing stock UI.
+                // Collapse BEFORE resetting the native window translation, so
+                // no full shade flashes back onscreen during animated dismissal.
                 NativeShadeHostBridge.collapseNative();
+                NativeShadeSlideAnimator.restore();
                 NativeShadeHostBridge.detach(current);
             } else if (windowManager != null) {
                 windowManager.removeViewImmediate(current);
@@ -928,6 +1041,8 @@ public final class PullDownHook implements IXposedHookLoadPackage {
         } catch (Throwable error) {
             Log.w(TAG, "Unable to remove unified shade host", error);
         } finally {
+            // Also restore after an exception during native collapse/detach.
+            if (nativeMount) NativeShadeSlideAnimator.restore();
             stopFavoritesObserver();
             stopMediaSessions();
             unregisterScreenOffReceiver();
@@ -993,7 +1108,12 @@ public final class PullDownHook implements IXposedHookLoadPackage {
     private static final class SwipeState {
         final float startY;
         final float startX;
+        final long downTime;
         boolean opened;
-        SwipeState(float y, float x) { startY = y; startX = x; }
+        SwipeState(float y, float x, long time) {
+            startY = y;
+            startX = x;
+            downTime = time;
+        }
     }
 }
