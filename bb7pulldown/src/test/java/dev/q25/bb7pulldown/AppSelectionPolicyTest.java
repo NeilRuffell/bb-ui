@@ -1,6 +1,8 @@
 package dev.q25.bb7pulldown;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
 import java.util.Arrays;
 import java.util.Collections;
@@ -31,4 +33,15 @@ public class AppSelectionPolicyTest {
         assertEquals(3, AppSelectionPolicy.move(3, 1, 4));
         assertEquals(-1, AppSelectionPolicy.move(0, 1, 0));
     }
+    @Test public void selectedIconHighlightsOnlyWhileItHasFocus() {
+        assertTrue(AppSelectionPolicy.shouldHighlight("a", "a", true, false));
+        assertFalse(AppSelectionPolicy.shouldHighlight("a", "a", false, false));
+        assertFalse(AppSelectionPolicy.shouldHighlight("a", "a", true, true));
+    }
+
+    @Test public void selectionWithoutMatchingFocusedRowIsNotHighlighted() {
+        assertFalse(AppSelectionPolicy.shouldHighlight("a", "b", true, false));
+        assertFalse(AppSelectionPolicy.shouldHighlight("a", null, true, false));
+    }
+
 }
