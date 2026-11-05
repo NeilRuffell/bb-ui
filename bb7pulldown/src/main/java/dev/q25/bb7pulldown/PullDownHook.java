@@ -142,6 +142,8 @@ public final class PullDownHook implements IXposedHookLoadPackage {
         // Colour icons have their own independent rollback property, even when
         // the custom BB7 shade is disabled.
         NativeStatusBarColorIcons.install(lp.classLoader);
+        // Popup presentation only; BB shade and its notification actions are untouched.
+        NativeSimpleHeadsUp.install(lp.classLoader);
 
         if (!enabled()) {
             Log.i(TAG, "Disabled by " + ENABLE_PROP + "; stock status bar retained");
