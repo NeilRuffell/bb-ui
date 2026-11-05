@@ -20,6 +20,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import android.support.v4.media.session.MediaControllerCompat;
+import android.support.v4.media.session.MediaSessionCompat;
+import android.support.v4.media.session.PlaybackStateCompat;
+
 /**
  * Uses Android's own SystemUI-accessible media controllers and transport actions.
  * No media services, artificial playback state, or notification action parsing.
@@ -29,6 +33,8 @@ final class NativeMediaSessions {
     static final int PREVIOUS = 0;
     static final int PLAY_PAUSE = 1;
     static final int NEXT = 2;
+    static final int SHUFFLE = MediaModePolicy.SHUFFLE;
+    static final int REPEAT = MediaModePolicy.REPEAT;
     private static final String TAG = "BB7-Media";
 
     interface Listener {
@@ -52,12 +58,17 @@ final class NativeMediaSessions {
         final boolean advancing;
         final Bitmap artwork;
         final String artworkUri;
+        final boolean canShuffle;
+        final boolean canRepeat;
+        final int shuffleMode;
+        final int repeatMode;
 
         Entry(MediaSession.Token token, String packageName, String title, String artist,
                 boolean playing, boolean canPrevious, boolean canPlayPause, boolean canNext,
                 boolean canSeek, long durationMs, long positionMs,
                 long positionUpdatedAtMs, float playbackSpeed, boolean advancing,
-                Bitmap artwork, String artworkUri) {
+                Bitmap artwork, String artworkUri,
+                boolean canShuffle, boolean canRepeat, int shuffleMode, int repeatMode) {
             this.token = token;
             this.packageName = packageName;
             this.title = title;
@@ -74,6 +85,10 @@ final class NativeMediaSessions {
             this.advancing = advancing;
             this.artwork = artwork;
             this.artworkUri = artworkUri;
+            this.canShuffle = canShuffle;
+            this.canRepeat = canRepeat;
+            this.shuffleMode = shuffleMode;
+            this.repeatMode = repeatMode;
         }
 
         long positionAt(long elapsedRealtimeMs) {
@@ -88,6 +103,10 @@ final class NativeMediaSessions {
     private final Listener listener;
     private final Map<MediaSession.Token, MediaController> controllers = new LinkedHashMap<>();
     private final Map<MediaSession.Token, MediaController.Callback> callbacks =
+            new LinkedHashMap<>();
+    private final Map<MediaSession.Token, MediaControllerCompat> compatControllers =
+            new LinkedHashMap<>();
+    private final Map<MediaSession.Token, MediaControllerCompat.Callback> compatCallbacks =
             new LinkedHashMap<>();
     private final MediaSessionManager.OnActiveSessionsChangedListener activeListener =
             this::replaceControllers;
@@ -160,6 +179,35 @@ final class NativeMediaSessions {
                 }
             }
         }
+        for (Map.Entry<MediaSession.Token, MediaControllerCompat> old
+                : new ArrayList<>(compatControllers.entrySet())) {
+            if (next.containsKey(old.getKey())) continue;
+            MediaControllerCompat.Callback callback = compatCallbacks.remove(old.getKey());
+            if (callback != null) old.getValue().unregisterCallback(callback);
+            compatControllers.remove(old.getKey());
+        }
+        for (Map.Entry<MediaSession.Token, MediaController> item : next.entrySet()) {
+            if (!compatControllers.containsKey(item.getKey())) {
+                try {
+                    MediaSessionCompat.Token compatToken =
+                            MediaSessionCompat.Token.fromToken(item.getKey());
+                    MediaControllerCompat compat = new MediaControllerCompat(context, compatToken);
+                    MediaControllerCompat.Callback callback = new MediaControllerCompat.Callback() {
+                        @Override public void onSessionReady() { publish(); }
+                        @Override public void onRepeatModeChanged(int mode) { publish(); }
+                        @Override public void onShuffleModeChanged(int mode) { publish(); }
+                        @Override public void onPlaybackStateChanged(PlaybackStateCompat state) {
+                            publish();
+                        }
+                    };
+                    compat.registerCallback(callback, handler);
+                    compatControllers.put(item.getKey(), compat);
+                    compatCallbacks.put(item.getKey(), callback);
+                } catch (RuntimeException error) {
+                    Log.d(TAG, "Compat media mode access unavailable", error);
+                }
+            }
+        }
         for (Map.Entry<MediaSession.Token, MediaController> item : next.entrySet()) {
             if (callbacks.containsKey(item.getKey())) continue;
             MediaController.Callback callback = new MediaController.Callback() {
@@ -213,6 +261,26 @@ final class NativeMediaSessions {
                     artwork = SystemUiNotificationObserver.mediaNotificationArtwork(
                             controller.getSessionToken(), context);
                 }
+                boolean canShuffle = false;
+                boolean canRepeat = false;
+                int shuffleMode = MediaModePolicy.INVALID;
+                int repeatMode = MediaModePolicy.INVALID;
+                MediaControllerCompat compat = compatControllers.get(controller.getSessionToken());
+                if (compat != null) {
+                    try {
+                        boolean ready = compat.isSessionReady();
+                        PlaybackStateCompat compatState = compat.getPlaybackState();
+                        long compatActions = compatState == null ? 0L : compatState.getActions();
+                        shuffleMode = compat.getShuffleMode();
+                        repeatMode = compat.getRepeatMode();
+                        canShuffle = MediaModePolicy.available(ready, compatActions,
+                                PlaybackStateCompat.ACTION_SET_SHUFFLE_MODE, shuffleMode);
+                        canRepeat = MediaModePolicy.available(ready, compatActions,
+                                PlaybackStateCompat.ACTION_SET_REPEAT_MODE, repeatMode);
+                    } catch (RuntimeException error) {
+                        Log.d(TAG, "No advertised shuffle/repeat controls", error);
+                    }
+                }
                 entries.add(new Entry(controller.getSessionToken(), controller.getPackageName(),
                         title, artist, playing,
                         (actions & PlaybackState.ACTION_SKIP_TO_PREVIOUS) != 0,
@@ -223,7 +291,8 @@ final class NativeMediaSessions {
                         durationMs > 0 && (actions & PlaybackState.ACTION_SEEK_TO) != 0,
                         durationMs, state.getPosition(), state.getLastPositionUpdateTime(),
                         state.getPlaybackSpeed(), state.getState() == PlaybackState.STATE_PLAYING,
-                        artwork, artworkUri(metadata)));
+                        artwork, artworkUri(metadata),
+                        canShuffle, canRepeat, shuffleMode, repeatMode));
             } catch (RuntimeException error) {
                 Log.w(TAG, "Cannot read native playback state", error);
             }
@@ -326,6 +395,37 @@ final class NativeMediaSessions {
         }
     }
 
+    /** Dispatch only modes explicitly supported by the current compat session. */
+    boolean setMode(MediaSession.Token token, int kind, int newMode) {
+        if (!started || token == null || !controllers.containsKey(token)) return false;
+        MediaControllerCompat compat = compatControllers.get(token);
+        if (compat == null) return false;
+        try {
+            if (!compat.isSessionReady()) return false;
+            PlaybackStateCompat state = compat.getPlaybackState();
+            if (state == null) return false;
+            if (kind == SHUFFLE) {
+                if (!MediaModePolicy.available(true, state.getActions(),
+                        PlaybackStateCompat.ACTION_SET_SHUFFLE_MODE, compat.getShuffleMode())) {
+                    return false;
+                }
+                compat.getTransportControls().setShuffleMode(newMode);
+            } else if (kind == REPEAT) {
+                if (!MediaModePolicy.available(true, state.getActions(),
+                        PlaybackStateCompat.ACTION_SET_REPEAT_MODE, compat.getRepeatMode())) {
+                    return false;
+                }
+                compat.getTransportControls().setRepeatMode(newMode);
+            } else {
+                return false;
+            }
+            return true;
+        } catch (RuntimeException error) {
+            Log.w(TAG, "Native media repeat/shuffle command unavailable", error);
+            return false;
+        }
+    }
+
     private static boolean isPlaying(PlaybackState state) {
         int value = state.getState();
         return value == PlaybackState.STATE_PLAYING
@@ -354,6 +454,13 @@ final class NativeMediaSessions {
         }
         callbacks.clear();
         controllers.clear();
+        for (Map.Entry<MediaSession.Token, MediaControllerCompat> entry
+                : compatControllers.entrySet()) {
+            MediaControllerCompat.Callback callback = compatCallbacks.get(entry.getKey());
+            if (callback != null) entry.getValue().unregisterCallback(callback);
+        }
+        compatCallbacks.clear();
+        compatControllers.clear();
         // The panel is being removed; do not alter its focus during teardown.
     }
 }
