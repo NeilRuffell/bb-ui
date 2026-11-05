@@ -278,6 +278,7 @@ final class BB6NativeQsPanel extends FrameLayout {
     }
 
     void focusFirst() {
+        trackpadPress.cancel();
         if (navigation != null) navigation.focusContent();
         list.requestFocus();
         if (!rows.isEmpty()) list.setSelectionFromTop(HEADER_COUNT, firstRowOffset());
@@ -323,6 +324,7 @@ final class BB6NativeQsPanel extends FrameLayout {
         }
 
         if (structureChanged) {
+            trackpadPress.cancel();
             int before = selectedIndex();
             String selectedKey = before >= 0 ? rows.get(before).key : null;
             View oldSelectedView = list.getSelectedView();
@@ -608,6 +610,7 @@ final class BB6NativeQsPanel extends FrameLayout {
     }
 
     @Override public boolean dispatchTouchEvent(MotionEvent event) {
+        if (event.getActionMasked() == MotionEvent.ACTION_DOWN) trackpadPress.cancel();
         // Full QS retains ListView's native touch scrolling. Only the compact
         // lock-screen panel keeps its existing upward swipe-to-exit gesture.
         if (!lockscreenMode) return super.dispatchTouchEvent(event);
