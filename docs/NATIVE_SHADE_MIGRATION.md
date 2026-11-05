@@ -3,7 +3,7 @@
 **Status:** Phase 1 complete in source; Q25 hardware test pending.
 **Branch:** feat/native-bb-shade-host (not merged)
 **Base:** feat/q25-simple-heads-up-notifications, commit 590a6d2
-**Version:** 0.9.78-native-shade-statusbar-q25-dev
+**Version:** 0.9.79-native-stable-statusbar-q25-dev
 
 ## Objective
 
@@ -243,3 +243,55 @@ SystemUI visibility-policy change, not a second status-bar implementation.
 
 Rollback still uses debug.bb7pulldown.native_shade.enabled=false
 and a SystemUI process restart. No change to master.
+## Stable native status bar while BB UI is open (version 0.9.79)
+
+Q25 device feedback from v0.9.78: opening either BB shade changes native
+status bar formatting, and the blue trackpad focus appears behind a blurred
+shade layer. Device log reported:
+
+    BB7-StatusBar: Native status-bar visibility state not captured
+
+The compiled Q25 SystemUI APK has:
+- StatusBarVisibilityInteractor.isShadeVisibleOnAnyDisplay: ReadonlyStateFlow
+- ReadonlyStateFlow.$$delegate_0: StateFlow
+- StateFlowImpl.setValue(Object): void
+- HomeStatusBarViewModelImpl constructor with StatusBarVisibilityInteractor
+  passed as a dependency. This is the additional reliable capture point.
+
+The native visibility interceptor is now registered before other BB UI
+SystemUI hooks. It also observes the HomeStatusBarViewModelImpl constructor
+and extracts its injected StatusBarVisibilityInteractor, rather than
+requiring the interactor constructor to have run after hook registration.
+The bridge reads the exact Q25 ReadonlyStateFlow delegate.
+
+Native shade content and scrims are clipped below the status-bar height
+at their common NotificationShadeWindowView root. The original clip
+bounds are restored when the BB child detaches. The native status-bar
+window remains separately owned: no replacement clock or icons are created.
+The goal is for clock, notification icons and system indicators to retain
+their collapsed-mode formatting and blue focus highlight above the shade.
+
+### Q25 acceptance check
+
+After installing v0.9.79 and opening notifications and QS using touch
+and trackpad, compare the top bar to its closed appearance. Check that
+the clock/icons never change format, and that the blue trackpad
+highlight is rendered without the native shade blur covering it.
+
+    adb -s 202512003630 logcat -d -s \
+      'BB7-StatusBar:V' 'BB7-NativeShade:V' '*:S' | tail -90
+
+Expected new diagnostics:
+- Native Q25 status-bar visibility policy hooks registered
+- Captured actual native status-bar visibility StateFlow via ...
+- Native shade drawing clipped below status bar height=...px
+- Native shade window drawing bounds restored (on close)
+
+If the capture log is absent or the status bar still changes format,
+this milestone requires further Q25 runtime diagnosis. A passing CI build
+does not prove either visual condition. Roll back with the existing
+debug.bb7pulldown.native_shade.enabled=false property if necessary.
+
+ROM implementation: keep the home status-bar visibility model enabled
+throughout BB native shade sessions, and clip native shade/chrome layers
+below the native status bar at the source; do not duplicate statusbar UI.
