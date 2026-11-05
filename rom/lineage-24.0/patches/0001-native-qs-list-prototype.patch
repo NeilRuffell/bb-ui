@@ -1,0 +1,76 @@
+diff --git a/packages/SystemUI/src/com/android/systemui/qs/panels/ui/compose/infinitegrid/InfiniteGridLayout.kt b/packages/SystemUI/src/com/android/systemui/qs/panels/ui/compose/infinitegrid/InfiniteGridLayout.kt
+--- a/packages/SystemUI/src/com/android/systemui/qs/panels/ui/compose/infinitegrid/InfiniteGridLayout.kt
++++ b/packages/SystemUI/src/com/android/systemui/qs/panels/ui/compose/infinitegrid/InfiniteGridLayout.kt
+@@ -16,15 +16,23 @@
+ 
+ package com.android.systemui.qs.panels.ui.compose.infinitegrid
+ 
++import android.os.SystemProperties
++import androidx.compose.foundation.layout.Arrangement
++import androidx.compose.foundation.layout.Column
++import androidx.compose.foundation.layout.fillMaxWidth
++import androidx.compose.foundation.layout.padding
++import androidx.compose.foundation.verticalScroll
+ import androidx.compose.foundation.rememberScrollState
+ import androidx.compose.runtime.Composable
+ import androidx.compose.runtime.LaunchedEffect
+ import androidx.compose.runtime.derivedStateOf
+ import androidx.compose.runtime.getValue
++import androidx.compose.runtime.key
+ import androidx.compose.runtime.remember
+ import androidx.compose.runtime.rememberCoroutineScope
+ import androidx.compose.runtime.rememberUpdatedState
+ import androidx.compose.runtime.toMutableStateList
++import androidx.compose.ui.unit.dp
+ import androidx.compose.ui.Modifier
+ import androidx.compose.ui.platform.LocalContext
+ import androidx.compose.ui.platform.LocalResources
+@@ -100,6 +108,48 @@
+         val bounceables =
+             remember(sizedTiles) { List(sizedTiles.size) { BounceableTileViewModel() } }
+         val spans by remember(sizedTiles) { derivedStateOf { sizedTiles.fastMap { it.width } } }
++// Native-only proof of concept. No Vector/BB6NativeQsPanel views here:
++        // the original SystemUI Tile() composable owns rendering and actions.
++        // Keep this opt-in; a full BB UI ROM integration must first replace
++        // the overlay page rather than showing two panels.
++        if (SystemProperties.getBoolean("persist.sys.bbui.native_qs_list", false)) {
++            Column(
++                modifier = modifier
++                    .verticalScroll(rememberScrollState())
++                    .padding(horizontal = 7.dp, vertical = 4.dp),
++                verticalArrangement = Arrangement.spacedBy(4.dp),
++            ) {
++                sizedTiles.forEachIndexed { index, sized ->
++                    key(sized.tile.spec) {
++                        Element(sized.tile.spec.toElementKey(), Modifier) {
++                            Tile(
++                                tile = sized.tile,
++                                iconOnly = false,
++                                squishiness = { squishiness },
++                                coroutineScope = scope,
++                                bounceableInfo =
++                                    bounceables.bounceableInfo(
++                                        sized,
++                                        index = index,
++                                        column = 0,
++                                        columns = 1,
++                                        isFirstInRow = true,
++                                        isLastInRow = true,
++                                    ),
++                                tileHapticsViewModelFactory = tileHapticsViewModelFactory,
++                                modifier = Modifier.fillMaxWidth(),
++                                isVisible = listening,
++                                requestToggleTextFeedback = textFeedbackViewModel::requestShowFeedback,
++                                detailsViewModel = detailsViewModel,
++                                enableRevealEffect = enableRevealEffect,
++                            )
++                        }
++                    }
++                }
++            }
++            TileListener(tiles, listening)
++            return
++        }
+         VerticalSpannedGrid(
+             columns = columns,
+             columnSpacing = dimensionResource(R.dimen.qs_tile_margin_horizontal),
