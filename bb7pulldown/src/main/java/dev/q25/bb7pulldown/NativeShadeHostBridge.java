@@ -90,6 +90,7 @@ final class NativeShadeHostBridge {
         // Reuse the original SystemUI status-bar visibility pipeline rather
         // than drawing replacement clocks/icons or reparenting native views.
         NativeShadeStatusBarVisibility.install(loader);
+        NativeShadeBlurPolicyHook.install(loader);
         try {
             type.getDeclaredField("mView");
             type.getDeclaredMethod("onFinishInflate");
@@ -213,6 +214,17 @@ final class NativeShadeHostBridge {
                 }
             });
         }
+    }
+
+    static FrameLayout shadeWindow() {
+        return shadeWindowRef.get();
+    }
+
+    static boolean ownsNativeShadeWindow() {
+        UnifiedShadeHost bbRoot = mountedRef.get();
+        FrameLayout nativeWindow = shadeWindowRef.get();
+        return active() && bbRoot != null && nativeWindow != null
+                && bbRoot.getParent() == nativeWindow;
     }
 
     static FrameLayout panel() {
