@@ -70,6 +70,7 @@ final class NativeShadeHostBridge {
             type.getDeclaredField("mView");
             type.getDeclaredMethod("onFinishInflate");
             type.getDeclaredMethod("setExpandedFraction", float.class);
+            type.getDeclaredMethod("setExpandedHeightInternal", float.class);
             type.getDeclaredMethod("expandToNotifications");
             type.getDeclaredMethod("instantCollapse");
             type.getDeclaredMethod("isExpandedWithoutHeadsUp");
@@ -89,6 +90,15 @@ final class NativeShadeHostBridge {
                 }
             });
             XposedHelpers.findAndHookMethod(type, "setExpandedFraction",
+                    float.class, new XC_MethodHook() {
+                        @Override protected void afterHookedMethod(MethodHookParam param) {
+                            if (!param.hasThrowable()) notifyExpansion(param.thisObject);
+                        }
+                    });
+            // Ordinary finger gestures (including heads-up drag-down) can
+            // update mExpandedFraction through this method without calling
+            // setExpandedFraction(). Both paths must be observed.
+            XposedHelpers.findAndHookMethod(type, "setExpandedHeightInternal",
                     float.class, new XC_MethodHook() {
                         @Override protected void afterHookedMethod(MethodHookParam param) {
                             if (!param.hasThrowable()) notifyExpansion(param.thisObject);
