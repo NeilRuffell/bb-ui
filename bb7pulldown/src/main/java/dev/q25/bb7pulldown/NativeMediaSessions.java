@@ -1,6 +1,7 @@
 package dev.q25.bb7pulldown;
 
 import android.content.Context;
+import android.graphics.Bitmap;
 import android.media.MediaMetadata;
 import android.media.session.MediaController;
 import android.media.session.MediaSession;
@@ -49,11 +50,14 @@ final class NativeMediaSessions {
         final long positionUpdatedAtMs;
         final float playbackSpeed;
         final boolean advancing;
+        final Bitmap artwork;
+        final String artworkUri;
 
         Entry(MediaSession.Token token, String packageName, String title, String artist,
                 boolean playing, boolean canPrevious, boolean canPlayPause, boolean canNext,
                 boolean canSeek, long durationMs, long positionMs,
-                long positionUpdatedAtMs, float playbackSpeed, boolean advancing) {
+                long positionUpdatedAtMs, float playbackSpeed, boolean advancing,
+                Bitmap artwork, String artworkUri) {
             this.token = token;
             this.packageName = packageName;
             this.title = title;
@@ -68,6 +72,8 @@ final class NativeMediaSessions {
             this.positionUpdatedAtMs = positionUpdatedAtMs;
             this.playbackSpeed = playbackSpeed;
             this.advancing = advancing;
+            this.artwork = artwork;
+            this.artworkUri = artworkUri;
         }
 
         long positionAt(long elapsedRealtimeMs) {
@@ -209,12 +215,35 @@ final class NativeMediaSessions {
                         (actions & PlaybackState.ACTION_SKIP_TO_NEXT) != 0,
                         durationMs > 0 && (actions & PlaybackState.ACTION_SEEK_TO) != 0,
                         durationMs, state.getPosition(), state.getLastPositionUpdateTime(),
-                        state.getPlaybackSpeed(), state.getState() == PlaybackState.STATE_PLAYING));
+                        state.getPlaybackSpeed(), state.getState() == PlaybackState.STATE_PLAYING,
+                        artworkBitmap(metadata), artworkUri(metadata)));
             } catch (RuntimeException error) {
                 Log.w(TAG, "Cannot read native playback state", error);
             }
         }
         listener.onSessionsChanged(Collections.unmodifiableList(entries));
+    }
+
+    /** Embedded artwork is provided by the media app's native MediaMetadata. */
+    private static Bitmap artworkBitmap(MediaMetadata metadata) {
+        if (metadata == null) return null;
+        Bitmap art = metadata.getBitmap(MediaMetadata.METADATA_KEY_ART);
+        if (art == null) art = metadata.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART);
+        if (art == null) art = metadata.getBitmap(MediaMetadata.METADATA_KEY_DISPLAY_ICON);
+        return art;
+    }
+
+    /** URI-backed album art is decoded off SystemUI's main thread by the view. */
+    private static String artworkUri(MediaMetadata metadata) {
+        if (metadata == null) return "";
+        String uri = metadata.getString(MediaMetadata.METADATA_KEY_ART_URI);
+        if (uri == null || uri.trim().isEmpty()) {
+            uri = metadata.getString(MediaMetadata.METADATA_KEY_ALBUM_ART_URI);
+        }
+        if (uri == null || uri.trim().isEmpty()) {
+            uri = metadata.getString(MediaMetadata.METADATA_KEY_DISPLAY_ICON_URI);
+        }
+        return uri == null ? "" : uri.trim();
     }
 
     private static String metadataValue(MediaMetadata metadata, String key) {
