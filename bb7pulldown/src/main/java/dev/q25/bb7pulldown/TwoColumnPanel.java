@@ -275,6 +275,11 @@ final class TwoColumnPanel extends FrameLayout {
         // Parent row owns trackpad focus; SeekBar owns direct touch dragging.
         mediaSeekBar.setFocusable(false);
         mediaSeekBar.setFocusableInTouchMode(false);
+        // The selected 56dp pill extends 28dp beyond its progress position.
+        // Reserve that width inside SeekBar at both endpoints so Android does
+        // not clip it against the separate elapsed/total-time views.
+        // This also keeps the touch-to-seek range aligned with the visible track.
+        mediaSeekBar.setPadding(dp(32), 0, dp(32), 0);
         mediaSeekBar.setProgressTintList(ColorStateList.valueOf(MEDIA_SEEK_SILVER));
         mediaSeekBar.setProgressBackgroundTintList(ColorStateList.valueOf(MEDIA_SEEK_TRACK));
         mediaSeekBar.setSecondaryProgressTintList(ColorStateList.valueOf(MEDIA_SEEK_TRACK));
