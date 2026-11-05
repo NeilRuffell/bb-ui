@@ -652,9 +652,24 @@ public final class PullDownHook implements IXposedHookLoadPackage {
      */
     static boolean onNativeSystemBackRequested() {
         UnifiedShadeHost current = shadeHost;
-        if (current == null || openingOrClosing
-                || !NativeShadeHostBridge.isMounted(current)) return false;
+        if (current == null || !NativeShadeHostBridge.isMounted(current)) return false;
+        if (openingOrClosing) {
+            // A second native Back must NOT start Android's competing collapse.
+            // Back during the opening slide reverses it immediately.
+            if (NativeShadeSlideAnimator.isOpening()) dismissShade();
+            return true;
+        }
         return current.handleNativeBack();
+    }
+
+    /** A SystemUI root reinflation interrupted entrance motion. Remount without animation. */
+    static void onNativeShadeSlideInterrupted() {
+        UnifiedShadeHost current = shadeHost;
+        if (current == null) return;
+        openingOrClosing = false;
+        current.post(() -> {
+            if (shadeHost == current) current.focusContent();
+        });
     }
 
     static void onNativeShadeExpansionChanged(boolean expanded) {
@@ -769,11 +784,16 @@ public final class PullDownHook implements IXposedHookLoadPackage {
         }
         root.setTranslationY(nativeMode ? 0f : -height);
         boolean attached = false;
+        boolean nativeSlidePrepared = false;
         try {
             if (nativeMode) {
                 if (!NativeShadeHostBridge.attach(root, nativeStatusBarHeight(context))) {
                     throw new IllegalStateException("Cannot mount BB UI in Q25 native shade");
                 }
+                // Move the EXISTING native shade window, not a second BB overlay
+                // and not just its foreground child (which would expose stock QS).
+                nativeSlidePrepared = NativeShadeSlideAnimator.prepareOpen(
+                        NativeShadeHostBridge.shadeWindow());
             } else {
                 manager.addView(root, params);
             }
@@ -791,15 +811,30 @@ public final class PullDownHook implements IXposedHookLoadPackage {
 
             if (nativeMode) {
                 Log.i(TAG, "BB UI session attached inside native shade: page=" + initialPage);
-                openingOrClosing = false;
                 if (!NativeShadeHostBridge.requestNativeOpen()) {
                     Log.e(TAG, "Native shade controller refused expansion; releasing BB UI host");
                     dismissShadeImmediately();
                     return;
                 }
-                root.post(() -> {
-                    if (shadeHost == root) root.focusContent();
-                });
+                if (nativeSlidePrepared) {
+                    root.post(() -> {
+                        if (shadeHost != root || !NativeShadeSlideAnimator.isOpening()) return;
+                        if (!NativeShadeSlideAnimator.animateOpen(() -> {
+                            if (shadeHost == root && !NativeShadeSlideAnimator.isClosing()) {
+                                openingOrClosing = false;
+                                root.focusContent();
+                            }
+                        }) && shadeHost == root) {
+                            openingOrClosing = false;
+                            root.focusContent();
+                        }
+                    });
+                } else {
+                    openingOrClosing = false;
+                    root.post(() -> {
+                        if (shadeHost == root) root.focusContent();
+                    });
+                }
             } else {
                 Log.i(TAG, "Unified shade window attached: initialPage=" + initialPage
                         + " heightPx=" + height);
@@ -841,10 +876,18 @@ public final class PullDownHook implements IXposedHookLoadPackage {
 
     private static void dismissShade() {
         UnifiedShadeHost root = shadeHost;
-        if (root == null || openingOrClosing) return;
+        if (root == null || (openingOrClosing && !NativeShadeSlideAnimator.isOpening())) {
+            return;
+        }
         if (NativeShadeHostBridge.isMounted(root)) {
-            // Native SystemUI controls shade state; do not invent a second
-            // window-translation animation for its child.
+            openingOrClosing = true;
+            root.clearStatusBarFocus();
+            // The native WINDOW itself slides up, keeping the BB child and
+            // native backdrop together. Only after the slide do we collapse
+            // the SystemUI panel and release its child.
+            if (NativeShadeSlideAnimator.animateClose(() -> {
+                if (shadeHost == root) dismissShadeImmediately();
+            })) return;
             dismissShadeImmediately();
             return;
         }
@@ -919,8 +962,10 @@ public final class PullDownHook implements IXposedHookLoadPackage {
             current.clearStatusBarFocus();
             current.animate().cancel();
             if (nativeMount) {
-                // Collapse before unmounting to avoid exposing stock UI.
+                // Collapse BEFORE resetting the native window translation, so
+                // no full shade flashes back onscreen during animated dismissal.
                 NativeShadeHostBridge.collapseNative();
+                NativeShadeSlideAnimator.restore();
                 NativeShadeHostBridge.detach(current);
             } else if (windowManager != null) {
                 windowManager.removeViewImmediate(current);
@@ -928,6 +973,8 @@ public final class PullDownHook implements IXposedHookLoadPackage {
         } catch (Throwable error) {
             Log.w(TAG, "Unable to remove unified shade host", error);
         } finally {
+            // Also restore after an exception during native collapse/detach.
+            if (nativeMount) NativeShadeSlideAnimator.restore();
             stopFavoritesObserver();
             stopMediaSessions();
             unregisterScreenOffReceiver();

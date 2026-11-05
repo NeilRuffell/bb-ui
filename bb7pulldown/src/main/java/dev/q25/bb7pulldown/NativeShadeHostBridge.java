@@ -202,9 +202,20 @@ final class NativeShadeHostBridge {
     private static void captureWindow(FrameLayout window) {
         if (!SHADE_WINDOW.equals(window.getClass().getName())) return;
         FrameLayout previous = shadeWindowRef.get();
-        shadeWindowRef = new WeakReference<>(window);
         if (previous == window) return;
+        // Rotation/reinflation must not strand an animated, off-screen
+        // SystemUI root. Abort the slide before native view migration.
+        boolean interruptedOpening = NativeShadeSlideAnimator.isActiveOn(previous)
+                && NativeShadeSlideAnimator.isOpening();
+        boolean interruptedClosing = NativeShadeSlideAnimator.isActiveOn(previous)
+                && NativeShadeSlideAnimator.isClosing();
+        if (interruptedOpening || interruptedClosing) NativeShadeSlideAnimator.restore();
+        shadeWindowRef = new WeakReference<>(window);
         Log.i(TAG, "Captured native NotificationShadeWindowView root");
+        if (interruptedClosing) {
+            PullDownHook.onNativeShadeHostUnavailable();
+            return;
+        }
 
         UnifiedShadeHost mounted = mountedRef.get();
         if (mounted != null && mounted.getParent() == previous && previous != null) {
@@ -218,6 +229,8 @@ final class NativeShadeHostBridge {
                     if (!attach(mounted, topInset)) {
                         Log.e(TAG, "Unable to migrate BB host to new native shade window");
                         PullDownHook.onNativeShadeHostUnavailable();
+                    } else if (interruptedOpening) {
+                        PullDownHook.onNativeShadeSlideInterrupted();
                     }
                 }
             });

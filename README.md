@@ -5,15 +5,14 @@ Android on the Zinwa Q25. The current test build is a single **Vector/LSPosed
 APK** that integrates with LineageOS SystemUI. The long-term target is a
 native LineageOS SystemUI implementation.
 
-**Current merged baseline:** `0.9.83-native-fast-back-q25-dev`
-(versionCode 113). The native shade integration is **opt-in**, not the
+**Current merged baseline:** `0.9.84-native-notification-draw-q25-dev`
+(versionCode 114). The native shade integration is **opt-in**, not the
 default, until its remaining presentation work is completed.
 
-**Development branch:** `feat/native-notification-draw-policy` tests
-selectively skipping native card drawing beneath BB-UI and reading
-notification opening intents directly from active Android notifications.
-See [notification rendering experiment](docs/NATIVE_NOTIFICATION_RENDERING.md).
-This work is **not merged** and does not remove Android's native row objects.
+**Development branch:** `feat/native-shade-bbos6-slide` adds an opt-in
+BBOS6-style downward entrance and upward dismissal to the existing native
+shade window. See [shade slide experiment](docs/NATIVE_SHADE_SLIDE.md).
+This animation is not yet in master.
 
 ## Start here
 
