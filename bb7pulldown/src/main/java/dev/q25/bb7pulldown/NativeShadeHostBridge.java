@@ -241,8 +241,9 @@ final class NativeShadeHostBridge {
             window.addView(root, params);
             root.bringToFront();
             mountedRef = new WeakReference<>(root);
-            nativeGestureInProgress = false;
-            bbGestureInProgress = false;
+            // Do not reset nativeGestureInProgress: a heads-up or native
+            // downward swipe may still be holding the pointer at mount time.
+            // Its MOVE/UP must be consumed, not sent without an ACTION_DOWN.
             Log.i(TAG, "BB UI mounted at native NotificationShadeWindowView root;"
                     + " stock notification stack covered; one shade window");
             return true;
