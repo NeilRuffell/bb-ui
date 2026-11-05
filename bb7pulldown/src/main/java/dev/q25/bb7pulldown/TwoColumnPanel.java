@@ -10,6 +10,7 @@ import android.view.inputmethod.EditorInfo;
 import android.widget.EditText;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
+import android.graphics.Bitmap;
 import android.os.Bundle;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
@@ -67,6 +68,17 @@ final class TwoColumnPanel extends FrameLayout {
     private final NotificationActionListener onActions;
     private final MediaControlListener onMediaControl;
     private final LinearLayout mediaRow;
+    private final LinearLayout mediaContainer;
+    private final LinearLayout mediaColumns;
+    private final FrameLayout mediaArtworkFrame;
+    private final ImageView mediaArtworkImage;
+    private final TextView mediaArtworkPlaceholder;
+    private final MediaArtworkLoader mediaArtworkLoader = new MediaArtworkLoader();
+    private MediaSession.Token shownArtworkToken;
+    private String shownArtworkTitle;
+    private String shownArtworkArtist;
+    private String shownArtworkUri;
+    private Bitmap shownArtworkBitmap;
     private final LinearLayout mediaSeekRow;
     private final SeekBar mediaSeekBar;
     private final TextView mediaElapsed;
@@ -221,7 +233,7 @@ final class TwoColumnPanel extends FrameLayout {
         mediaIndex.setFocusable(false);
         mediaRow.addView(mediaIndex, new LinearLayout.LayoutParams(
                 LayoutParams.WRAP_CONTENT, LayoutParams.MATCH_PARENT));
-        LinearLayout mediaContainer = new LinearLayout(context);
+        mediaContainer = new LinearLayout(context);
         mediaContainer.setOrientation(LinearLayout.VERTICAL);
         content.addView(mediaContainer, new LinearLayout.LayoutParams(
                 LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
@@ -290,15 +302,38 @@ final class TwoColumnPanel extends FrameLayout {
         mediaContainer.addView(mediaSeekRow, new LinearLayout.LayoutParams(
                 LayoutParams.MATCH_PARENT, dp(48)));
 
-        LinearLayout columns = new LinearLayout(context);
-        columns.setOrientation(LinearLayout.HORIZONTAL);
-        columns.setWeightSum(PanelRatio.TOTAL_WEIGHT);
-        content.addView(columns, new LinearLayout.LayoutParams(
+        // Expanded music view replaces the notification columns and fills their space.
+        // The album art remains passive; hardware focus stays on the transport/seek row.
+        mediaArtworkFrame = new FrameLayout(context);
+        mediaArtworkFrame.setBackgroundColor(palette.canvas);
+        mediaArtworkFrame.setFocusable(false);
+        mediaArtworkFrame.setVisibility(View.GONE);
+
+        mediaArtworkImage = new ImageView(context);
+        mediaArtworkImage.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        mediaArtworkImage.setPadding(dp(16), dp(16), dp(16), dp(16));
+        mediaArtworkImage.setFocusable(false);
+        mediaArtworkImage.setContentDescription("Album artwork");
+        mediaArtworkFrame.addView(mediaArtworkImage, new FrameLayout.LayoutParams(
+                LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
+
+        mediaArtworkPlaceholder = text("Artwork unavailable", 13, palette.muted);
+        mediaArtworkPlaceholder.setGravity(Gravity.CENTER);
+        mediaArtworkPlaceholder.setFocusable(false);
+        mediaArtworkFrame.addView(mediaArtworkPlaceholder, new FrameLayout.LayoutParams(
+                LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
+        mediaContainer.addView(mediaArtworkFrame, new LinearLayout.LayoutParams(
+                LayoutParams.MATCH_PARENT, 0, 1f));
+
+        mediaColumns = new LinearLayout(context);
+        mediaColumns.setOrientation(LinearLayout.HORIZONTAL);
+        mediaColumns.setWeightSum(PanelRatio.TOTAL_WEIGHT);
+        content.addView(mediaColumns, new LinearLayout.LayoutParams(
                 LayoutParams.MATCH_PARENT, 0, 1f));
 
         FrameLayout left = new FrameLayout(context);
         left.setBackgroundColor(palette.left);
-        columns.addView(left, new LinearLayout.LayoutParams(
+        mediaColumns.addView(left, new LinearLayout.LayoutParams(
                 0, LinearLayout.LayoutParams.MATCH_PARENT, PanelRatio.LEFT_WEIGHT));
 
         ScrollView iconScroller = new ScrollView(context);
@@ -323,7 +358,7 @@ final class TwoColumnPanel extends FrameLayout {
 
         FrameLayout right = new FrameLayout(context);
         right.setBackgroundColor(palette.right);
-        columns.addView(right, new LinearLayout.LayoutParams(
+        mediaColumns.addView(right, new LinearLayout.LayoutParams(
                 0, LinearLayout.LayoutParams.MATCH_PARENT, PanelRatio.RIGHT_WEIGHT));
 
         LinearLayout rightContent = new LinearLayout(context);
@@ -425,7 +460,49 @@ final class TwoColumnPanel extends FrameLayout {
                 + (mediaSessions.size() > 1
                         ? ", " + (index + 1) + " of " + mediaSessions.size() : ""));
         renderMediaProgress();
+        updateMediaArtwork();
         updateMediaHighlight();
+    }
+
+    /** Artwork changes with the selected native media session or track metadata. */
+    private void updateMediaArtwork() {
+        if (!mediaControlsOpen) return;
+        int index = mediaSessionIndex();
+        if (index < 0) return;
+        NativeMediaSessions.Entry entry = mediaSessions.get(index);
+        if (Objects.equals(shownArtworkToken, entry.token)
+                && Objects.equals(shownArtworkTitle, entry.title)
+                && Objects.equals(shownArtworkArtist, entry.artist)
+                && Objects.equals(shownArtworkUri, entry.artworkUri)
+                && shownArtworkBitmap == entry.artwork) {
+            return;
+        }
+
+        shownArtworkToken = entry.token;
+        shownArtworkTitle = entry.title;
+        shownArtworkArtist = entry.artist;
+        shownArtworkUri = entry.artworkUri;
+        shownArtworkBitmap = entry.artwork;
+        mediaArtworkLoader.cancel();
+        mediaArtworkImage.setImageBitmap(entry.artwork);
+        mediaArtworkPlaceholder.setVisibility(entry.artwork == null ? View.VISIBLE : View.GONE);
+        mediaArtworkPlaceholder.setText(entry.artworkUri.isEmpty()
+                ? "Artwork unavailable" : "Loading artwork");
+
+        // Embedded bitmaps provide immediate feedback; an accessible metadata URI
+        // may provide higher-resolution art without blocking SystemUI's main thread.
+        if (!entry.artworkUri.isEmpty()) {
+            mediaArtworkLoader.load(getContext(), entry.artworkUri, artwork -> {
+                if (!mediaControlsOpen) return;
+                if (artwork != null) {
+                    mediaArtworkImage.setImageBitmap(artwork);
+                    mediaArtworkPlaceholder.setVisibility(View.GONE);
+                } else if (mediaArtworkImage.getDrawable() == null) {
+                    mediaArtworkPlaceholder.setText("Artwork unavailable");
+                    mediaArtworkPlaceholder.setVisibility(View.VISIBLE);
+                }
+            });
+        }
     }
 
     private void setMediaControlsOpen(boolean open) {
@@ -435,7 +512,24 @@ final class TwoColumnPanel extends FrameLayout {
         mediaSeekDragging = false;
         mediaDragToken = null;
         mediaSeekRow.setVisibility(open ? View.VISIBLE : View.GONE);
-        if (open) renderMediaProgress();
+        mediaArtworkFrame.setVisibility(open ? View.VISIBLE : View.GONE);
+        mediaColumns.setVisibility(open ? View.GONE : View.VISIBLE);
+        mediaContainer.setLayoutParams(new LinearLayout.LayoutParams(
+                LayoutParams.MATCH_PARENT,
+                open ? 0 : LayoutParams.WRAP_CONTENT, open ? 1f : 0f));
+
+        if (open) {
+            renderMediaProgress();
+            updateMediaArtwork();
+        } else {
+            mediaArtworkLoader.cancel();
+            shownArtworkToken = null;
+            shownArtworkTitle = null;
+            shownArtworkArtist = null;
+            shownArtworkUri = null;
+            shownArtworkBitmap = null;
+            mediaArtworkImage.setImageDrawable(null);
+        }
         updateMediaHighlight();
         updateMediaTicker();
     }
@@ -497,6 +591,8 @@ final class TwoColumnPanel extends FrameLayout {
 
     @Override protected void onDetachedFromWindow() {
         removeCallbacks(mediaProgressTick);
+        mediaArtworkLoader.close();
+        mediaArtworkImage.setImageDrawable(null);
         super.onDetachedFromWindow();
     }
 
