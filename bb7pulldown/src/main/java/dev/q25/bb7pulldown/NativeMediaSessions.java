@@ -183,7 +183,13 @@ final class NativeMediaSessions {
                 : new ArrayList<>(compatControllers.entrySet())) {
             if (next.containsKey(old.getKey())) continue;
             MediaControllerCompat.Callback callback = compatCallbacks.remove(old.getKey());
-            if (callback != null) old.getValue().unregisterCallback(callback);
+            if (callback != null) {
+                try {
+                    old.getValue().unregisterCallback(callback);
+                } catch (RuntimeException error) {
+                    Log.w(TAG, "Unable to release media-mode callback", error);
+                }
+            }
             compatControllers.remove(old.getKey());
         }
         for (Map.Entry<MediaSession.Token, MediaController> item : next.entrySet()) {
@@ -457,7 +463,13 @@ final class NativeMediaSessions {
         for (Map.Entry<MediaSession.Token, MediaControllerCompat> entry
                 : compatControllers.entrySet()) {
             MediaControllerCompat.Callback callback = compatCallbacks.get(entry.getKey());
-            if (callback != null) entry.getValue().unregisterCallback(callback);
+            if (callback != null) {
+                try {
+                    entry.getValue().unregisterCallback(callback);
+                } catch (RuntimeException error) {
+                    Log.w(TAG, "Unable to unregister media-mode callback", error);
+                }
+            }
         }
         compatCallbacks.clear();
         compatControllers.clear();
