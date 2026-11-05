@@ -53,6 +53,11 @@ final class TwoColumnPanel extends FrameLayout {
     interface MediaControlListener {
         boolean onControl(MediaSession.Token token, int action);
         boolean onSeek(MediaSession.Token token, long positionMs);
+        boolean onSetMode(MediaSession.Token token, int kind, int value);
+    }
+    interface MediaHeaderListener {
+        void onMediaHeader(boolean expanded, NativeMediaSessions.Entry session,
+                boolean modeSelected, int selectedMode);
     }
     interface NotificationActionListener {
         void onAction(String notificationKey, int actionIndex);
@@ -70,6 +75,7 @@ final class TwoColumnPanel extends FrameLayout {
     private final OpenNotificationListener onOpenNotification;
     private final NotificationActionListener onActions;
     private final MediaControlListener onMediaControl;
+    private MediaHeaderListener onMediaHeader;
     private final LinearLayout mediaRow;
     private final LinearLayout mediaContainer;
     private final LinearLayout mediaColumns;
@@ -97,6 +103,8 @@ final class TwoColumnPanel extends FrameLayout {
     private boolean mediaControlsOpen;
     private int selectedMediaButton = NativeMediaSessions.PLAY_PAUSE;
     private boolean mediaSeekSelected;
+    private boolean mediaModeSelected;
+    private int selectedMediaMode = MediaModePolicy.SHUFFLE;
     private boolean mediaSeekDragging;
     private MediaSession.Token mediaDragToken;
     private MediaSession.Token mediaPendingToken;
@@ -184,8 +192,10 @@ final class TwoColumnPanel extends FrameLayout {
                 setMediaControlsOpen(true);
             } else {
                 mediaSeekSelected = false;
+                mediaModeSelected = false;
                 performMediaAction();
                 updateMediaHighlight();
+                notifyMediaHeader();
             }
         });
 
@@ -226,8 +236,10 @@ final class TwoColumnPanel extends FrameLayout {
                 mediaRow.requestFocus();
                 setMediaControlsOpen(true);
                 mediaSeekSelected = false;
+                mediaModeSelected = false;
                 performMediaAction();
                 updateMediaHighlight();
+                notifyMediaHeader();
             });
             mediaButtons[i] = button;
             mediaRow.addView(button, new LinearLayout.LayoutParams(dp(39), dp(39)));
@@ -479,6 +491,7 @@ final class TwoColumnPanel extends FrameLayout {
         selectedMediaToken = mediaSessions.get(next).token;
         mediaPendingToken = null;
         mediaSeekSelected = false;
+        mediaModeSelected = false;
         renderMediaSession();
     }
 
@@ -516,6 +529,7 @@ final class TwoColumnPanel extends FrameLayout {
         renderMediaProgress();
         updateMediaArtwork();
         updateMediaHighlight();
+        notifyMediaHeader();
     }
 
     /** Artwork changes with the selected native media session or track metadata. */
@@ -563,6 +577,7 @@ final class TwoColumnPanel extends FrameLayout {
         if (mediaControlsOpen == open) return;
         mediaControlsOpen = open;
         mediaSeekSelected = false;
+        mediaModeSelected = false;
         mediaSeekDragging = false;
         mediaDragToken = null;
         mediaSeekRow.setVisibility(open ? View.VISIBLE : View.GONE);
@@ -605,6 +620,56 @@ final class TwoColumnPanel extends FrameLayout {
         }
         updateMediaHighlight();
         updateMediaTicker();
+        notifyMediaHeader();
+    }
+
+    /** The shared host owns the media header; the player only reports its state. */
+    void setMediaHeaderListener(MediaHeaderListener listener) {
+        onMediaHeader = listener;
+        notifyMediaHeader();
+    }
+
+    private NativeMediaSessions.Entry currentMediaSession() {
+        int index = mediaSessionIndex();
+        return index < 0 ? null : mediaSessions.get(index);
+    }
+
+    private void notifyMediaHeader() {
+        if (onMediaHeader == null) return;
+        NativeMediaSessions.Entry entry = currentMediaSession();
+        if (entry != null && mediaModeSelected) {
+            selectedMediaMode = MediaModePolicy.stepMode(selectedMediaMode, 0,
+                    entry.canShuffle, entry.canRepeat);
+            if (selectedMediaMode < 0) mediaModeSelected = false;
+        }
+        onMediaHeader.onMediaHeader(mediaControlsOpen, entry,
+                mediaModeSelected, selectedMediaMode);
+    }
+
+    void activateMediaHeaderMode(int kind) {
+        if (!mediaControlsOpen) return;
+        NativeMediaSessions.Entry entry = currentMediaSession();
+        if (entry == null || (kind == MediaModePolicy.SHUFFLE && !entry.canShuffle)
+                || (kind == MediaModePolicy.REPEAT && !entry.canRepeat)) return;
+        selectedMediaMode = kind;
+        mediaModeSelected = true;
+        mediaSeekSelected = false;
+        mediaRow.requestFocus();
+        updateMediaHighlight();
+        notifyMediaHeader();
+        performMediaModeAction();
+    }
+
+    private void performMediaModeAction() {
+        NativeMediaSessions.Entry entry = currentMediaSession();
+        if (entry == null) return;
+        if (selectedMediaMode == MediaModePolicy.SHUFFLE && entry.canShuffle) {
+            onMediaControl.onSetMode(entry.token, MediaModePolicy.SHUFFLE,
+                    MediaModePolicy.nextShuffle(entry.shuffleMode));
+        } else if (selectedMediaMode == MediaModePolicy.REPEAT && entry.canRepeat) {
+            onMediaControl.onSetMode(entry.token, MediaModePolicy.REPEAT,
+                    MediaModePolicy.nextRepeat(entry.repeatMode));
+        }
     }
 
     private void updateMediaTicker() {
@@ -712,7 +777,8 @@ final class TwoColumnPanel extends FrameLayout {
         for (int i = 0; i < mediaButtons.length; i++) {
             boolean enabled = i == NativeMediaSessions.PREVIOUS ? entry.canPrevious
                     : i == NativeMediaSessions.NEXT ? entry.canNext : entry.canPlayPause;
-            boolean selected = focused && mediaControlsOpen && !mediaSeekSelected
+            boolean selected = focused && mediaControlsOpen
+                    && !mediaSeekSelected && !mediaModeSelected
                     && selectedMediaButton == i;
             ImageView button = mediaButtons[i];
             button.setBackground(selected ? BB7Theme.selected(dp(3), dp(1)) : null);
@@ -746,6 +812,13 @@ final class TwoColumnPanel extends FrameLayout {
                             if (entry.canSeek) seekMedia(entry, MediaSeekPolicy.seekStep(
                                     displayedMediaPosition(entry), entry.durationMs, step));
                         }
+                    } else if (mediaControlsOpen && mediaModeSelected) {
+                        NativeMediaSessions.Entry entry = currentMediaSession();
+                        if (entry != null) {
+                            selectedMediaMode = MediaModePolicy.stepMode(selectedMediaMode, step,
+                                    entry.canShuffle, entry.canRepeat);
+                            notifyMediaHeader();
+                        }
                     } else if (mediaControlsOpen) {
                         selectedMediaButton = AppSelectionPolicy.move(
                                 selectedMediaButton, step, mediaButtons.length);
@@ -759,16 +832,32 @@ final class TwoColumnPanel extends FrameLayout {
             case KeyEvent.KEYCODE_DPAD_DOWN:
                 if (event.getAction() == KeyEvent.ACTION_DOWN) {
                     if (mediaControlsOpen) {
-                        int current = mediaSeekSelected
-                                ? MediaNavigationPolicy.SEEK_BAR
-                                : MediaNavigationPolicy.TRANSPORT_CONTROLS;
-                        int direction = code == KeyEvent.KEYCODE_DPAD_DOWN ? 1 : -1;
-                        int next = MediaNavigationPolicy.moveRow(current, direction);
-                        // No wrap or session switching at either end of the
-                        // expanded player. The artwork is not a selectable row.
-                        if (next != current) {
-                            mediaSeekSelected = next == MediaNavigationPolicy.SEEK_BAR;
+                        if (mediaModeSelected) {
+                            if (code == KeyEvent.KEYCODE_DPAD_DOWN) {
+                                mediaModeSelected = false;
+                                updateMediaHighlight();
+                                notifyMediaHeader();
+                            }
+                        } else if (mediaSeekSelected) {
+                            if (code == KeyEvent.KEYCODE_DPAD_UP) {
+                                mediaSeekSelected = false;
+                                updateMediaHighlight();
+                            }
+                        } else if (code == KeyEvent.KEYCODE_DPAD_DOWN) {
+                            mediaSeekSelected = true;
                             updateMediaHighlight();
+                        } else {
+                            NativeMediaSessions.Entry entry = currentMediaSession();
+                            if (entry != null) {
+                                int first = MediaModePolicy.firstAvailable(
+                                        entry.canShuffle, entry.canRepeat);
+                                if (first >= 0) {
+                                    selectedMediaMode = first;
+                                    mediaModeSelected = true;
+                                    updateMediaHighlight();
+                                    notifyMediaHeader();
+                                }
+                            }
                         }
                     } else if (code == KeyEvent.KEYCODE_DPAD_UP) {
                         enterStatusZone();
@@ -785,6 +874,8 @@ final class TwoColumnPanel extends FrameLayout {
                     if (!mediaControlsOpen) {
                         selectedMediaButton = NativeMediaSessions.PLAY_PAUSE;
                         setMediaControlsOpen(true);
+                    } else if (mediaModeSelected) {
+                        performMediaModeAction();
                     } else if (!mediaSeekSelected) {
                         performMediaAction();
                     }
