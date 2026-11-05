@@ -5,30 +5,39 @@ import android.content.res.ColorStateList;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
+import android.graphics.drawable.ColorDrawable;
 import android.text.TextUtils;
 import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
+import android.view.ViewGroup;
+import android.widget.AbsListView;
+import android.widget.AdapterView;
+import android.widget.BaseAdapter;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
-import android.widget.ScrollView;
+import android.widget.ListView;
 import android.widget.TextView;
 
 import java.util.ArrayList;
-import java.util.List;
-import java.util.Set;
 import java.util.HashSet;
+import java.util.List;
+import java.util.Objects;
+import java.util.Set;
 
 import dev.q25.trackpad.theme.BB7Theme;
 
 /**
- * BBOS6/7 presentation of the installed SystemUI QS tiles.
+ * BBOS6/7 presentation of installed native SystemUI Quick Settings tiles.
  *
- * This class is a view only. Neither this view nor its Vector entry points
- * create tiles, implement radio controls, or bypass native tile security.
- * It can later be constructed directly by a LineageOS SystemUI integration.
+ * One Android ListView owns both row selection and the vertical viewport.
+ * Unlike ScrollView + focusable children, ListView has built-in one-item
+ * Up/Down navigation and scrolls the selected item into view as needed.
+ * There are no manual scroll amounts, focus-scroll workarounds or paging.
+ *
+ * The panel is view-only: tile lifecycles/actions are still owned by SystemUI.
  */
 final class BB6NativeQsPanel extends FrameLayout {
     interface Listener {
@@ -37,36 +46,51 @@ final class BB6NativeQsPanel extends FrameLayout {
     }
 
     private static final int UNLOCKED = -1;
+    private static final int HEADER_COUNT = 1;
 
     private final BB7Theme.Palette palette;
     private final Listener listener;
     private final ShadeUiController navigation;
     private final boolean lockscreenMode;
     private final NativeQuickSettingsTiles.Session nativeSession;
-    private final LinearLayout list;
+    private final ListView list;
+    private final TextView empty;
     private final List<Row> rows = new ArrayList<>();
+    private final BaseAdapter adapter;
     private boolean active;
     private float downY;
     private float downX;
     private boolean closingSwipe;
 
+    /** Data only: ListView creates/recycles the actual views. */
     private static final class Row {
         final String key;
         final String spec;
         final int lockedKind;
-        final NativeQuickSettingsTiles.TileInfo tile;
-        final LinearLayout view;
-        final ImageView icon;
-        final TextView label;
-        final TextView status;
+        NativeQuickSettingsTiles.TileInfo tile;
+        CharSequence title;
 
-        Row(String key, String spec, int lockedKind, NativeQuickSettingsTiles.TileInfo tile,
-                LinearLayout view, ImageView icon, TextView label, TextView status) {
+        Row(String key, String spec, int lockedKind,
+                NativeQuickSettingsTiles.TileInfo tile, CharSequence title) {
             this.key = key;
             this.spec = spec;
             this.lockedKind = lockedKind;
             this.tile = tile;
-            this.view = view;
+            this.title = title;
+        }
+    }
+
+    private static final class RowViews {
+        final LinearLayout root;
+        final ImageView icon;
+        final TextView label;
+        final TextView status;
+        boolean styled;
+        boolean lastFocused;
+        boolean lastEnabled;
+
+        RowViews(LinearLayout root, ImageView icon, TextView label, TextView status) {
+            this.root = root;
             this.icon = icon;
             this.label = label;
             this.status = status;
@@ -86,15 +110,23 @@ final class BB6NativeQsPanel extends FrameLayout {
         setFocusableInTouchMode(true);
         setBackgroundColor(palette.canvas);
 
-        ScrollView scroll = new ScrollView(context);
-        scroll.setFillViewport(true);
-        scroll.setVerticalScrollBarEnabled(false);
-        addView(scroll, new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
+        list = new ListView(context);
+        list.setBackgroundColor(palette.canvas);
+        list.setVerticalScrollBarEnabled(false);
+        list.setFastScrollEnabled(false);
+        list.setItemsCanFocus(false);
+        list.setFocusable(true);
+        list.setFocusableInTouchMode(true);
+        list.setSelector(android.R.color.transparent);
+        list.setDivider(new ColorDrawable(palette.divider));
+        list.setDividerHeight(dp(1));
+        addView(list, new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
 
-        LinearLayout content = new LinearLayout(context);
-        content.setOrientation(LinearLayout.VERTICAL);
-        scroll.addView(content, new ScrollView.LayoutParams(
-                LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
+        // This heading scrolls as part of the same list, exactly like the
+        // previous panel. It is not a selectable tile.
+        LinearLayout header = new LinearLayout(context);
+        header.setOrientation(LinearLayout.VERTICAL);
+        header.setPadding(dp(7), dp(7), dp(7), dp(2));
 
         TextView heading = new TextView(context);
         heading.setText(lockscreenMode ? "Manage Connections" : "Quick Settings");
@@ -104,17 +136,55 @@ final class BB6NativeQsPanel extends FrameLayout {
         heading.setGravity(Gravity.CENTER_VERTICAL);
         heading.setPadding(dp(13), 0, dp(12), 0);
         heading.setBackgroundColor(palette.heading);
-        LinearLayout.LayoutParams headingParams = new LinearLayout.LayoutParams(
-                LayoutParams.MATCH_PARENT, dp(37));
-        headingParams.setMargins(dp(7), dp(7), dp(7), dp(2));
-        content.addView(heading, headingParams);
+        header.addView(heading, new LinearLayout.LayoutParams(
+                LayoutParams.MATCH_PARENT, dp(37)));
 
-        list = new LinearLayout(context);
-        list.setOrientation(LinearLayout.VERTICAL);
-        LinearLayout.LayoutParams listParams = new LinearLayout.LayoutParams(
-                LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT);
-        listParams.setMargins(dp(7), 0, dp(7), dp(10));
-        content.addView(list, listParams);
+        empty = new TextView(context);
+        empty.setText("No native Quick Settings tiles available");
+        empty.setTextColor(palette.muted);
+        empty.setTextSize(14);
+        empty.setPadding(dp(12), dp(16), dp(12), dp(16));
+        empty.setVisibility(View.GONE);
+        header.addView(empty);
+        list.addHeaderView(header, null, false);
+
+        adapter = new BaseAdapter() {
+            @Override public int getCount() { return rows.size(); }
+            @Override public Object getItem(int position) { return rows.get(position); }
+            @Override public long getItemId(int position) { return position; }
+            @Override public View getView(int position, View convertView, ViewGroup parent) {
+                View view = convertView == null ? createRowView() : convertView;
+                bindRow((RowViews) view.getTag(), rows.get(position), position);
+                return view;
+            }
+        };
+        list.setAdapter(adapter);
+        list.setOnItemClickListener((parent, view, position, id) -> {
+            if (navigation != null) navigation.focusContent();
+            dispatchAt(position - HEADER_COUNT, NativeQuickSettingsTiles.Action.PRIMARY);
+        });
+        list.setOnItemLongClickListener((parent, view, position, id) -> {
+            dispatchAt(position - HEADER_COUNT, NativeQuickSettingsTiles.Action.LONG_PRESS);
+            return true;
+        });
+        list.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override public void onItemSelected(AdapterView<?> parent, View view,
+                    int position, long id) {
+                styleVisibleRows();
+            }
+
+            @Override public void onNothingSelected(AdapterView<?> parent) {
+                styleVisibleRows();
+            }
+        });
+        list.setOnFocusChangeListener((view, focused) -> styleVisibleRows());
+        list.setOnScrollListener(new AbsListView.OnScrollListener() {
+            @Override public void onScrollStateChanged(AbsListView view, int state) { }
+            @Override public void onScroll(AbsListView view, int firstVisible,
+                    int visibleCount, int totalCount) {
+                styleVisibleRows();
+            }
+        });
     }
 
     @Override protected void onAttachedToWindow() {
@@ -137,23 +207,16 @@ final class BB6NativeQsPanel extends FrameLayout {
 
     void focusFirst() {
         if (navigation != null) navigation.focusContent();
-        if (!rows.isEmpty()) rows.get(0).view.requestFocus();
-        else requestFocus();
+        list.requestFocus();
+        if (!rows.isEmpty()) list.setSelectionFromTop(HEADER_COUNT, firstRowOffset());
+        styleVisibleRows();
     }
 
-    /** Called by SystemUI's own QSHost and QSTile callback sessions. */
+    /** QSTile state callbacks change data, not the selection or scroll position. */
     private void render() {
         if (!active || !isAttachedToWindow()) return;
-        String currentFocus = null;
-        for (Row row : rows) {
-            if (row.view.isFocused()) {
-                currentFocus = row.key;
-                break;
-            }
-        }
         List<NativeQuickSettingsTiles.TileInfo> nativeTiles = nativeSession.snapshot();
-        list.removeAllViews();
-        rows.clear();
+        List<Row> desired = new ArrayList<>();
         if (lockscreenMode) {
             Set<String> available = new HashSet<>();
             for (NativeQuickSettingsTiles.TileInfo tile : nativeTiles) {
@@ -161,33 +224,67 @@ final class BB6NativeQsPanel extends FrameLayout {
             }
             for (int kind : LockscreenQuickSettingsPolicy.visibleKinds()) {
                 String spec = LockscreenQuickSettingsPolicy.selectNativeSpec(kind, available);
-                NativeQuickSettingsTiles.TileInfo tile = find(nativeTiles, spec);
-                addRow("locked:" + kind, spec, kind, tile,
-                        ConnectionControlPolicy.label(kind));
+                desired.add(new Row("locked:" + kind, spec, kind,
+                        find(nativeTiles, spec), ConnectionControlPolicy.label(kind)));
             }
         } else {
             for (NativeQuickSettingsTiles.TileInfo tile : nativeTiles) {
-                if (tile.available) addRow(tile.spec, tile.spec, UNLOCKED, tile,
-                        tile.label);
+                if (tile.available) {
+                    desired.add(new Row(tile.spec, tile.spec, UNLOCKED, tile, tile.label));
+                }
             }
         }
-        if (rows.isEmpty()) {
-            TextView empty = new TextView(getContext());
-            empty.setText("No native Quick Settings tiles available");
-            empty.setTextColor(palette.muted);
-            empty.setTextSize(14);
-            empty.setPadding(dp(12), dp(16), dp(12), dp(16));
-            list.addView(empty);
-        }
-        if (currentFocus != null) {
-            for (Row row : rows) {
-                if (row.key.equals(currentFocus)) {
-                    row.view.requestFocus();
+
+        empty.setVisibility(desired.isEmpty() ? View.VISIBLE : View.GONE);
+        boolean structureChanged = desired.size() != rows.size();
+        if (!structureChanged) {
+            for (int i = 0; i < desired.size(); i++) {
+                Row current = rows.get(i);
+                Row updated = desired.get(i);
+                if (!current.key.equals(updated.key)
+                        || !Objects.equals(current.spec, updated.spec)
+                        || current.lockedKind != updated.lockedKind) {
+                    structureChanged = true;
                     break;
                 }
             }
         }
-        updateFocus();
+
+        if (structureChanged) {
+            int before = selectedIndex();
+            String selectedKey = before >= 0 ? rows.get(before).key : null;
+            View oldSelectedView = list.getSelectedView();
+            int selectedTop = oldSelectedView == null ? firstRowOffset()
+                    : oldSelectedView.getTop();
+            rows.clear();
+            rows.addAll(desired);
+            adapter.notifyDataSetChanged();
+            if (selectedKey != null) {
+                int next = -1;
+                for (int i = 0; i < rows.size(); i++) {
+                    if (selectedKey.equals(rows.get(i).key)) {
+                        next = i;
+                        break;
+                    }
+                }
+                if (next < 0 && !rows.isEmpty()) {
+                    next = Math.min(before, rows.size() - 1);
+                }
+                if (next >= 0) {
+                    list.setSelectionFromTop(next + HEADER_COUNT, selectedTop);
+                }
+            } else if (list.hasFocus() && !rows.isEmpty()) {
+                list.setSelectionFromTop(HEADER_COUNT, firstRowOffset());
+            }
+        } else {
+            // No notifyDataSetChanged(): rebinding can otherwise reset the
+            // focused item and cause ListView to change its viewport.
+            for (int i = 0; i < desired.size(); i++) {
+                rows.get(i).tile = desired.get(i).tile;
+                rows.get(i).title = desired.get(i).title;
+            }
+            refreshVisibleRows();
+        }
     }
 
     private static NativeQuickSettingsTiles.TileInfo find(
@@ -199,31 +296,17 @@ final class BB6NativeQsPanel extends FrameLayout {
         return null;
     }
 
-    private void addRow(String key, String spec, int kind,
-            NativeQuickSettingsTiles.TileInfo tile, CharSequence title) {
-        if (!rows.isEmpty()) {
-            View separator = new View(getContext());
-            separator.setBackgroundColor(palette.divider);
-            list.addView(separator, new LinearLayout.LayoutParams(
-                    LayoutParams.MATCH_PARENT, dp(1)));
-        }
-        LinearLayout row = new LinearLayout(getContext());
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(dp(9), dp(4), dp(9), dp(4));
-        row.setBackgroundColor(palette.card);
-        row.setFocusable(true);
-        row.setFocusableInTouchMode(true);
-        row.setClickable(tile != null);
-        list.addView(row, new LinearLayout.LayoutParams(
+    private View createRowView() {
+        LinearLayout root = new LinearLayout(getContext());
+        root.setOrientation(LinearLayout.HORIZONTAL);
+        root.setGravity(Gravity.CENTER_VERTICAL);
+        root.setPadding(dp(16), dp(4), dp(16), dp(4));
+        root.setLayoutParams(new AbsListView.LayoutParams(
                 LayoutParams.MATCH_PARENT, dp(55)));
+        root.setFocusable(false);
 
         ImageView icon = new ImageView(getContext());
-        Drawable drawable = tile == null ? null :
-                NativeQuickSettingsTiles.iconDrawable(getContext(), tile.icon);
-        if (drawable != null) icon.setImageDrawable(drawable);
-        else icon.setImageResource(android.R.drawable.ic_menu_manage);
-        row.addView(icon, new LinearLayout.LayoutParams(dp(23), dp(23)));
+        root.addView(icon, new LinearLayout.LayoutParams(dp(23), dp(23)));
 
         LinearLayout labels = new LinearLayout(getContext());
         labels.setOrientation(LinearLayout.VERTICAL);
@@ -231,44 +314,93 @@ final class BB6NativeQsPanel extends FrameLayout {
         LinearLayout.LayoutParams labelsParams = new LinearLayout.LayoutParams(
                 0, LayoutParams.MATCH_PARENT, 1);
         labelsParams.leftMargin = dp(9);
-        row.addView(labels, labelsParams);
+        root.addView(labels, labelsParams);
 
         TextView primary = new TextView(getContext());
-        primary.setText(TextUtils.isEmpty(title) ? (spec == null ? "Unavailable" : spec) : title);
         primary.setTextSize(15);
         primary.setSingleLine(true);
         primary.setEllipsize(TextUtils.TruncateAt.END);
         labels.addView(primary);
 
         TextView secondary = new TextView(getContext());
-        secondary.setText(tile == null ? "Unavailable" :
-                tile.disabledByPolicy ? "Restricted" : tile.statusText());
         secondary.setTextSize(12);
         secondary.setSingleLine(true);
         secondary.setEllipsize(TextUtils.TruncateAt.END);
         labels.addView(secondary);
 
-        Row item = new Row(key, spec, kind, tile, row, icon, primary, secondary);
-        rows.add(item);
-        String description = tile == null ? "Unavailable" :
-                (tile.contentDescription == null ? String.valueOf(title == null ? spec : title)
-                        : tile.contentDescription.toString());
-        row.setContentDescription(description + ", " + secondary.getText());
-        if (tile != null) {
-            row.setOnClickListener(view -> dispatch(item, NativeQuickSettingsTiles.Action.PRIMARY));
-            row.setOnLongClickListener(view -> {
-                dispatch(item, NativeQuickSettingsTiles.Action.LONG_PRESS);
-                return true;
-            });
-        }
-        row.setOnFocusChangeListener((view, focused) -> {
-            if (focused && navigation != null) navigation.focusContent();
-            updateFocus();
-        });
-        row.setOnKeyListener((view, code, event) -> onRowKey(item, code, event));
+        root.setTag(new RowViews(root, icon, primary, secondary));
+        return root;
     }
 
-    private void dispatch(Row row, NativeQuickSettingsTiles.Action action) {
+    private void bindRow(RowViews views, Row row, int index) {
+        NativeQuickSettingsTiles.TileInfo tile = row.tile;
+        Drawable drawable = tile == null ? null
+                : NativeQuickSettingsTiles.iconDrawable(getContext(), tile.icon);
+        if (drawable != null) views.icon.setImageDrawable(drawable);
+        else views.icon.setImageResource(android.R.drawable.ic_menu_manage);
+        CharSequence title = TextUtils.isEmpty(row.title)
+                ? (row.spec == null ? "Unavailable" : row.spec) : row.title;
+        views.label.setText(title);
+        views.status.setText(tile == null ? "Unavailable"
+                : tile.disabledByPolicy ? "Restricted" : tile.statusText());
+        CharSequence description = tile == null ? "Unavailable"
+                : tile.contentDescription == null ? title : tile.contentDescription;
+        views.root.setContentDescription(description + ", " + views.status.getText());
+        styleRow(views, index);
+    }
+
+    private void refreshVisibleRows() {
+        int start = list.getFirstVisiblePosition();
+        for (int i = 0; i < list.getChildCount(); i++) {
+            int rowIndex = start + i - HEADER_COUNT;
+            if (rowIndex >= 0 && rowIndex < rows.size()) {
+                View child = list.getChildAt(i);
+                if (child.getTag() instanceof RowViews) {
+                    bindRow((RowViews) child.getTag(), rows.get(rowIndex), rowIndex);
+                }
+            }
+        }
+    }
+
+    private void styleVisibleRows() {
+        int start = list.getFirstVisiblePosition();
+        for (int i = 0; i < list.getChildCount(); i++) {
+            int rowIndex = start + i - HEADER_COUNT;
+            if (rowIndex >= 0 && rowIndex < rows.size()) {
+                View child = list.getChildAt(i);
+                if (child.getTag() instanceof RowViews) {
+                    styleRow((RowViews) child.getTag(), rowIndex);
+                }
+            }
+        }
+    }
+
+    private void styleRow(RowViews views, int index) {
+        boolean focused = list.hasFocus() && selectedIndex() == index
+                && (navigation == null || !navigation.isStatusBarFocused());
+        boolean enabled = rows.get(index).tile != null;
+        if (views.styled && views.lastFocused == focused && views.lastEnabled == enabled) {
+            return;
+        }
+        views.styled = true;
+        views.lastFocused = focused;
+        views.lastEnabled = enabled;
+        if (focused) views.root.setBackground(BB7Theme.selected(dp(3), dp(1)));
+        else views.root.setBackgroundColor(palette.card);
+        views.label.setTextColor(focused ? Color.WHITE : enabled ? palette.title : palette.muted);
+        views.status.setTextColor(focused ? Color.WHITE : palette.muted);
+        views.icon.setImageTintList(ColorStateList.valueOf(
+                focused ? Color.WHITE : enabled ? palette.body : palette.muted));
+    }
+
+    private int selectedIndex() {
+        int position = list.getSelectedItemPosition() - HEADER_COUNT;
+        return position >= 0 && position < rows.size() ? position : -1;
+    }
+
+    private void dispatchAt(int index, NativeQuickSettingsTiles.Action action) {
+        if (index < 0 || index >= rows.size()) return;
+        Row row = rows.get(index);
         if (row.tile == null || row.spec == null) return;
         if (lockscreenMode && action != NativeQuickSettingsTiles.Action.PRIMARY) return;
         if (action == NativeQuickSettingsTiles.Action.SECONDARY
@@ -278,19 +410,41 @@ final class BB6NativeQsPanel extends FrameLayout {
         listener.onAction(row.spec, row.lockedKind, action);
     }
 
-    private boolean onRowKey(Row row, int code, KeyEvent event) {
-        int index = rows.indexOf(row);
-        if (index < 0) return false;
+    @Override public boolean dispatchKeyEvent(KeyEvent event) {
+        if (navigation != null && navigation.handleKey(event)) return true;
+        int code = event.getKeyCode();
         if (code == KeyEvent.KEYCODE_DPAD_UP || code == KeyEvent.KEYCODE_DPAD_DOWN) {
-            if (event.getAction() == KeyEvent.ACTION_DOWN) {
-                if (code == KeyEvent.KEYCODE_DPAD_UP && index == 0) {
+            if (event.getAction() == KeyEvent.ACTION_DOWN && !rows.isEmpty()) {
+                int selected = selectedIndex();
+                if (code == KeyEvent.KEYCODE_DPAD_UP && selected <= 0) {
                     if (lockscreenMode) listener.onClose();
-                    else if (navigation != null)
+                    else if (navigation != null) {
                         navigation.focusStatusBarFromPage(ShadeStatusNavigation.QUICK_SETTINGS);
+                        // Keep ListView as the hardware key receiver. The shared
+                        // controller now owns status-bar selection, so its
+                        // dispatchKeyEvent() consumes Left/Right/Down/Enter.
+                        // Clearing actual View focus here strands key events
+                        // outside this panel while its status zone stays active.
+                        styleVisibleRows();
+                    }
+                } else if (selected < 0) {
+                    // Re-enter keyboard navigation at an already visible row
+                    // if touch scrolling has cleared ListView's selection.
+                    int first = Math.max(HEADER_COUNT, list.getFirstVisiblePosition());
+                    int last = Math.min(rows.size(), list.getLastVisiblePosition());
+                    int target = code == KeyEvent.KEYCODE_DPAD_UP
+                            ? Math.max(first, last) : first;
+                    int visibleIndex = target - list.getFirstVisiblePosition();
+                    View visible = visibleIndex >= 0 && visibleIndex < list.getChildCount()
+                            ? list.getChildAt(visibleIndex) : null;
+                    int top = visible == null ? 0 : visible.getTop();
+                    list.requestFocus();
+                    list.setSelectionFromTop(target, top);
                 } else {
-                    int next = Math.max(0, Math.min(rows.size() - 1,
-                            index + (code == KeyEvent.KEYCODE_DPAD_UP ? -1 : 1)));
-                    rows.get(next).view.requestFocus();
+                    // This is ListView's own one-item arrow navigation.
+                    // Do not give the event to any ScrollView/page-scroll handler.
+                    if (!list.hasFocus()) list.requestFocus();
+                    list.dispatchKeyEvent(event);
                 }
             }
             return true;
@@ -301,43 +455,25 @@ final class BB6NativeQsPanel extends FrameLayout {
         if (code == KeyEvent.KEYCODE_SPACE && lockscreenMode) return true;
         if (code == KeyEvent.KEYCODE_MENU) {
             if (event.getAction() == KeyEvent.ACTION_UP) {
-                dispatch(row, row.tile != null && row.tile.hasSecondaryAction
-                        ? NativeQuickSettingsTiles.Action.SECONDARY
-                        : NativeQuickSettingsTiles.Action.LONG_PRESS);
+                int selected = selectedIndex();
+                if (selected >= 0) {
+                    Row row = rows.get(selected);
+                    dispatchAt(selected, row.tile != null && row.tile.hasSecondaryAction
+                            ? NativeQuickSettingsTiles.Action.SECONDARY
+                            : NativeQuickSettingsTiles.Action.LONG_PRESS);
+                }
             }
             return true;
         }
         if (code == KeyEvent.KEYCODE_DPAD_CENTER || code == KeyEvent.KEYCODE_ENTER
                 || code == KeyEvent.KEYCODE_NUMPAD_ENTER
                 || (code == KeyEvent.KEYCODE_SPACE && !lockscreenMode)) {
-            if (event.getAction() == KeyEvent.ACTION_UP && row.tile != null)
-                row.view.performClick();
+            if (event.getAction() == KeyEvent.ACTION_UP) {
+                dispatchAt(selectedIndex(), NativeQuickSettingsTiles.Action.PRIMARY);
+            }
             return true;
         }
-        return false;
-    }
-
-    private void updateFocus() {
-        for (Row row : rows) {
-            boolean focused = row.view.isFocused();
-            boolean enabled = row.tile != null;
-            row.view.setBackground(focused
-                    ? BB7Theme.selected(dp(3), dp(1))
-                    : null);
-            if (!focused) row.view.setBackgroundColor(palette.card);
-            int titleColor = focused ? Color.WHITE : enabled ? palette.title : palette.muted;
-            int stateColor = focused ? Color.WHITE : palette.muted;
-            row.label.setTextColor(titleColor);
-            row.status.setTextColor(stateColor);
-            row.icon.setImageTintList(ColorStateList.valueOf(
-                    focused ? Color.WHITE : enabled ? palette.body : palette.muted));
-        }
-    }
-
-    @Override public boolean dispatchKeyEvent(KeyEvent event) {
-        if (navigation != null && navigation.handleKey(event)) return true;
-        int key = event.getKeyCode();
-        if (key == KeyEvent.KEYCODE_BACK || key == KeyEvent.KEYCODE_ESCAPE) {
+        if (code == KeyEvent.KEYCODE_BACK || code == KeyEvent.KEYCODE_ESCAPE) {
             if (event.getAction() == KeyEvent.ACTION_UP) listener.onClose();
             return true;
         }
@@ -345,8 +481,8 @@ final class BB6NativeQsPanel extends FrameLayout {
     }
 
     @Override public boolean dispatchTouchEvent(MotionEvent event) {
-        // Full QS must scroll vertically; the legacy three-radio swipe-to-exit
-        // gesture is retained only for the compact locked panel.
+        // Full QS retains ListView's native touch scrolling. Only the compact
+        // lock-screen panel keeps its existing upward swipe-to-exit gesture.
         if (!lockscreenMode) return super.dispatchTouchEvent(event);
         switch (event.getActionMasked()) {
             case MotionEvent.ACTION_DOWN:
@@ -370,6 +506,12 @@ final class BB6NativeQsPanel extends FrameLayout {
                 break;
         }
         return super.dispatchTouchEvent(event);
+    }
+
+    /** Start the first tile immediately below the nonselectable list header. */
+    private int firstRowOffset() {
+        // Header: 7dp top inset + 37dp label + 2dp bottom + the list divider.
+        return dp(7) + dp(37) + dp(2) + list.getDividerHeight();
     }
 
     private int dp(int value) {
