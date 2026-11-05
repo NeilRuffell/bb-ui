@@ -2,7 +2,10 @@ package dev.q25.bb7pulldown;
 
 import android.content.Context;
 import android.content.res.ColorStateList;
+import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.Paint;
+import android.graphics.Path;
 import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.ColorDrawable;
@@ -20,6 +23,7 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.TextView;
+import android.service.quicksettings.Tile;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -85,15 +89,76 @@ final class BB6NativeQsPanel extends FrameLayout {
         final ImageView icon;
         final TextView label;
         final TextView status;
+        final StatusCheckbox checkbox;
         boolean styled;
         boolean lastFocused;
         boolean lastEnabled;
+        boolean lastActive;
 
-        RowViews(LinearLayout root, ImageView icon, TextView label, TextView status) {
+        RowViews(LinearLayout root, ImageView icon, TextView label,
+                TextView status, StatusCheckbox checkbox) {
             this.root = root;
             this.icon = icon;
             this.label = label;
             this.status = status;
+            this.checkbox = checkbox;
+        }
+    }
+
+    /**
+     * Presentation-only BBOS6 square checkbox. Never receives focus or
+     * handles clicks: activating the list item remains the only action.
+     */
+    private static final class StatusCheckbox extends View {
+        private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Path tick = new Path();
+        private boolean checked;
+        private boolean highlighted;
+
+        StatusCheckbox(Context context) {
+            super(context);
+            setFocusable(false);
+            setClickable(false);
+            setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        }
+
+        void display(boolean checked, boolean highlighted) {
+            if (this.checked == checked && this.highlighted == highlighted) return;
+            this.checked = checked;
+            this.highlighted = highlighted;
+            invalidate();
+        }
+
+        @Override protected void onDraw(Canvas canvas) {
+            super.onDraw(canvas);
+            float density = getResources().getDisplayMetrics().density;
+            float edge = Math.min(Math.min(getWidth(), getHeight()), 19f * density);
+            float left = (getWidth() - edge) * 0.5f;
+            float top = (getHeight() - edge) * 0.5f;
+            float right = left + edge;
+            float bottom = top + edge;
+            float radius = 2f * density;
+
+            paint.setStyle(Paint.Style.FILL);
+            paint.setColor(0xfff3f5f7);
+            canvas.drawRoundRect(left, top, right, bottom, radius, radius, paint);
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setStrokeWidth(Math.max(1f, density));
+            paint.setColor(highlighted ? 0xffe1efff : 0xff84909e);
+            canvas.drawRoundRect(left, top, right, bottom, radius, radius, paint);
+
+            if (checked) {
+                tick.reset();
+                tick.moveTo(left + edge * 0.19f, top + edge * 0.52f);
+                tick.lineTo(left + edge * 0.41f, top + edge * 0.74f);
+                tick.lineTo(left + edge * 0.83f, top + edge * 0.26f);
+                paint.setStrokeWidth(2.3f * density);
+                paint.setStrokeCap(Paint.Cap.ROUND);
+                paint.setStrokeJoin(Paint.Join.ROUND);
+                paint.setColor(0xff176bd1);
+                canvas.drawPath(tick, paint);
+            }
+            paint.setStyle(Paint.Style.FILL);
         }
     }
 
@@ -308,27 +373,35 @@ final class BB6NativeQsPanel extends FrameLayout {
         ImageView icon = new ImageView(getContext());
         root.addView(icon, new LinearLayout.LayoutParams(dp(23), dp(23)));
 
-        LinearLayout labels = new LinearLayout(getContext());
-        labels.setOrientation(LinearLayout.VERTICAL);
-        labels.setGravity(Gravity.CENTER_VERTICAL);
-        LinearLayout.LayoutParams labelsParams = new LinearLayout.LayoutParams(
-                0, LayoutParams.MATCH_PARENT, 1);
-        labelsParams.leftMargin = dp(9);
-        root.addView(labels, labelsParams);
-
         TextView primary = new TextView(getContext());
         primary.setTextSize(15);
         primary.setSingleLine(true);
+        primary.setGravity(Gravity.CENTER_VERTICAL);
         primary.setEllipsize(TextUtils.TruncateAt.END);
-        labels.addView(primary);
+        LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(
+                0, LayoutParams.MATCH_PARENT, 1f);
+        titleParams.leftMargin = dp(9);
+        root.addView(primary, titleParams);
 
         TextView secondary = new TextView(getContext());
-        secondary.setTextSize(12);
+        secondary.setTextSize(14);
         secondary.setSingleLine(true);
+        secondary.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
         secondary.setEllipsize(TextUtils.TruncateAt.END);
-        labels.addView(secondary);
+        secondary.setMaxWidth(Math.max(dp(65),
+                (int) (getResources().getDisplayMetrics().widthPixels * 0.38f)));
+        LinearLayout.LayoutParams statusParams = new LinearLayout.LayoutParams(
+                LayoutParams.WRAP_CONTENT, LayoutParams.MATCH_PARENT);
+        statusParams.leftMargin = dp(7);
+        root.addView(secondary, statusParams);
 
-        root.setTag(new RowViews(root, icon, primary, secondary));
+        StatusCheckbox checkbox = new StatusCheckbox(getContext());
+        LinearLayout.LayoutParams checkParams = new LinearLayout.LayoutParams(
+                dp(24), dp(26));
+        checkParams.leftMargin = dp(7);
+        root.addView(checkbox, checkParams);
+
+        root.setTag(new RowViews(root, icon, primary, secondary, checkbox));
         return root;
     }
 
@@ -343,6 +416,8 @@ final class BB6NativeQsPanel extends FrameLayout {
         views.label.setText(title);
         views.status.setText(tile == null ? "Unavailable"
                 : tile.disabledByPolicy ? "Restricted" : tile.statusText());
+        boolean hasCheckState = tile != null && tile.checked != null;
+        views.checkbox.setVisibility(hasCheckState ? View.VISIBLE : View.GONE);
         CharSequence description = tile == null ? "Unavailable"
                 : tile.contentDescription == null ? title : tile.contentDescription;
         views.root.setContentDescription(description + ", " + views.status.getText());
@@ -378,17 +453,27 @@ final class BB6NativeQsPanel extends FrameLayout {
     private void styleRow(RowViews views, int index) {
         boolean focused = list.hasFocus() && selectedIndex() == index
                 && (navigation == null || !navigation.isStatusBarFocused());
-        boolean enabled = rows.get(index).tile != null;
-        if (views.styled && views.lastFocused == focused && views.lastEnabled == enabled) {
+        NativeQuickSettingsTiles.TileInfo tile = rows.get(index).tile;
+        boolean enabled = tile != null && !tile.disabledByPolicy;
+        boolean active = enabled && tile.state == Tile.STATE_ACTIVE;
+        views.checkbox.display(tile != null && Boolean.TRUE.equals(tile.checked), focused);
+        if (views.styled && views.lastFocused == focused
+                && views.lastEnabled == enabled && views.lastActive == active) {
             return;
         }
         views.styled = true;
         views.lastFocused = focused;
         views.lastEnabled = enabled;
+        views.lastActive = active;
         if (focused) views.root.setBackground(BB7Theme.selected(dp(3), dp(1)));
         else views.root.setBackgroundColor(palette.card);
         views.label.setTextColor(focused ? Color.WHITE : enabled ? palette.title : palette.muted);
-        views.status.setTextColor(focused ? Color.WHITE : palette.muted);
+        // BBOS6 uses green status text for an enabled connection, and a
+        // neutral value for inactive/unavailable controls.
+        int statusColor = focused ? Color.WHITE
+                : active ? (palette == BB7Theme.Palette.DARK ? 0xff6bdd78 : 0xff168c27)
+                : enabled ? palette.title : palette.muted;
+        views.status.setTextColor(statusColor);
         views.icon.setImageTintList(ColorStateList.valueOf(
                 focused ? Color.WHITE : enabled ? palette.body : palette.muted));
     }
