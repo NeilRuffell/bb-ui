@@ -23,6 +23,19 @@ public class MediaModePolicyTest {
                 SHUFFLE_ACTION, MediaModePolicy.INVALID));
     }
 
+    @Test public void collapsedStatusOnlyAppearsForAdvertisedEnabledModes() {
+        assertFalse(MediaModePolicy.showShuffleStatus(true, MediaModePolicy.SHUFFLE_NONE));
+        assertFalse(MediaModePolicy.showShuffleStatus(false, MediaModePolicy.SHUFFLE_ALL));
+        assertFalse(MediaModePolicy.showShuffleStatus(true, MediaModePolicy.INVALID));
+        assertTrue(MediaModePolicy.showShuffleStatus(true, MediaModePolicy.SHUFFLE_ALL));
+
+        assertFalse(MediaModePolicy.showRepeatStatus(true, MediaModePolicy.REPEAT_NONE));
+        assertFalse(MediaModePolicy.showRepeatStatus(false, MediaModePolicy.REPEAT_ALL));
+        assertFalse(MediaModePolicy.showRepeatStatus(true, MediaModePolicy.INVALID));
+        assertTrue(MediaModePolicy.showRepeatStatus(true, MediaModePolicy.REPEAT_ONE));
+        assertTrue(MediaModePolicy.showRepeatStatus(true, MediaModePolicy.REPEAT_ALL));
+    }
+
     @Test public void shuffleTogglesOnlyNoneAndAll() {
         assertEquals(MediaModePolicy.SHUFFLE_ALL,
                 MediaModePolicy.nextShuffle(MediaModePolicy.SHUFFLE_NONE));
