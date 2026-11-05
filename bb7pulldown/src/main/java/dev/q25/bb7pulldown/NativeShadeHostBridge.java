@@ -1,6 +1,7 @@
 package dev.q25.bb7pulldown;
 
 import android.util.Log;
+import android.graphics.Rect;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
@@ -46,6 +47,13 @@ final class NativeShadeHostBridge {
     private static final Map<View, Integer> accessibility = new IdentityHashMap<>();
     private static volatile Boolean observedExpanded;
     private static boolean firstTouchRoutedLogged;
+    private static FrameLayout clippedWindow;
+    private static Rect originalWindowClip;
+    private static int reservedStatusBandHeight;
+    private static final View.OnLayoutChangeListener WINDOW_CLIP_LAYOUT =
+            (view, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom) -> {
+                if (view == clippedWindow) updateWindowClip();
+            };
     // A gesture that opened SystemUI's shade does not have an ACTION_DOWN
     // delivered to the BB child. Swallow its tail instead of sending an
     // orphaned MOVE/UP event or continuing the native drag.
@@ -246,6 +254,7 @@ final class NativeShadeHostBridge {
             window.addView(root, params);
             root.bringToFront();
             mountedRef = new WeakReference<>(root);
+            beginWindowClip(window, topInset);
             NativeShadeStatusBarVisibility.onBbShadeMountChanged(true);
             Log.i(TAG, "Native status-bar region left transparent; original icons retained");
             // Do not reset nativeGestureInProgress: a heads-up or native
@@ -259,6 +268,11 @@ final class NativeShadeHostBridge {
             if (parent instanceof ViewGroup) {
                 try { ((ViewGroup) parent).removeView(root); }
                 catch (Throwable ignored) { }
+            }
+            endWindowClip();
+            if (mountedRef.get() == root) {
+                mountedRef = new WeakReference<>(null);
+                NativeShadeStatusBarVisibility.onBbShadeMountChanged(false);
             }
             restoreAccessibility();
             Log.e(TAG, "Could not mount BB UI at native shade-window root", error);
@@ -277,6 +291,7 @@ final class NativeShadeHostBridge {
         if (mountedRef.get() == root) {
             mountedRef = new WeakReference<>(null);
             NativeShadeStatusBarVisibility.onBbShadeMountChanged(false);
+            endWindowClip();
         }
         ViewParent parent = root.getParent();
         try {
@@ -286,6 +301,49 @@ final class NativeShadeHostBridge {
         } finally {
             restoreAccessibility();
         }
+    }
+
+    /**
+     * Native shade scrims and QS/notification headers are siblings of the
+     * BB presentation. Even with a transparent BB root, they can tint or
+     * blur the reserved status-bar band behind it. Prevent the native
+     * notification-shade WINDOW from drawing any pixels in that band.
+     * The separately owned SystemUI status-bar window then remains visible.
+     *
+     * This does not remove, reparent or duplicate the status-bar clock/icons
+     * or change the native shade's notification and QS services.
+     */
+    private static void beginWindowClip(FrameLayout window, int statusBandPx) {
+        endWindowClip();
+        clippedWindow = window;
+        originalWindowClip = window.getClipBounds();
+        reservedStatusBandHeight = Math.max(0, statusBandPx);
+        window.addOnLayoutChangeListener(WINDOW_CLIP_LAYOUT);
+        updateWindowClip();
+        Log.i(TAG, "Native shade drawing clipped below status bar height="
+                + reservedStatusBandHeight + "px");
+    }
+
+    private static void updateWindowClip() {
+        FrameLayout window = clippedWindow;
+        if (window == null) return;
+        int width = window.getWidth();
+        int height = window.getHeight();
+        if (width <= 0 || height <= 0) return;
+        Rect clip = NativeShadeStatusBandPolicy.clipBounds(
+                width, height, reservedStatusBandHeight);
+        window.setClipBounds(clip);
+    }
+
+    private static void endWindowClip() {
+        FrameLayout window = clippedWindow;
+        if (window == null) return;
+        window.removeOnLayoutChangeListener(WINDOW_CLIP_LAYOUT);
+        window.setClipBounds(originalWindowClip);
+        clippedWindow = null;
+        originalWindowClip = null;
+        reservedStatusBandHeight = 0;
+        Log.i(TAG, "Native shade window drawing bounds restored");
     }
 
     private static void restoreAccessibility() {
