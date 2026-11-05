@@ -28,6 +28,7 @@ Compiled classes2.dex declares:
 - NotificationPanelViewController.mView: NotificationPanelView
 - NotificationPanelViewController.onFinishInflate(): void
 - NotificationPanelViewController.setExpandedFraction(float): void
+- NotificationPanelViewController.setExpandedHeightInternal(float): void
 - NotificationPanelViewController.expandToNotifications(): void
 - NotificationPanelViewController.instantCollapse(): void
 - NotificationPanelViewController.isExpandedWithoutHeadsUp(): boolean
@@ -38,7 +39,8 @@ upstream LineageOS Java sources.
 ## Phase 1: native window ownership (this branch)
 
 NativeShadeHostBridge hooks the native panel controller, captures its
-existing NotificationPanelView, and follows its expansion state.
+existing NotificationPanelView, and follows its expansion state through
+both fraction updates and touch-driven internal height updates.
 
 With native mode enabled:
 - A BB UnifiedShadeHost becomes a child of the existing native shade
