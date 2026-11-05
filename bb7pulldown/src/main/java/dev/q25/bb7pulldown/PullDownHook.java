@@ -4,6 +4,7 @@ import dev.q25.trackpad.theme.BB7Theme;
 
 import android.app.KeyguardManager;
 import android.content.Context;
+import android.media.session.MediaSession;
 import android.content.BroadcastReceiver;
 import android.content.Intent;
 import android.content.IntentFilter;
@@ -652,7 +653,14 @@ public final class PullDownHook implements IXposedHookLoadPackage {
                     @Override public boolean onReply(String key, int index, String reply) {
                         return sendNotificationReply(key, index, reply);
                     }
-                }, NAVIGATION, nativeMedia::send);
+                }, NAVIGATION, new TwoColumnPanel.MediaControlListener() {
+                    @Override public boolean onControl(MediaSession.Token token, int action) {
+                        return nativeMedia.send(token, action);
+                    }
+                    @Override public boolean onSeek(MediaSession.Token token, long positionMs) {
+                        return nativeMedia.seekTo(token, positionMs);
+                    }
+                });
         BB6NativeQsPanel connections = new BB6NativeQsPanel(context,
                 new BB6NativeQsPanel.Listener() {
                     @Override public void onClose() {
