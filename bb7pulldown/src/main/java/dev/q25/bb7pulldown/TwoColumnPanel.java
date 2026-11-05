@@ -288,8 +288,10 @@ final class TwoColumnPanel extends FrameLayout {
                 mediaSeekDragging = true;
                 mediaDragToken = selectedMediaToken;
                 mediaSeekSelected = true;
+                mediaModeSelected = false;
                 mediaRow.requestFocus();
                 updateMediaHighlight();
+                notifyMediaHeader();
             }
 
             @Override public void onProgressChanged(SeekBar seekBar, int progress,
