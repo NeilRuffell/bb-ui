@@ -7,8 +7,8 @@ android {
         applicationId 'dev.q25.trackpad'
         minSdk 33
         targetSdk 28
-        versionCode 87
-        versionName '0.9.57-expanded-media-layout-dev'
+        versionCode 88
+        versionName '0.9.58-media-radial-gradient-dev'
     }
     // Compile legacy feature sources into this one APK. These directories
     // are source roots only; their former application modules are not built.
