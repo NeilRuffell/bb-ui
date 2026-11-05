@@ -156,6 +156,10 @@ final class NativeShadeHostBridge {
                             }
                         }
                     });
+            // The Q25's normal system Back dispatcher belongs to SystemUI,
+            // not to our BB child; intercept its real native decision instead
+            // of waiting for Android to animateCollapseShade().
+            NativeShadeBackBridge.install(loader);
             installed = true;
             Log.i(TAG, "Native SystemUI shade-window ownership hooks registered");
         } catch (Throwable error) {

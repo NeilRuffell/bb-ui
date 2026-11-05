@@ -645,6 +645,18 @@ public final class PullDownHook implements IXposedHookLoadPackage {
         }
     }
 
+    /**
+     * Called by Q25 BackActionInteractor.onBackRequested() only while BB UI
+     * is attached to the actual native notification-shade window.
+     * Back keeps the existing notification/reply/media navigation depth.
+     */
+    static boolean onNativeSystemBackRequested() {
+        UnifiedShadeHost current = shadeHost;
+        if (current == null || openingOrClosing
+                || !NativeShadeHostBridge.isMounted(current)) return false;
+        return current.handleNativeBack();
+    }
+
     static void onNativeShadeExpansionChanged(boolean expanded) {
         if (!NativeShadeHostBridge.active()) return;
         nativeShadeExpanded = expanded;

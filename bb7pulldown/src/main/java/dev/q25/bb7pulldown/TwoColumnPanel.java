@@ -1808,6 +1808,18 @@ final class TwoColumnPanel extends FrameLayout {
         }
     }
 
+    /**
+     * Identical Back behaviour whether a key reached the focused child
+     * or SystemUI delivered a native OnBackInvokedCallback.
+     */
+    void handleNativeBack() {
+        if (activeReplyInput != null) closeInlineReply();
+        else if (mediaControlsOpen) {
+            setMediaControlsOpen(false);
+        } else if (notificationPaneActive) returnToAppIcons();
+        else onClose.onClose();
+    }
+
     @Override
     public boolean dispatchKeyEvent(KeyEvent event) {
         if (navigation.handleKey(event)) {
@@ -1836,13 +1848,7 @@ final class TwoColumnPanel extends FrameLayout {
             }
         }
         if (event.getKeyCode() == KeyEvent.KEYCODE_BACK) {
-            if (event.getAction() == KeyEvent.ACTION_UP) {
-                if (activeReplyInput != null) closeInlineReply();
-                else if (mediaControlsOpen) {
-                    setMediaControlsOpen(false);
-                } else if (notificationPaneActive) returnToAppIcons();
-                else onClose.onClose();
-            }
+            if (event.getAction() == KeyEvent.ACTION_UP) handleNativeBack();
             return true;
         }
         return super.dispatchKeyEvent(event);
