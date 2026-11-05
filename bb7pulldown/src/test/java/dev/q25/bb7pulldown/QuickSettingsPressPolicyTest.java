@@ -4,11 +4,11 @@ import static org.junit.Assert.assertEquals;
 import org.junit.Test;
 
 public final class QuickSettingsPressPolicyTest {
-    @Test public void nativeToggleAndDetailsAreReversedForVerifiedConnectivityTiles() {
+    @Test public void shortToggleAndLongSettingsForVerifiedConnectivityTiles() {
         for (String spec : new String[] {"wifi", "bt", "cell"}) {
             assertEquals(QuickSettingsPressPolicy.Action.SECONDARY,
                     QuickSettingsPressPolicy.select(spec, true, false));
-            assertEquals(QuickSettingsPressPolicy.Action.PRIMARY,
+            assertEquals(QuickSettingsPressPolicy.Action.LONG_PRESS,
                     QuickSettingsPressPolicy.select(spec, true, true));
         }
     }
