@@ -80,15 +80,20 @@ final class UnifiedShadeHost extends FrameLayout {
         mediaModeHeader.setOrientation(LinearLayout.HORIZONTAL);
         mediaModeHeader.setGravity(Gravity.CENTER_VERTICAL);
         mediaModeHeader.setPadding(dp(8), 0, dp(8), 0);
+        // Neutral, unfocused media surface: reserve BB UI blue for the
+        // individually selected shuffle/repeat control, not the whole header.
         mediaModeHeader.setBackground(new GradientDrawable(
-                GradientDrawable.Orientation.TOP_BOTTOM, BB7Theme.gradientColors()));
+                GradientDrawable.Orientation.TOP_BOTTOM,
+                BB7Theme.palette(context) == BB7Theme.Palette.DARK
+                        ? new int[] {0xff2f4053, 0xff1e2c3b}
+                        : new int[] {0xffecf1f7, 0xffd8e2ec}));
         mediaModeHeader.setVisibility(View.GONE);
         layout.addView(mediaModeHeader, new LinearLayout.LayoutParams(
                 LayoutParams.MATCH_PARENT, dp(32)));
 
         TextView heading = new TextView(context);
         heading.setText("Media");
-        heading.setTextColor(Color.WHITE);
+        heading.setTextColor(BB7Theme.palette(context).headingText);
         heading.setTextSize(12);
         heading.setGravity(Gravity.CENTER_VERTICAL);
         mediaModeHeader.addView(heading, new LinearLayout.LayoutParams(
@@ -135,7 +140,7 @@ final class UnifiedShadeHost extends FrameLayout {
     private static TextView modeButton(Context context) {
         TextView button = new TextView(context);
         button.setTextSize(12);
-        button.setTextColor(Color.WHITE);
+        button.setTextColor(BB7Theme.palette(context).headingText);
         button.setGravity(Gravity.CENTER);
         button.setPadding(12, 0, 12, 0);
         button.setFocusable(false);
