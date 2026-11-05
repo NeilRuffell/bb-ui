@@ -75,6 +75,9 @@ public final class PullDownHook implements IXposedHookLoadPackage {
     private static final int STATUS_BAR_SUB_PANEL_WINDOW_TYPE = 2017;
     private static final Map<View, SwipeState> SWIPES =
             Collections.synchronizedMap(new WeakHashMap<>());
+    // Non-null ONLY while creating the native shade from an active finger
+    // gesture on the real Android status bar. Never stored in BB view state.
+    private static SwipeState pendingNativeTouchOpen;
     private static WindowManager windowManager;
     private static UnifiedShadeHost shadeHost;
     private static TwoColumnPanel panel;
@@ -333,7 +336,8 @@ public final class PullDownHook implements IXposedHookLoadPackage {
             if (!enabled() || shadeHost != null || openingOrClosing || locked(view.getContext())
                     || event.getPointerCount() != 1
                     || event.getToolType(0) != MotionEvent.TOOL_TYPE_FINGER) return false;
-            SwipeState state = new SwipeState(event.getRawY(), event.getRawX());
+            SwipeState state = new SwipeState(
+                    event.getRawY(), event.getRawX(), event.getEventTime());
             SWIPES.put(view, state);
             return true;
         }
@@ -343,28 +347,70 @@ public final class PullDownHook implements IXposedHookLoadPackage {
             case MotionEvent.ACTION_MOVE:
                 float deltaY = event.getRawY() - state.startY;
                 float deltaX = Math.abs(event.getRawX() - state.startX);
-                int thresholdPx = dp(view.getContext(), 48);
-                if (!state.opened && deltaY >= thresholdPx && deltaY > deltaX) {
+                int thresholdPx = dp(view.getContext(), 20);
+                if (!state.opened && deltaY >= thresholdPx && deltaY > deltaX
+                        && event.getPointerCount() == 1) {
                     state.opened = true;
-                    showPanel(view.getContext());
+                    if (NativeShadeHostBridge.requested()
+                            && NativeShadeSlideAnimator.touchEnabled()) {
+                        pendingNativeTouchOpen = state;
+                        try {
+                            showPanel(view.getContext());
+                        } finally {
+                            pendingNativeTouchOpen = null;
+                        }
+                    } else {
+                        showPanel(view.getContext());
+                    }
+                }
+                if (state.opened && NativeShadeSlideAnimator.isTouchOpening()) {
+                    NativeShadeSlideAnimator.updateTouchOpen(deltaY);
                 }
                 return true;
             case MotionEvent.ACTION_UP:
-                if (!state.opened && Math.abs(event.getRawY() - state.startY)
+                if (state.opened && NativeShadeSlideAnimator.isTouchOpening()) {
+                    finishStatusBarDrag(event, state, false);
+                } else if (!state.opened && Math.abs(event.getRawY() - state.startY)
                         < dp(view.getContext(), 12)
                         && Math.abs(event.getRawX() - state.startX)
                         < dp(view.getContext(), 12)) {
+                    // A tap retains the ordinary animated shade opening.
                     showPanel(view.getContext());
                 }
                 SWIPES.remove(view);
                 return true;
             case MotionEvent.ACTION_CANCEL:
             case MotionEvent.ACTION_POINTER_DOWN:
+                if (state.opened && NativeShadeSlideAnimator.isTouchOpening()) {
+                    finishStatusBarDrag(event, state, true);
+                }
                 SWIPES.remove(view);
                 return true;
             default:
                 return true;
         }
+    }
+
+    private static void finishStatusBarDrag(MotionEvent event, SwipeState state,
+            boolean canceled) {
+        UnifiedShadeHost root = shadeHost;
+        if (root == null) {
+            NativeShadeSlideAnimator.restore();
+            return;
+        }
+        long elapsed = Math.max(1L, event.getEventTime() - state.downTime);
+        float velocityY = (event.getRawY() - state.startY) * 1000f / elapsed;
+        boolean started = NativeShadeSlideAnimator.finishTouchOpen(velocityY, canceled,
+                () -> {
+                    if (shadeHost == root) {
+                        openingOrClosing = false;
+                        root.focusContent();
+                    }
+                },
+                () -> {
+                    if (shadeHost == root) dismissShadeImmediately();
+                });
+        if (!started && shadeHost == root) dismissShadeImmediately();
     }
 
     static void onNotificationItemsUpdated() {
@@ -672,6 +718,22 @@ public final class PullDownHook implements IXposedHookLoadPackage {
         });
     }
 
+    /** Existing native shade root, not a second touch or notification system. */
+    static void onNativeShadeTouchCloseStarted() {
+        if (shadeHost != null) openingOrClosing = true;
+    }
+
+    static void onNativeShadeTouchCloseSettled(boolean closed) {
+        UnifiedShadeHost root = shadeHost;
+        if (root == null) return;
+        if (closed) {
+            dismissShadeImmediately();
+        } else {
+            openingOrClosing = false;
+            root.focusContent();
+        }
+    }
+
     static void onNativeShadeExpansionChanged(boolean expanded) {
         if (!NativeShadeHostBridge.active()) return;
         nativeShadeExpanded = expanded;
@@ -793,7 +855,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
                 // Move the EXISTING native shade window, not a second BB overlay
                 // and not just its foreground child (which would expose stock QS).
                 nativeSlidePrepared = NativeShadeSlideAnimator.prepareOpen(
-                        NativeShadeHostBridge.shadeWindow());
+                        NativeShadeHostBridge.shadeWindow(), pendingNativeTouchOpen != null);
             } else {
                 manager.addView(root, params);
             }
@@ -817,18 +879,24 @@ public final class PullDownHook implements IXposedHookLoadPackage {
                     return;
                 }
                 if (nativeSlidePrepared) {
-                    root.post(() -> {
-                        if (shadeHost != root || !NativeShadeSlideAnimator.isOpening()) return;
-                        if (!NativeShadeSlideAnimator.animateOpen(() -> {
-                            if (shadeHost == root && !NativeShadeSlideAnimator.isClosing()) {
+                    if (NativeShadeSlideAnimator.isTouchOpening()) {
+                        // Status-bar MOVE/UP owns the window translation until
+                        // release. No competing timed entrance animation.
+                        Log.i(TAG, "Native shade opening under finger control");
+                    } else {
+                        root.post(() -> {
+                            if (shadeHost != root || !NativeShadeSlideAnimator.isOpening()) return;
+                            if (!NativeShadeSlideAnimator.animateOpen(() -> {
+                                if (shadeHost == root && !NativeShadeSlideAnimator.isClosing()) {
+                                    openingOrClosing = false;
+                                    root.focusContent();
+                                }
+                            }) && shadeHost == root) {
                                 openingOrClosing = false;
                                 root.focusContent();
                             }
-                        }) && shadeHost == root) {
-                            openingOrClosing = false;
-                            root.focusContent();
-                        }
-                    });
+                        });
+                    }
                 } else {
                     openingOrClosing = false;
                     root.post(() -> {
@@ -1040,7 +1108,12 @@ public final class PullDownHook implements IXposedHookLoadPackage {
     private static final class SwipeState {
         final float startY;
         final float startX;
+        final long downTime;
         boolean opened;
-        SwipeState(float y, float x) { startY = y; startX = x; }
+        SwipeState(float y, float x, long time) {
+            startY = y;
+            startX = x;
+            downTime = time;
+        }
     }
 }

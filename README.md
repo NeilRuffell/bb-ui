@@ -9,10 +9,11 @@ native LineageOS SystemUI implementation.
 (versionCode 114). The native shade integration is **opt-in**, not the
 default, until its remaining presentation work is completed.
 
-**Development branch:** `feat/native-shade-bbos6-slide` adds an opt-in
-BBOS6-style downward entrance and upward dismissal to the existing native
-shade window. See [shade slide experiment](docs/NATIVE_SHADE_SLIDE.md).
-This animation is not yet in master.
+**Development branch:** `feat/native-shade-touch-drag` extends the existing
+BBOS6 native shade slide with direct finger tracking for open/close and
+release-to-snap behaviour. The original timed keyboard/trackpad animations
+remain. See [touch drag testing](docs/NATIVE_SHADE_TOUCH_DRAG.md).
+Neither animation branch is merged into master.
 
 ## Start here
 

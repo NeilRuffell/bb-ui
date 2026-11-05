@@ -9,23 +9,20 @@ import android.widget.FrameLayout;
 import java.lang.reflect.Method;
 
 /**
- * Visual motion for the EXISTING SystemUI NotificationShadeWindowView.
+ * Position/gesture controller for the ONE existing SystemUI shade window.
+ * Android continues to own expansion, native notifications, Back and QS.
  *
- * Native shade expansion, input, notification data, QS tiles, and Back
- * remain owned by SystemUI. Translating the entire native window ensures
- * that stock shade children never peek through while the BB face slides.
- * The genuine status bar is in a different window and does not move.
- *
- * Opt-in during Q25 testing. Never permanently mutate native view state:
- * restore() is called on close, Home/screen-off and failed transitions.
+ * Touch directly adjusts the same window translation used by the ordinary
+ * keyboard/trackpad animations; never create a separate surface or controller.
  */
 final class NativeShadeSlideAnimator {
     private static final String TAG = "BB7-ShadeSlide";
     private static final String PROP = "debug.bb7pulldown.native_slide.enabled";
+    private static final String DRAG_PROP = "debug.bb7pulldown.native_drag.enabled";
     private static final long OPEN_MS = 220L;
     private static final long CLOSE_MS = 180L;
 
-    private enum Phase { NONE, OPENING, OPEN, CLOSING }
+    private enum Phase { NONE, OPENING, DRAG_OPEN, OPEN, DRAG_CLOSE, CLOSING }
 
     private static View animatedWindow;
     private static float originalY;
@@ -34,7 +31,7 @@ final class NativeShadeSlideAnimator {
 
     private NativeShadeSlideAnimator() {}
 
-    static boolean prepareOpen(FrameLayout window) {
+    static boolean prepareOpen(FrameLayout window, boolean byTouch) {
         if (!enabled() || window == null || !window.isAttachedToWindow()
                 || !NativeShadeHostBridge.ownsNativeShadeWindow()) return false;
         restore();
@@ -43,17 +40,20 @@ final class NativeShadeSlideAnimator {
         originalY = window.getTranslationY();
         hiddenY = NativeShadeSlidePolicy.hiddenTranslation(originalY, distance);
         animatedWindow = window;
-        phase = Phase.OPENING;
+        phase = byTouch && touchEnabled() ? Phase.DRAG_OPEN : Phase.OPENING;
         window.animate().cancel();
         window.setTranslationY(hiddenY);
-        Log.i(TAG, "Native shade slide prepared: distance=" + distance + "px");
+        Log.i(TAG, "Native shade slide prepared: distance=" + distance
+                + "px touch=" + (phase == Phase.DRAG_OPEN));
         return true;
     }
 
     static boolean animateOpen(Runnable completed) {
         final View target = animatedWindow;
         if (target == null || phase != Phase.OPENING) return false;
-        target.animate().translationY(originalY).setDuration(OPEN_MS)
+        long duration = remainingDuration(target.getTranslationY(), originalY, OPEN_MS);
+        target.animate().cancel();
+        target.animate().translationY(originalY).setDuration(duration)
                 .setInterpolator(new DecelerateInterpolator(1.4f))
                 .withEndAction(() -> {
                     if (animatedWindow != target || phase != Phase.OPENING) return;
@@ -70,11 +70,10 @@ final class NativeShadeSlideAnimator {
         if (target == null || phase == Phase.CLOSING || phase == Phase.NONE) {
             return false;
         }
-        // Reverse an ongoing entrance from its CURRENT screen position.
-        // Make stale entrance callbacks inert before canceling that animator.
         phase = Phase.CLOSING;
+        long duration = remainingDuration(target.getTranslationY(), hiddenY, CLOSE_MS);
         target.animate().cancel();
-        target.animate().translationY(hiddenY).setDuration(CLOSE_MS)
+        target.animate().translationY(hiddenY).setDuration(duration)
                 .setInterpolator(new AccelerateInterpolator(1.1f))
                 .withEndAction(() -> {
                     if (animatedWindow != target || phase != Phase.CLOSING) return;
@@ -85,9 +84,76 @@ final class NativeShadeSlideAnimator {
         return true;
     }
 
-    static boolean isOpening() { return phase == Phase.OPENING; }
+    /** Called from the real native status bar before releasing a touch-open. */
+    static void updateTouchOpen(float fingerTravel) {
+        if (animatedWindow == null || phase != Phase.DRAG_OPEN) return;
+        float fraction = NativeShadeDragPolicy.fraction(fingerTravel, distance());
+        animatedWindow.setTranslationY(hiddenY + fraction * distance());
+    }
 
-    static boolean isClosing() { return phase == Phase.CLOSING; }
+    static boolean finishTouchOpen(float velocityY, boolean canceled,
+            Runnable opened, Runnable closed) {
+        if (animatedWindow == null || phase != Phase.DRAG_OPEN) return false;
+        float fraction = NativeShadeDragPolicy.fraction(
+                animatedWindow.getTranslationY() - hiddenY, distance());
+        if (NativeShadeDragPolicy.shouldOpen(fraction, velocityY, canceled)) {
+            phase = Phase.OPENING;
+            Log.i(TAG, "Touch-open released: completing down");
+            return animateOpen(opened);
+        }
+        Log.i(TAG, "Touch-open released: returning up");
+        return animateClose(closed);
+    }
+
+    static boolean canDragClose() {
+        return animatedWindow != null && phase == Phase.OPEN;
+    }
+
+    static boolean beginTouchClose() {
+        if (!canDragClose()) return false;
+        phase = Phase.DRAG_CLOSE;
+        animatedWindow.animate().cancel();
+        return true;
+    }
+
+    static void updateTouchClose(float fingerTravelUp) {
+        if (animatedWindow == null || phase != Phase.DRAG_CLOSE) return;
+        float fraction = NativeShadeDragPolicy.fraction(fingerTravelUp, distance());
+        animatedWindow.setTranslationY(originalY - fraction * distance());
+    }
+
+    static boolean finishTouchClose(float velocityY, boolean canceled,
+            Runnable closed, Runnable reopened) {
+        if (animatedWindow == null || phase != Phase.DRAG_CLOSE) return false;
+        float fraction = NativeShadeDragPolicy.fraction(
+                originalY - animatedWindow.getTranslationY(), distance());
+        if (NativeShadeDragPolicy.shouldClose(fraction, velocityY, canceled)) {
+            Log.i(TAG, "Touch-close released: completing up");
+            return animateClose(closed);
+        }
+        phase = Phase.OPENING;
+        Log.i(TAG, "Touch-close released: returning down");
+        return animateOpen(reopened);
+    }
+
+    private static float distance() {
+        return Math.max(1f, originalY - hiddenY);
+    }
+
+    private static long remainingDuration(float from, float to, long fullDuration) {
+        float remaining = NativeShadeDragPolicy.fraction(Math.abs(to - from), distance());
+        return Math.max(65L, Math.round(fullDuration * remaining));
+    }
+
+    static boolean isOpening() {
+        return phase == Phase.OPENING || phase == Phase.DRAG_OPEN;
+    }
+
+    static boolean isTouchOpening() { return phase == Phase.DRAG_OPEN; }
+
+    static boolean isClosing() {
+        return phase == Phase.CLOSING || phase == Phase.DRAG_CLOSE;
+    }
 
     static boolean isActiveOn(View window) {
         return window != null && window == animatedWindow;
@@ -96,8 +162,6 @@ final class NativeShadeSlideAnimator {
     static void restore() {
         final View target = animatedWindow;
         if (target == null) return;
-        // Clear state FIRST; a canceled animation must never run its
-        // stale completion callback or dismiss a new shade session.
         animatedWindow = null;
         phase = Phase.NONE;
         target.animate().cancel();
@@ -105,13 +169,21 @@ final class NativeShadeSlideAnimator {
         Log.i(TAG, "Original native shade window position restored");
     }
 
+    static boolean touchEnabled() {
+        return enabled() && readBoolean(DRAG_PROP, true);
+    }
+
     private static boolean enabled() {
+        return readBoolean(PROP, false);
+    }
+
+    private static boolean readBoolean(String name, boolean defaultValue) {
         try {
             Class<?> props = Class.forName("android.os.SystemProperties");
-            Method getBoolean = props.getMethod("getBoolean", String.class, boolean.class);
-            return Boolean.TRUE.equals(getBoolean.invoke(null, PROP, false));
+            Method method = props.getMethod("getBoolean", String.class, boolean.class);
+            return Boolean.TRUE.equals(method.invoke(null, name, defaultValue));
         } catch (Throwable error) {
-            Log.w(TAG, "Cannot read slide enable property; using immediate shade", error);
+            Log.w(TAG, "Cannot read " + name + "; using disabled touch slide", error);
             return false;
         }
     }

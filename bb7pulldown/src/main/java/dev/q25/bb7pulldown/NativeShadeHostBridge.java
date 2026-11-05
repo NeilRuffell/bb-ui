@@ -2,6 +2,9 @@ package dev.q25.bb7pulldown;
 
 import android.util.Log;
 import android.graphics.Rect;
+import android.widget.EditText;
+import android.widget.SeekBar;
+import android.view.ViewConfiguration;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
@@ -59,6 +62,8 @@ final class NativeShadeHostBridge {
     // orphaned MOVE/UP event or continuing the native drag.
     private static boolean nativeGestureInProgress;
     private static boolean bbGestureInProgress;
+    private static TouchCloseState touchClose;
+    private static boolean swallowCloseGestureTail;
 
     private NativeShadeHostBridge() {}
 
@@ -209,7 +214,10 @@ final class NativeShadeHostBridge {
                 && NativeShadeSlideAnimator.isOpening();
         boolean interruptedClosing = NativeShadeSlideAnimator.isActiveOn(previous)
                 && NativeShadeSlideAnimator.isClosing();
-        if (interruptedOpening || interruptedClosing) NativeShadeSlideAnimator.restore();
+        if (interruptedOpening || interruptedClosing) {
+            clearTouchClose();
+            NativeShadeSlideAnimator.restore();
+        }
         shadeWindowRef = new WeakReference<>(window);
         Log.i(TAG, "Captured native NotificationShadeWindowView root");
         if (interruptedClosing) {
@@ -333,6 +341,7 @@ final class NativeShadeHostBridge {
 
     static void detach(UnifiedShadeHost root) {
         if (root == null) return;
+        clearTouchClose();
         if (mountedRef.get() == root) {
             mountedRef = new WeakReference<>(null);
             NativeShadeStatusBarVisibility.onBbShadeMountChanged(false);
@@ -449,26 +458,101 @@ final class NativeShadeHostBridge {
         if (action == MotionEvent.ACTION_DOWN) {
             nativeGestureInProgress = !mounted;
             bbGestureInProgress = mounted;
+            clearTouchClose();
+            if (mounted && NativeShadeSlideAnimator.canDragClose()
+                    && NativeShadeSlideAnimator.touchEnabled()
+                    && source.getPointerCount() == 1
+                    && source.getToolType(0) == MotionEvent.TOOL_TYPE_FINGER
+                    && canStartCloseAt(bb, source.getRawX(), source.getRawY())) {
+                touchClose = new TouchCloseState(source.getRawX(), source.getRawY(),
+                        source.getEventTime(),
+                        ViewConfiguration.get(bb.getContext()).getScaledTouchSlop());
+            }
         }
         if (!mounted) {
-            // If BB UI was just detached in the middle of a touch, do not
-            // deliver the trailing MOVE/UP to the stock shade.
-            boolean consume = bbGestureInProgress;
+            // Do not pass an orphaned MOVE/UP to the stock native shade.
+            boolean consume = bbGestureInProgress || swallowCloseGestureTail;
             if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
                 bbGestureInProgress = false;
                 nativeGestureInProgress = false;
+                clearTouchClose();
             }
             return consume;
         }
         if (NativeShadeModePolicy.swallowOpeningGestureTail(
                 mounted, nativeGestureInProgress, action == MotionEvent.ACTION_DOWN)) {
-            // Initial native pull-down started before BB UI was mounted.
-            // It has no matching DOWN in BB; swallow the gesture tail.
             if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
                 nativeGestureInProgress = false;
             }
             return true;
         }
+        if (swallowCloseGestureTail) {
+            if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+                clearTouchClose();
+                bbGestureInProgress = false;
+            }
+            return true;
+        }
+
+        TouchCloseState gesture = touchClose;
+        if (gesture != null) {
+            if (action == MotionEvent.ACTION_POINTER_DOWN) {
+                // Never continue a one-finger shade drag after a second finger.
+                if (gesture.claimed) {
+                    finishTouchClose(gesture, source, true);
+                    swallowCloseGestureTail = true;
+                }
+                touchClose = null;
+                return gesture.claimed || dispatchToBb(window, bb, source);
+            }
+            if (action == MotionEvent.ACTION_MOVE && source.getPointerCount() == 1) {
+                float dx = source.getRawX() - gesture.startX;
+                float dy = source.getRawY() - gesture.startY;
+                if (!gesture.claimed && NativeShadeDragPolicy.isUpwardDrag(
+                        dx, dy, gesture.touchSlop)) {
+                    if (NativeShadeSlideAnimator.beginTouchClose()) {
+                        gesture.claimed = true;
+                        PullDownHook.onNativeShadeTouchCloseStarted();
+                        // The BB card or scroller got the preceding DOWN.
+                        // End its gesture before the window starts moving.
+                        MotionEvent cancel = MotionEvent.obtain(source);
+                        cancel.setAction(MotionEvent.ACTION_CANCEL);
+                        dispatchToBb(window, bb, cancel);
+                        cancel.recycle();
+                        Log.i(TAG, "Finger captured native shade close drag");
+                    }
+                }
+                if (gesture.claimed) {
+                    NativeShadeSlideAnimator.updateTouchClose(-dy);
+                    return true;
+                }
+                if (Math.abs(dx) > gesture.touchSlop
+                        || dy > gesture.touchSlop) {
+                    // Horizontal card dismissals and downward scrolling still
+                    // belong to the existing BB content view.
+                    touchClose = null;
+                }
+            }
+            if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+                touchClose = null;
+                if (gesture.claimed) {
+                    finishTouchClose(gesture, source, action == MotionEvent.ACTION_CANCEL);
+                    bbGestureInProgress = false;
+                    nativeGestureInProgress = false;
+                    return true;
+                }
+            }
+        }
+        boolean result = dispatchToBb(window, bb, source);
+        if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+            bbGestureInProgress = false;
+            nativeGestureInProgress = false;
+        }
+        return result;
+    }
+
+    private static boolean dispatchToBb(FrameLayout window, UnifiedShadeHost bb,
+            MotionEvent source) {
         MotionEvent translated = MotionEvent.obtain(source);
         try {
             translated.offsetLocation(window.getScrollX() - bb.getLeft(),
@@ -482,12 +566,69 @@ final class NativeShadeHostBridge {
             Log.e(TAG, "BB touch dispatch failed; blocking stock shade interaction", error);
         } finally {
             translated.recycle();
-            if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
-                bbGestureInProgress = false;
-                nativeGestureInProgress = false;
-            }
         }
         return true;
+    }
+
+    private static void finishTouchClose(TouchCloseState gesture, MotionEvent source,
+            boolean canceled) {
+        long elapsed = Math.max(1L, source.getEventTime() - gesture.startTime);
+        float velocityY = (source.getRawY() - gesture.startY) * 1000f / elapsed;
+        if (!NativeShadeSlideAnimator.finishTouchClose(velocityY, canceled,
+                () -> PullDownHook.onNativeShadeTouchCloseSettled(true),
+                () -> PullDownHook.onNativeShadeTouchCloseSettled(false))) {
+            NativeShadeSlideAnimator.restore();
+            PullDownHook.onNativeShadeTouchCloseSettled(true);
+        }
+    }
+
+    private static boolean canStartCloseAt(View root, float rawX, float rawY) {
+        // The top transparent status-bar band is NOT a shade drag handle.
+        int[] location = new int[2];
+        root.getLocationOnScreen(location);
+        if (rawY < location[1] + root.getPaddingTop()) return false;
+        return !hasScrollingOrInputTarget(root, rawX, rawY);
+    }
+
+    /** Prevent global dismissal from stealing list scrolling or reply editing. */
+    private static boolean hasScrollingOrInputTarget(View view, float rawX, float rawY) {
+        if (view.getVisibility() != View.VISIBLE || view.getAlpha() <= 0f) return false;
+        int[] location = new int[2];
+        view.getLocationOnScreen(location);
+        if (rawX < location[0] || rawY < location[1]
+                || rawX >= location[0] + view.getWidth()
+                || rawY >= location[1] + view.getHeight()) return false;
+        if (view instanceof EditText || view instanceof SeekBar
+                || view.canScrollVertically(1)) return true;
+        if (view instanceof ViewGroup) {
+            ViewGroup group = (ViewGroup) view;
+            for (int i = group.getChildCount() - 1; i >= 0; i--) {
+                if (hasScrollingOrInputTarget(group.getChildAt(i), rawX, rawY)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private static void clearTouchClose() {
+        touchClose = null;
+        swallowCloseGestureTail = false;
+    }
+
+    private static final class TouchCloseState {
+        final float startX;
+        final float startY;
+        final long startTime;
+        final int touchSlop;
+        boolean claimed;
+
+        TouchCloseState(float x, float y, long time, int slop) {
+            startX = x;
+            startY = y;
+            startTime = time;
+            touchSlop = slop;
+        }
     }
 
     /** Includes stock shade gestures and heads-up downward expansion. */
