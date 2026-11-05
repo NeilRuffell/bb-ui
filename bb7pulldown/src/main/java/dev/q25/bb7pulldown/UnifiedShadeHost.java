@@ -9,6 +9,7 @@ import android.view.Gravity;
 import android.widget.TextView;
 import android.view.View;
 import android.view.MotionEvent;
+import android.view.KeyEvent;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 
@@ -210,6 +211,25 @@ final class UnifiedShadeHost extends FrameLayout {
         } else {
             notifications.focusSelectedAppIcon();
         }
+    }
+
+    /**
+     * Native OnBackInvokedCallback arrives at SystemUI, not the focused BB
+     * child view. Route it through the SAME BB navigation levels as hardware
+     * Back rather than invoking stock shade animations or synthesizing events.
+     */
+    boolean handleNativeBack() {
+        int route = NativeShadeBackRoute.route(navigation.isStatusBarFocused(),
+                displayedPage);
+        if (route == NativeShadeBackRoute.STATUS_BAR) {
+            return navigation.handleKey(KeyEvent.KEYCODE_BACK, KeyEvent.ACTION_UP);
+        }
+        if (route == NativeShadeBackRoute.QUICK_SETTINGS) {
+            closeShade.run();
+            return true;
+        }
+        notifications.handleNativeBack();
+        return true;
     }
 
     void clearStatusBarFocus() {

@@ -139,9 +139,20 @@ public final class PullDownHook implements IXposedHookLoadPackage {
     @Override
     public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lp) {
         if (!PACKAGE.equals(lp.packageName) || !PACKAGE.equals(lp.processName)) return;
+        // Capture the native status-bar visibility interactor as early as
+        // possible during SystemUI startup. Installing this only after the
+        // other BB hooks missed Q25's already constructed flow instance.
+        if (NativeShadeHostBridge.requested()) {
+            NativeShadeStatusBarVisibility.install(lp.classLoader);
+        }
         // Colour icons have their own independent rollback property, even when
         // the custom BB7 shade is disabled.
         NativeStatusBarColorIcons.install(lp.classLoader);
+        // Popup presentation only; BB shade and its notification actions are untouched.
+        NativeSimpleHeadsUp.install(lp.classLoader);
+        NativeSquareHeadsUpCorners.install(lp.classLoader);
+        // Shared SystemUI notification width policy: remove Android side gutters globally.
+        NativeFullWidthNotifications.install(lp.classLoader);
 
         if (!enabled()) {
             Log.i(TAG, "Disabled by " + ENABLE_PROP + "; stock status bar retained");
@@ -152,6 +163,8 @@ public final class PullDownHook implements IXposedHookLoadPackage {
         SystemUiNotificationObserver.install(lp.classLoader);
         NativeQuickSettingsTiles.install(lp.classLoader);
         NativeNotificationClicks.install(lp.classLoader);
+        // Optional single-shade integration: SystemUI owns the BB UI shade window.
+        NativeShadeHostBridge.install(lp.classLoader);
         Class<?> viewClass = XposedHelpers.findClassIfExists(STATUS_BAR, lp.classLoader);
         if (viewClass == null) {
             Log.w(TAG, "Native status-bar gesture source not present");
@@ -312,6 +325,11 @@ public final class PullDownHook implements IXposedHookLoadPackage {
     private static boolean handleTopEdgeTouch(View view, MotionEvent event) {
         int action = event.getActionMasked();
         if (action == MotionEvent.ACTION_DOWN) {
+            // If native integration is enabled but SystemUI's controller is
+            // not ready, leave the touch to Android instead of consuming it.
+            if (NativeShadeHostBridge.requested() && !NativeShadeHostBridge.ready()) {
+                return false;
+            }
             if (!enabled() || shadeHost != null || openingOrClosing || locked(view.getContext())
                     || event.getPointerCount() != 1
                     || event.getToolType(0) != MotionEvent.TOOL_TYPE_FINGER) return false;
@@ -617,16 +635,63 @@ public final class PullDownHook implements IXposedHookLoadPackage {
     }
 
     /**
-     * One window per shade session. Both pages remain attached until the shade
-     * really closes; internal page changes only toggle view visibility.
+     * Native SystemUI expanded/collapsed, including a stock heads-up
+     * pull-down gesture. Enter BB presentation in the same native window.
+     */
+    static void onNativeShadeHostUnavailable() {
+        if (shadeHost != null && NativeShadeHostBridge.requested()) {
+            Log.w(TAG, "Native shade host lost; releasing BB UI session");
+            dismissShadeImmediately();
+        }
+    }
+
+    /**
+     * Called by Q25 BackActionInteractor.onBackRequested() only while BB UI
+     * is attached to the actual native notification-shade window.
+     * Back keeps the existing notification/reply/media navigation depth.
+     */
+    static boolean onNativeSystemBackRequested() {
+        UnifiedShadeHost current = shadeHost;
+        if (current == null || openingOrClosing
+                || !NativeShadeHostBridge.isMounted(current)) return false;
+        return current.handleNativeBack();
+    }
+
+    static void onNativeShadeExpansionChanged(boolean expanded) {
+        if (!NativeShadeHostBridge.active()) return;
+        nativeShadeExpanded = expanded;
+        updateStatusAppearance();
+        UnifiedShadeHost current = shadeHost;
+        if (NativeShadeModePolicy.detachOnCollapse(true, expanded,
+                current != null && NativeShadeHostBridge.isMounted(current))) {
+            dismissShadeImmediately();
+            return;
+        }
+        FrameLayout nativePanel = NativeShadeHostBridge.panel();
+        if (nativePanel != null && NativeShadeModePolicy.openFromNative(true,
+                expanded, current != null || openingOrClosing,
+                locked(nativePanel.getContext()))) {
+            showShade(nativePanel.getContext(), UnifiedShadeHost.NOTIFICATIONS);
+        }
+    }
+
+    /**
+     * Native mode uses SystemUI's NotificationPanelView as the only shade
+     * window. Legacy mode is retained solely as an independent rollback.
      */
     private static void showShade(Context context, int initialPage) {
         if (focusWindow != null) dismissStatusFocus();
         if (shadeHost != null || openingOrClosing || !enabled() || locked(context)) return;
+        final boolean nativeMode = NativeShadeHostBridge.requested();
+        if (nativeMode && !NativeShadeModePolicy.mayMount(
+                true, NativeShadeHostBridge.ready(), locked(context))) {
+            Log.w(TAG, "Native shade requested but unavailable; refusing duplicate window");
+            return;
+        }
         openingOrClosing = true;
-        WindowManager manager = (WindowManager)
-                context.getSystemService(Context.WINDOW_SERVICE);
-        if (manager == null) {
+        final WindowManager manager = NativeShadeModePolicy.useLegacyWindow(nativeMode)
+                ? (WindowManager) context.getSystemService(Context.WINDOW_SERVICE) : null;
+        if (!nativeMode && manager == null) {
             openingOrClosing = false;
             Log.w(TAG, "Shade WindowManager unavailable");
             return;
@@ -682,27 +747,39 @@ public final class PullDownHook implements IXposedHookLoadPackage {
         UnifiedShadeHost root = new UnifiedShadeHost(
                 context, notifications, connections, NAVIGATION, initialPage,
                 PullDownHook::dismissShade);
-        WindowManager.LayoutParams params = new WindowManager.LayoutParams(
-                WindowManager.LayoutParams.MATCH_PARENT,
-                Math.max(1, context.getResources().getDisplayMetrics().heightPixels
-                        - nativeStatusBarHeight(context)),
-                STATUS_BAR_SUB_PANEL_WINDOW_TYPE,
-                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
-                PixelFormat.OPAQUE);
-        params.setTitle("BB UI Unified Shade");
-        params.gravity = Gravity.TOP | Gravity.START;
-        params.y = nativeStatusBarHeight(context);
-        params.setFitInsetsTypes(0);
-        params.layoutInDisplayCutoutMode =
-                WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS;
-        int height = params.height;
-        root.setTranslationY(-height);
+        // Construct legacy window parameters only in rollback mode.
+        // Native mode must not allocate a second shade window at all.
+        WindowManager.LayoutParams params = null;
+        int height = 0;
+        if (!nativeMode) {
+            params = new WindowManager.LayoutParams(
+                    WindowManager.LayoutParams.MATCH_PARENT,
+                    Math.max(1, context.getResources().getDisplayMetrics().heightPixels
+                            - nativeStatusBarHeight(context)),
+                    STATUS_BAR_SUB_PANEL_WINDOW_TYPE,
+                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                    PixelFormat.OPAQUE);
+            params.setTitle("BB UI Unified Shade");
+            params.gravity = Gravity.TOP | Gravity.START;
+            params.y = nativeStatusBarHeight(context);
+            params.setFitInsetsTypes(0);
+            params.layoutInDisplayCutoutMode =
+                    WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS;
+            height = params.height;
+        }
+        root.setTranslationY(nativeMode ? 0f : -height);
         boolean attached = false;
         try {
-            manager.addView(root, params);
+            if (nativeMode) {
+                if (!NativeShadeHostBridge.attach(root, nativeStatusBarHeight(context))) {
+                    throw new IllegalStateException("Cannot mount BB UI in Q25 native shade");
+                }
+            } else {
+                manager.addView(root, params);
+            }
             attached = true;
             shadeHost = root;
-            windowManager = manager;
+            windowManager = manager; // deliberately null for native shade mode
             panel = notifications;
             quickPanel = connections;
             NAVIGATION.onShadeOpened(initialPage);
@@ -712,25 +789,40 @@ public final class PullDownHook implements IXposedHookLoadPackage {
             registerFavoritesObserver(context, notifications);
             updateStatusAppearance();
 
-            Log.i(TAG, "Unified shade window attached: initialPage=" + initialPage
-                    + " heightPx=" + height);
-            root.post(() -> {
-                if (shadeHost != root) return;
-                root.animate().translationY(0f).setDuration(220).withEndAction(() -> {
-                    if (shadeHost == root) {
-                        openingOrClosing = false;
-                        root.focusContent();
-                    }
-                }).start();
-            });
+            if (nativeMode) {
+                Log.i(TAG, "BB UI session attached inside native shade: page=" + initialPage);
+                openingOrClosing = false;
+                if (!NativeShadeHostBridge.requestNativeOpen()) {
+                    Log.e(TAG, "Native shade controller refused expansion; releasing BB UI host");
+                    dismissShadeImmediately();
+                    return;
+                }
+                root.post(() -> {
+                    if (shadeHost == root) root.focusContent();
+                });
+            } else {
+                Log.i(TAG, "Unified shade window attached: initialPage=" + initialPage
+                        + " heightPx=" + height);
+                root.post(() -> {
+                    if (shadeHost != root) return;
+                    root.animate().translationY(0f).setDuration(220).withEndAction(() -> {
+                        if (shadeHost == root) {
+                            openingOrClosing = false;
+                            root.focusContent();
+                        }
+                    }).start();
+                });
+            }
         } catch (Throwable error) {
             Log.e(TAG, "Unable to attach unified shade; rolling back", error);
             if (shadeHost == root) {
                 dismissShadeImmediately();
             } else if (attached) {
-                try { manager.removeViewImmediate(root); }
-                catch (Throwable rollbackError) {
-                    Log.w(TAG, "Unable to remove failed unified shade window", rollbackError);
+                try {
+                    if (nativeMode) NativeShadeHostBridge.detach(root);
+                    else manager.removeViewImmediate(root);
+                } catch (Throwable rollbackError) {
+                    Log.w(TAG, "Unable to remove failed shade host", rollbackError);
                 }
                 openingOrClosing = false;
             } else {
@@ -750,6 +842,12 @@ public final class PullDownHook implements IXposedHookLoadPackage {
     private static void dismissShade() {
         UnifiedShadeHost root = shadeHost;
         if (root == null || openingOrClosing) return;
+        if (NativeShadeHostBridge.isMounted(root)) {
+            // Native SystemUI controls shade state; do not invent a second
+            // window-translation animation for its child.
+            dismissShadeImmediately();
+            return;
+        }
         openingOrClosing = true;
         int height = root.getHeight();
         if (height <= 0) height = root.getResources().getDisplayMetrics().heightPixels;
@@ -816,12 +914,19 @@ public final class PullDownHook implements IXposedHookLoadPackage {
         if (current == null) return;
         shadeHost = null;
         NAVIGATION.onShadeClosed();
+        boolean nativeMount = NativeShadeHostBridge.isMounted(current);
         try {
             current.clearStatusBarFocus();
             current.animate().cancel();
-            if (windowManager != null) windowManager.removeViewImmediate(current);
+            if (nativeMount) {
+                // Collapse before unmounting to avoid exposing stock UI.
+                NativeShadeHostBridge.collapseNative();
+                NativeShadeHostBridge.detach(current);
+            } else if (windowManager != null) {
+                windowManager.removeViewImmediate(current);
+            }
         } catch (Throwable error) {
-            Log.w(TAG, "Unable to remove unified shade window", error);
+            Log.w(TAG, "Unable to remove unified shade host", error);
         } finally {
             stopFavoritesObserver();
             stopMediaSessions();
