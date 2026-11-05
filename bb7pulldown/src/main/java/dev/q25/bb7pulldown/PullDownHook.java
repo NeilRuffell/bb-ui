@@ -869,7 +869,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
             @Override public void onReceive(Context c, Intent intent) {
                 String action = intent.getAction();
                 if (Intent.ACTION_CLOSE_SYSTEM_DIALOGS.equals(action)) {
-                    ShadeLatencyProbe.mark("HOME_CLOSE_SYSTEM_DIALOGS_BROADCAST");
+                    ShadeLatencyProbe.mark("CLOSE_SYSTEM_DIALOGS_BROADCAST (typically Home)");
                     Log.i(TAG, "Native close-system-dialogs event received");
                     dismissShadeImmediately();
                 } else if (Intent.ACTION_SCREEN_OFF.equals(action)) {

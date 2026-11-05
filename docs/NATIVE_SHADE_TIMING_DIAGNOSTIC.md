@@ -61,7 +61,7 @@ elapsed time since the first Back DOWN and latest Back UP event, when present.
 - `BACK_NOTIFICATIONS_REQUEST_SHADE_CLOSE`,
   `BACK_QS_REQUEST_SHADE_CLOSE`, `BACK_STATUS_ZONE_EXIT_CALLBACK` indicate
   which BB navigation level actually asked to close.
-- `HOME_CLOSE_SYSTEM_DIALOGS_BROADCAST` identifies Home's observable SystemUI
+- `CLOSE_SYSTEM_DIALOGS_BROADCAST` identifies Home's observable SystemUI
   entry point; it **does not** measure the physical Home key's earlier handling.
 - `DISMISS_SHADE_REQUEST` and `CLOSE_BEGIN` locate the cleanup entry.
 - `NATIVE_INSTANT_COLLAPSE_BEGIN` / `_RETURNED` isolate the native
