@@ -2,9 +2,9 @@
 
 **Branch:** `feat/native-shade-touch-drag`  
 **Version:** `0.9.86-native-touch-drag-q25-dev`  
-**Status:** Experimental Vector branch; hardware tests pending.
+**Status:** Included in `master` as part of version 0.9.86. The user confirmed the touch behaviour on Q25. Gesture regressions remain subject to further on-device testing.
 
-This builds on `feat/native-shade-bbos6-slide`, not `master`.
+Originally developed on `feat/native-shade-touch-drag`, based on the earlier timed-slide branch.
 
 ## Intended behaviour
 
@@ -61,7 +61,8 @@ remains available, restoring immediate native-shade opening/closing.
 ```sh
 cd ~/Projects/bb-ui
 git fetch origin
-git switch --track origin/feat/native-shade-touch-drag
+git switch master
+git pull --ff-only
 gradle :app:assembleDebug :app:testDebugUnitTest &&
 adb -s 202512003630 install -r app/build/outputs/apk/debug/app-debug.apk &&
 adb -s 202512003630 shell setprop debug.bb7pulldown.enabled true &&
@@ -101,4 +102,5 @@ Expected drag log messages include `Native shade slide prepared ... touch=true`,
 `Native shade opening under finger control`, and
 `Finger captured native shade close drag`.
 
-No performance or visual correctness claims are made until Q25 testing.
+The Q25 user confirmed the overall touch interaction; these checks remain
+useful when modifying gesture handling or porting to other ROMs.

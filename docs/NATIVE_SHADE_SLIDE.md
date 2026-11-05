@@ -2,7 +2,7 @@
 
 **Branch:** `feat/native-shade-bbos6-slide`  
 **Version:** `0.9.85-native-bbos6-slide-q25-dev`  
-**Status:** Experimental Vector feature; requires physical Q25 testing.
+**Status:** Included in `master` as part of version 0.9.86. The earlier timed slide was validated on Q25 before touch-drag was added; it remains opt-in.
 
 ## Goal
 
@@ -62,7 +62,8 @@ The independent native-shade rollback is still
 ```sh
 cd ~/Projects/bb-ui
 git fetch origin
-git switch --track origin/feat/native-shade-bbos6-slide
+git switch master
+git pull --ff-only
 gradle :app:assembleDebug :app:testDebugUnitTest &&
 adb -s 202512003630 install -r app/build/outputs/apk/debug/app-debug.apk &&
 adb -s 202512003630 shell setprop debug.bb7pulldown.enabled true &&
