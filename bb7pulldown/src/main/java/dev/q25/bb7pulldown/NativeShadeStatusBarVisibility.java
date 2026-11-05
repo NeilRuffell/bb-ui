@@ -29,6 +29,12 @@ final class NativeShadeStatusBarVisibility {
             "com.android.systemui.statusbar.pipeline.shared.domain.interactor"
                     + ".StatusBarVisibilityInteractor";
     private static final String FLOW_IMPL = "kotlinx.coroutines.flow.StateFlowImpl";
+    // Q25 DEX: HomeStatusBarViewModelImpl receives the visibility
+    // interactor as a constructor dependency. Capturing that parameter
+    // also covers instances created before our interactor-constructor hook.
+    private static final String HOME_VIEW_MODEL =
+            "com.android.systemui.statusbar.pipeline.shared.ui.viewmodel"
+                    + ".HomeStatusBarViewModelImpl";
 
     private static volatile WeakReference<Object> targetState = new WeakReference<>(null);
     private static volatile boolean bbMounted;
@@ -45,7 +51,8 @@ final class NativeShadeStatusBarVisibility {
         if (installed) return;
         Class<?> interactor = XposedHelpers.findClassIfExists(INTERACTOR, loader);
         Class<?> stateClass = XposedHelpers.findClassIfExists(FLOW_IMPL, loader);
-        if (interactor == null || stateClass == null) {
+        Class<?> viewModel = XposedHelpers.findClassIfExists(HOME_VIEW_MODEL, loader);
+        if (interactor == null || stateClass == null || viewModel == null) {
             Log.w(TAG, "Q25 native status-bar visibility classes unavailable");
             return;
         }
@@ -72,29 +79,54 @@ final class NativeShadeStatusBarVisibility {
             XposedBridge.hookAllConstructors(interactor, new XC_MethodHook() {
                 @Override protected void afterHookedMethod(MethodHookParam param) {
                     if (param.hasThrowable()) return;
-                    capture(param.thisObject, stateClass);
+                    capture(param.thisObject, stateClass, "interactor constructor");
+                }
+            });
+            // Q25 HomeStatusBarViewModelImpl's compiled constructor has
+            // StatusBarVisibilityInteractor among its injected parameters.
+            // It is not stored as a ViewModel field, so inspect its args
+            // *before* invoking the constructor rather than guessing fields.
+            XposedBridge.hookAllConstructors(viewModel, new XC_MethodHook() {
+                @Override protected void beforeHookedMethod(MethodHookParam param) {
+                    if (targetState.get() != null) return;
+                    for (Object arg : param.args) {
+                        if (interactor.isInstance(arg)) {
+                            capture(arg, stateClass, "native status-bar ViewModel dependency");
+                            break;
+                        }
+                    }
                 }
             });
             installed = true;
-            Log.i(TAG, "Native Q25 status-bar visibility policy hook registered");
+            Log.i(TAG, "Native Q25 status-bar visibility policy hooks registered"
+                    + " (interactor and ViewModel capture)");
         } catch (Throwable error) {
             Log.e(TAG, "Unable to hook native status-bar visibility policy", error);
         }
     }
 
-    private static void capture(Object interactor, Class<?> stateClass) {
+    private static void capture(Object interactor, Class<?> stateClass, String source) {
         try {
+            // Do not alter visibility on a secondary display or on a
+            // status-bar object that is still under construction.
+            if (XposedHelpers.getIntField(interactor, "thisDisplayId") != 0) return;
             Object readOnly = XposedHelpers.getObjectField(
                     interactor, "isShadeVisibleOnAnyDisplay");
+            if (readOnly == null) {
+                Log.w(TAG, "Native visibility flow not initialized at " + source);
+                return;
+            }
             Object state = unwrap(readOnly, stateClass);
             if (state == null) {
-                Log.w(TAG, "Q25 status-bar visibility StateFlow backing not identified");
+                Log.w(TAG, "Cannot unwrap Q25 native visibility flow "
+                        + readOnly.getClass().getName() + " from " + source);
                 return;
             }
             targetState = new WeakReference<>(state);
             Object current = XposedHelpers.callMethod(state, "getValue");
             if (current instanceof Boolean) lastNativeVisible = (Boolean) current;
-            Log.i(TAG, "Captured actual native status-bar visibility StateFlow");
+            Log.i(TAG, "Captured actual native status-bar visibility StateFlow via "
+                    + source);
             if (bbMounted) writeValue(state, Boolean.FALSE);
         } catch (Throwable error) {
             Log.w(TAG, "Unable to capture native visibility state", error);
@@ -106,9 +138,12 @@ final class NativeShadeStatusBarVisibility {
         for (int depth = 0; current != null && depth < 3; depth++) {
             if (stateClass.isInstance(current)) return current;
             Object next = null;
-            // Kotlin ReadonlyStateFlow delegates to StateFlowImpl via a
-            // private $$delegate_0 field. Reflect that only on this one
-            // verified Q25 interactor field; never modify unrelated flows.
+            // Q25 classes3.dex declares ReadonlyStateFlow.$delegate_0
+            // as StateFlow. Inspect this concrete field before fallback.
+            try {
+                next = XposedHelpers.getObjectField(current, "$delegate_0");
+            } catch (Throwable ignored) { }
+            // Fallback for an alternative Kotlin wrapper on ROM changes.
             for (Class<?> cls = current.getClass(); cls != null
                     && next == null; cls = cls.getSuperclass()) {
                 for (Field field : cls.getDeclaredFields()) {
