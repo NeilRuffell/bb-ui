@@ -307,7 +307,7 @@ final class TwoColumnPanel extends FrameLayout {
         // Expanded-only artwork and metadata: artwork on the left, track info
         // centered vertically on the right. The collapsed 46dp row is unchanged.
         mediaArtworkFrame = new FrameLayout(context);
-        mediaArtworkFrame.setBackgroundColor(palette.canvas);
+        mediaArtworkFrame.setBackground(new HalfRadialGradientDrawable());
         mediaArtworkFrame.setFocusable(false);
         mediaArtworkFrame.setVisibility(View.GONE);
 
