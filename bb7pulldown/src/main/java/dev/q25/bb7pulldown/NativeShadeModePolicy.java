@@ -18,4 +18,13 @@ final class NativeShadeModePolicy {
     static boolean detachOnCollapse(boolean requested, boolean expanded, boolean mounted) {
         return requested && !expanded && mounted;
     }
+
+    /**
+     * The opening DOWN was delivered to native SystemUI before the BB host
+     * mounted. Do not forward its later MOVE/UP to BB without a matching DOWN.
+     */
+    static boolean swallowOpeningGestureTail(boolean mounted,
+            boolean startedNative, boolean isNewDown) {
+        return mounted && startedNative && !isNewDown;
+    }
 }
