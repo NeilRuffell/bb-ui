@@ -42,11 +42,14 @@ public final class TrackpadPressHandler {
         if (!isConfirmKey(keyCode)) return false;
 
         if (event.getAction() == KeyEvent.ACTION_DOWN) {
-            // A native dialog can consume the previous key-up event. A fresh
-            // DOWN (repeatCount=0) still starts a new physical press.
-            if (event.getRepeatCount() == 0 && state.isHeld()) cancel();
-            if (state.press(keyCode)) {
-                handler.postDelayed(timeout, ViewConfiguration.getLongPressTimeout());
+            // A dialog can consume the previous key-up event. Only a fresh
+            // DOWN (repeatCount=0) arms a physical press; autorepeat must
+            // never synthesize an additional click or long press.
+            if (event.getRepeatCount() == 0) {
+                if (state.isHeld()) cancel();
+                if (state.press(keyCode)) {
+                    handler.postDelayed(timeout, ViewConfiguration.getLongPressTimeout());
+                }
             }
         } else if (event.getAction() == KeyEvent.ACTION_UP) {
             handler.removeCallbacks(timeout);
