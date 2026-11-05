@@ -85,6 +85,9 @@ final class BB6NativeQsPanel extends FrameLayout {
         final ImageView icon;
         final TextView label;
         final TextView status;
+        boolean styled;
+        boolean lastFocused;
+        boolean lastEnabled;
 
         RowViews(LinearLayout root, ImageView icon, TextView label, TextView status) {
             this.root = root;
@@ -371,6 +374,12 @@ final class BB6NativeQsPanel extends FrameLayout {
         boolean focused = list.hasFocus() && selectedIndex() == index
                 && (navigation == null || !navigation.isStatusBarFocused());
         boolean enabled = rows.get(index).tile != null;
+        if (views.styled && views.lastFocused == focused && views.lastEnabled == enabled) {
+            return;
+        }
+        views.styled = true;
+        views.lastFocused = focused;
+        views.lastEnabled = enabled;
         if (focused) views.root.setBackground(BB7Theme.selected(dp(3), dp(1)));
         else views.root.setBackgroundColor(palette.card);
         views.label.setTextColor(focused ? Color.WHITE : enabled ? palette.title : palette.muted);
@@ -410,11 +419,17 @@ final class BB6NativeQsPanel extends FrameLayout {
                         styleVisibleRows();
                     }
                 } else if (selected < 0) {
+                    // Re-enter keyboard navigation at an already visible row
+                    // if touch scrolling has cleared ListView's selection.
+                    int first = Math.max(HEADER_COUNT, list.getFirstVisiblePosition());
+                    int last = Math.min(rows.size(), list.getLastVisiblePosition());
                     list.requestFocus();
-                    list.setSelection(HEADER_COUNT);
+                    list.setSelection(code == KeyEvent.KEYCODE_DPAD_UP
+                            ? Math.max(first, last) : first);
                 } else {
                     // This is ListView's own one-item arrow navigation.
                     // Do not give the event to any ScrollView/page-scroll handler.
+                    if (!list.hasFocus()) list.requestFocus();
                     list.dispatchKeyEvent(event);
                 }
             }
