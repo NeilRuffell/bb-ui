@@ -32,6 +32,7 @@ import java.util.Objects;
 import java.util.Set;
 
 import dev.q25.trackpad.theme.BB7Theme;
+import dev.q25.trackpad.input.TrackpadPressHandler;
 
 /**
  * BBOS6/7 presentation of installed native SystemUI Quick Settings tiles.
@@ -61,6 +62,7 @@ final class BB6NativeQsPanel extends FrameLayout {
     private final TextView empty;
     private final List<Row> rows = new ArrayList<>();
     private final BaseAdapter adapter;
+    private final TrackpadPressHandler trackpadPress;
     private boolean active;
     private float downY;
     private float downX;
@@ -171,6 +173,9 @@ final class BB6NativeQsPanel extends FrameLayout {
         this.active = lockscreenMode;
         this.palette = BB7Theme.palette(context);
         this.nativeSession = new NativeQuickSettingsTiles.Session(context, this::render);
+        this.trackpadPress = new TrackpadPressHandler(
+                () -> dispatchPress(selectedIndex(), false),
+                () -> dispatchPress(selectedIndex(), true));
         setFocusable(true);
         setFocusableInTouchMode(true);
         setBackgroundColor(palette.canvas);
@@ -226,10 +231,10 @@ final class BB6NativeQsPanel extends FrameLayout {
         list.setAdapter(adapter);
         list.setOnItemClickListener((parent, view, position, id) -> {
             if (navigation != null) navigation.focusContent();
-            dispatchAt(position - HEADER_COUNT, NativeQuickSettingsTiles.Action.PRIMARY);
+            dispatchPress(position - HEADER_COUNT, false);
         });
         list.setOnItemLongClickListener((parent, view, position, id) -> {
-            dispatchAt(position - HEADER_COUNT, NativeQuickSettingsTiles.Action.LONG_PRESS);
+            dispatchPress(position - HEADER_COUNT, true);
             return true;
         });
         list.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
@@ -258,12 +263,14 @@ final class BB6NativeQsPanel extends FrameLayout {
     }
 
     @Override protected void onDetachedFromWindow() {
+        trackpadPress.cancel();
         nativeSession.stop();
         super.onDetachedFromWindow();
     }
 
     void setActive(boolean value) {
         if (active == value) return;
+        if (!value) trackpadPress.cancel();
         active = value;
         if (!isAttachedToWindow()) return;
         if (active) nativeSession.start();
@@ -483,6 +490,30 @@ final class BB6NativeQsPanel extends FrameLayout {
         return position >= 0 && position < rows.size() ? position : -1;
     }
 
+    /**
+     * Use the existing QSTile's secondary/toggle action where LineageOS
+     * exposes one; its primary action remains the native details popup.
+     * No direct Wi-Fi, Bluetooth or telephony API is used by BBUI.
+     */
+    private void dispatchPress(int index, boolean longPress) {
+        if (index < 0 || index >= rows.size()) return;
+        Row row = rows.get(index);
+        QuickSettingsPressPolicy.Action action = QuickSettingsPressPolicy.select(
+                row.spec, row.tile != null && row.tile.hasSecondaryAction, longPress);
+        switch (action) {
+            case SECONDARY:
+                dispatchAt(index, NativeQuickSettingsTiles.Action.SECONDARY);
+                break;
+            case LONG_PRESS:
+                dispatchAt(index, NativeQuickSettingsTiles.Action.LONG_PRESS);
+                break;
+            case PRIMARY:
+            default:
+                dispatchAt(index, NativeQuickSettingsTiles.Action.PRIMARY);
+                break;
+        }
+    }
+
     private void dispatchAt(int index, NativeQuickSettingsTiles.Action action) {
         if (index < 0 || index >= rows.size()) return;
         Row row = rows.get(index);
@@ -496,8 +527,20 @@ final class BB6NativeQsPanel extends FrameLayout {
     }
 
     @Override public boolean dispatchKeyEvent(KeyEvent event) {
-        if (navigation != null && navigation.handleKey(event)) return true;
         int code = event.getKeyCode();
+        // A different navigation key invalidates a pending trackpad hold.
+        // Do not let a delayed long press activate a previously selected row.
+        if (!TrackpadPressHandler.isConfirmKey(code)
+                && event.getAction() == KeyEvent.ACTION_DOWN) {
+            trackpadPress.cancel();
+        }
+        if (navigation != null && navigation.handleKey(event)) {
+            trackpadPress.cancel();
+            return true;
+        }
+        if (TrackpadPressHandler.isConfirmKey(code)) {
+            return trackpadPress.handle(event);
+        }
         if (code == KeyEvent.KEYCODE_DPAD_UP || code == KeyEvent.KEYCODE_DPAD_DOWN) {
             if (event.getAction() == KeyEvent.ACTION_DOWN && !rows.isEmpty()) {
                 int selected = selectedIndex();
@@ -541,20 +584,13 @@ final class BB6NativeQsPanel extends FrameLayout {
         if (code == KeyEvent.KEYCODE_MENU) {
             if (event.getAction() == KeyEvent.ACTION_UP) {
                 int selected = selectedIndex();
-                if (selected >= 0) {
-                    Row row = rows.get(selected);
-                    dispatchAt(selected, row.tile != null && row.tile.hasSecondaryAction
-                            ? NativeQuickSettingsTiles.Action.SECONDARY
-                            : NativeQuickSettingsTiles.Action.LONG_PRESS);
-                }
+                if (selected >= 0) dispatchPress(selected, true);
             }
             return true;
         }
-        if (code == KeyEvent.KEYCODE_DPAD_CENTER || code == KeyEvent.KEYCODE_ENTER
-                || code == KeyEvent.KEYCODE_NUMPAD_ENTER
-                || (code == KeyEvent.KEYCODE_SPACE && !lockscreenMode)) {
+        if (code == KeyEvent.KEYCODE_SPACE && !lockscreenMode) {
             if (event.getAction() == KeyEvent.ACTION_UP) {
-                dispatchAt(selectedIndex(), NativeQuickSettingsTiles.Action.PRIMARY);
+                dispatchPress(selectedIndex(), false);
             }
             return true;
         }
@@ -591,6 +627,11 @@ final class BB6NativeQsPanel extends FrameLayout {
                 break;
         }
         return super.dispatchTouchEvent(event);
+    }
+
+    @Override public void onWindowFocusChanged(boolean hasWindowFocus) {
+        super.onWindowFocusChanged(hasWindowFocus);
+        if (!hasWindowFocus) trackpadPress.cancel();
     }
 
     /** Start the first tile immediately below the nonselectable list header. */
