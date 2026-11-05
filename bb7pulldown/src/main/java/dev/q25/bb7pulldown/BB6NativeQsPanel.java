@@ -335,10 +335,14 @@ final class BB6NativeQsPanel extends FrameLayout {
     }
 
     @Override public boolean dispatchKeyEvent(KeyEvent event) {
+        ShadeLatencyProbe.key("quick-settings-panel", event);
         if (navigation != null && navigation.handleKey(event)) return true;
         int key = event.getKeyCode();
         if (key == KeyEvent.KEYCODE_BACK || key == KeyEvent.KEYCODE_ESCAPE) {
-            if (event.getAction() == KeyEvent.ACTION_UP) listener.onClose();
+            if (event.getAction() == KeyEvent.ACTION_UP) {
+                ShadeLatencyProbe.mark("BACK_QS_REQUEST_SHADE_CLOSE");
+                listener.onClose();
+            }
             return true;
         }
         return super.dispatchKeyEvent(event);

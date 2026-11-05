@@ -366,6 +366,7 @@ final class NativeShadeHostBridge {
     }
 
     static boolean requestNativeOpen() {
+        ShadeLatencyProbe.mark("NATIVE_EXPAND_REQUEST_BEGIN");
         Object controller = controllerRef.get();
         if (!ready()) return false;
         try {
@@ -375,10 +376,12 @@ final class NativeShadeHostBridge {
             if (!Boolean.TRUE.equals(
                     XposedHelpers.callMethod(controller, "isExpandedWithoutHeadsUp"))) {
                 XposedHelpers.callMethod(controller, "expandToNotifications");
+                ShadeLatencyProbe.mark("NATIVE_EXPAND_TO_NOTIFICATIONS_RETURNED");
             }
             float fraction = XposedHelpers.getFloatField(controller, "mExpandedFraction");
             if (fraction < 0.999f) {
                 XposedHelpers.callMethod(controller, "setExpandedFraction", 1f);
+                ShadeLatencyProbe.mark("NATIVE_SET_EXPANDED_FRACTION_RETURNED");
             }
             Log.i(TAG, "Native SystemUI notification shade expanded for BB UI"
                     + " (previous fraction=" + fraction + ")");
@@ -390,10 +393,15 @@ final class NativeShadeHostBridge {
     }
 
     static void collapseNative() {
+        ShadeLatencyProbe.mark("NATIVE_INSTANT_COLLAPSE_BEGIN");
         Object controller = controllerRef.get();
-        if (controller == null) return;
+        if (controller == null) {
+            ShadeLatencyProbe.mark("NATIVE_COLLAPSE_CONTROLLER_MISSING");
+            return;
+        }
         try {
             XposedHelpers.callMethod(controller, "instantCollapse");
+            ShadeLatencyProbe.mark("NATIVE_INSTANT_COLLAPSE_RETURNED");
             Log.i(TAG, "Native shade collapse dispatched");
         } catch (Throwable error) {
             Log.e(TAG, "Native shade collapse failed", error);

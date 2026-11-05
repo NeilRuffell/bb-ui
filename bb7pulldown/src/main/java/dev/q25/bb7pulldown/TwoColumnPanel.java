@@ -1810,6 +1810,7 @@ final class TwoColumnPanel extends FrameLayout {
 
     @Override
     public boolean dispatchKeyEvent(KeyEvent event) {
+        ShadeLatencyProbe.key("notification-panel", event);
         if (navigation.handleKey(event)) {
             return true;
         }
@@ -1837,11 +1838,19 @@ final class TwoColumnPanel extends FrameLayout {
         }
         if (event.getKeyCode() == KeyEvent.KEYCODE_BACK) {
             if (event.getAction() == KeyEvent.ACTION_UP) {
-                if (activeReplyInput != null) closeInlineReply();
-                else if (mediaControlsOpen) {
+                if (activeReplyInput != null) {
+                    ShadeLatencyProbe.mark("BACK_NOTIFICATIONS_CLOSE_REPLY_ONLY");
+                    closeInlineReply();
+                } else if (mediaControlsOpen) {
+                    ShadeLatencyProbe.mark("BACK_NOTIFICATIONS_CLOSE_MEDIA_ONLY");
                     setMediaControlsOpen(false);
-                } else if (notificationPaneActive) returnToAppIcons();
-                else onClose.onClose();
+                } else if (notificationPaneActive) {
+                    ShadeLatencyProbe.mark("BACK_NOTIFICATIONS_RETURN_TO_APP_ICONS_ONLY");
+                    returnToAppIcons();
+                } else {
+                    ShadeLatencyProbe.mark("BACK_NOTIFICATIONS_REQUEST_SHADE_CLOSE");
+                    onClose.onClose();
+                }
             }
             return true;
         }

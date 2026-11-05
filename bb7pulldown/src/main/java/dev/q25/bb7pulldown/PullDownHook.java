@@ -126,6 +126,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
                 }
 
                 @Override public void onExit() {
+                    ShadeLatencyProbe.mark("BACK_STATUS_ZONE_EXIT_CALLBACK");
                     if (shadeHost != null) dismissShade();
                     else dismissStatusFocus();
                 }
@@ -646,6 +647,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
     }
 
     static void onNativeShadeExpansionChanged(boolean expanded) {
+        ShadeLatencyProbe.mark("NATIVE_EXPANSION_OBSERVER expanded=" + expanded);
         if (!NativeShadeHostBridge.active()) return;
         nativeShadeExpanded = expanded;
         updateStatusAppearance();
@@ -677,6 +679,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
             return;
         }
         openingOrClosing = true;
+        ShadeLatencyProbe.open(nativeMode, initialPage);
         final WindowManager manager = NativeShadeModePolicy.useLegacyWindow(nativeMode)
                 ? (WindowManager) context.getSystemService(Context.WINDOW_SERVICE) : null;
         if (!nativeMode && manager == null) {
@@ -687,9 +690,11 @@ public final class PullDownHook implements IXposedHookLoadPackage {
 
         try {
         SystemUiNotificationObserver.refreshBeforeOpen();
+        ShadeLatencyProbe.mark("OPEN_NOTIFICATION_REFRESH_DONE");
         activeFavorites = FavoritesClient.read(context);
         FavoritesClient.reportObserved(context, activeFavorites,
                 SystemUiNotificationObserver.itemsSnapshot());
+        ShadeLatencyProbe.mark("OPEN_FAVORITES_DONE");
 
         NativeMediaSessions nativeMedia = new NativeMediaSessions(context, entries -> {
             TwoColumnPanel current = panel;
@@ -735,6 +740,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
         UnifiedShadeHost root = new UnifiedShadeHost(
                 context, notifications, connections, NAVIGATION, initialPage,
                 PullDownHook::dismissShade);
+        ShadeLatencyProbe.mark("OPEN_VIEWS_CONSTRUCTED");
         // Construct legacy window parameters only in rollback mode.
         // Native mode must not allocate a second shade window at all.
         WindowManager.LayoutParams params = null;
@@ -766,6 +772,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
                 manager.addView(root, params);
             }
             attached = true;
+            ShadeLatencyProbe.mark("OPEN_ROOT_ATTACHED");
             shadeHost = root;
             windowManager = manager; // deliberately null for native shade mode
             panel = notifications;
@@ -776,6 +783,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
             nativeMedia.start();
             registerFavoritesObserver(context, notifications);
             updateStatusAppearance();
+            ShadeLatencyProbe.mark("OPEN_OBSERVERS_AND_MEDIA_STARTED");
 
             if (nativeMode) {
                 Log.i(TAG, "BB UI session attached inside native shade: page=" + initialPage);
@@ -785,8 +793,13 @@ public final class PullDownHook implements IXposedHookLoadPackage {
                     dismissShadeImmediately();
                     return;
                 }
+                ShadeLatencyProbe.mark("OPEN_NATIVE_EXPANSION_RETURNED");
+                ShadeLatencyProbe.nextFrameCallback("OPEN");
                 root.post(() -> {
-                    if (shadeHost == root) root.focusContent();
+                    if (shadeHost == root) {
+                        root.focusContent();
+                        ShadeLatencyProbe.mark("OPEN_FOCUS_GRANTED");
+                    }
                 });
             } else {
                 Log.i(TAG, "Unified shade window attached: initialPage=" + initialPage
@@ -828,8 +841,12 @@ public final class PullDownHook implements IXposedHookLoadPackage {
     }
 
     private static void dismissShade() {
+        ShadeLatencyProbe.mark("DISMISS_SHADE_REQUEST");
         UnifiedShadeHost root = shadeHost;
-        if (root == null || openingOrClosing) return;
+        if (root == null || openingOrClosing) {
+            ShadeLatencyProbe.mark("DISMISS_SHADE_IGNORED noHostOrTransition");
+            return;
+        }
         if (NativeShadeHostBridge.isMounted(root)) {
             // Native SystemUI controls shade state; do not invent a second
             // window-translation animation for its child.
@@ -852,6 +869,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
             @Override public void onReceive(Context c, Intent intent) {
                 String action = intent.getAction();
                 if (Intent.ACTION_CLOSE_SYSTEM_DIALOGS.equals(action)) {
+                    ShadeLatencyProbe.mark("HOME_CLOSE_SYSTEM_DIALOGS_BROADCAST");
                     Log.i(TAG, "Native close-system-dialogs event received");
                     dismissShadeImmediately();
                 } else if (Intent.ACTION_SCREEN_OFF.equals(action)) {
@@ -900,8 +918,10 @@ public final class PullDownHook implements IXposedHookLoadPackage {
     private static void dismissShadeImmediately() {
         UnifiedShadeHost current = shadeHost;
         if (current == null) return;
+        ShadeLatencyProbe.closeBegin();
         shadeHost = null;
         NAVIGATION.onShadeClosed();
+        ShadeLatencyProbe.mark("CLOSE_NAVIGATION_RESET");
         boolean nativeMount = NativeShadeHostBridge.isMounted(current);
         try {
             current.clearStatusBarFocus();
@@ -909,7 +929,9 @@ public final class PullDownHook implements IXposedHookLoadPackage {
             if (nativeMount) {
                 // Collapse before unmounting to avoid exposing stock UI.
                 NativeShadeHostBridge.collapseNative();
+                ShadeLatencyProbe.mark("CLOSE_NATIVE_COLLAPSE_RETURNED");
                 NativeShadeHostBridge.detach(current);
+                ShadeLatencyProbe.mark("CLOSE_NATIVE_CHILD_DETACHED");
             } else if (windowManager != null) {
                 windowManager.removeViewImmediate(current);
             }
@@ -925,6 +947,8 @@ public final class PullDownHook implements IXposedHookLoadPackage {
             openingOrClosing = false;
             updateStatusAppearance();
             Log.i(TAG, "Unified shade window removed");
+            ShadeLatencyProbe.mark("CLOSE_CLEANUP_DONE");
+            ShadeLatencyProbe.nextFrameCallback("CLOSE");
         }
     }
 

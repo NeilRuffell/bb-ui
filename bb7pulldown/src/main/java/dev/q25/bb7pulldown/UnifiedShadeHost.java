@@ -9,6 +9,7 @@ import android.view.Gravity;
 import android.widget.TextView;
 import android.view.View;
 import android.view.MotionEvent;
+import android.view.KeyEvent;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 
@@ -210,6 +211,11 @@ final class UnifiedShadeHost extends FrameLayout {
         } else {
             notifications.focusSelectedAppIcon();
         }
+    }
+
+    @Override public boolean dispatchKeyEvent(KeyEvent event) {
+        ShadeLatencyProbe.key("unified-host", event);
+        return super.dispatchKeyEvent(event);
     }
 
     void clearStatusBarFocus() {
