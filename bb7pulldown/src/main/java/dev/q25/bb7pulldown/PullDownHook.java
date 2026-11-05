@@ -660,6 +660,10 @@ public final class PullDownHook implements IXposedHookLoadPackage {
                     @Override public boolean onSeek(MediaSession.Token token, long positionMs) {
                         return nativeMedia.seekTo(token, positionMs);
                     }
+                    @Override public boolean onSetMode(
+                            MediaSession.Token token, int kind, int value) {
+                        return nativeMedia.setMode(token, kind, value);
+                    }
                 });
         BB6NativeQsPanel connections = new BB6NativeQsPanel(context,
                 new BB6NativeQsPanel.Listener() {
