@@ -59,7 +59,7 @@ final class NativeQuickSettingsTiles {
         final CharSequence secondary;
         final CharSequence contentDescription;
         final int state;
-        /** Native QSTile.BooleanState.value, or null for non-toggle tiles. */
+        /** Native toggle state for BBUI's checkbox, or null for action-only tiles. */
         final Boolean checked;
         final boolean available;
         final boolean disabledByPolicy;
@@ -321,9 +321,9 @@ final class NativeQuickSettingsTiles {
     }
 
     /**
-     * A checkmark represents a real native BooleanState, never a guessed
-     * toggle based on an arbitrary tile's ACTIVE/INACTIVE display state.
-     * Action-only tiles and menus have no checkbox.
+     * Read the underlying BooleanState value when available. Modern tiles
+     * may instead use plain State with explicit native toggle actions;
+     * QuickSettingsToggleIndicatorPolicy handles that distinction.
      */
     private static Boolean nativeChecked(Object state) {
         for (Class<?> type = state.getClass(); type != null; type = type.getSuperclass()) {
@@ -515,13 +515,23 @@ final class NativeQuickSettingsTiles {
                         if (icon == null) {
                             icon = XposedHelpers.getObjectField(state, "iconSupplier");
                         }
+                        int nativeState = XposedHelpers.getIntField(state, "state");
+                        boolean hasSecondary = booleanField(
+                                state, "handlesSecondaryClick", false);
+                        CharSequence accessibilityClass = charField(
+                                state, "expandedAccessibilityClassName");
+                        Boolean checked = QuickSettingsToggleIndicatorPolicy.checked(
+                                spec, nativeChecked(state), hasSecondary,
+                                accessibilityClass == null ? null
+                                        : accessibilityClass.toString(),
+                                booleanField(state, "forceExpandIcon", false),
+                                nativeState == Tile.STATE_ACTIVE);
                         result.add(new TileInfo(spec, title, charField(state, "secondaryLabel"),
                                 charField(state, "contentDescription"),
-                                XposedHelpers.getIntField(state, "state"),
-                                nativeChecked(state), available,
+                                nativeState, checked, available,
                                 booleanField(state, "disabledByPolicy", false),
-                                booleanField(state, "handlesSecondaryClick", false),
-                                booleanField(state, "handlesLongClick", true), icon));
+                                hasSecondary, booleanField(state, "handlesLongClick", true),
+                                icon));
                     } catch (Throwable error) {
                         Log.w(TAG, "Skipping unreadable native tile state", error);
                     }
