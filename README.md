@@ -9,6 +9,12 @@ native LineageOS SystemUI implementation.
 (versionCode 113). The native shade integration is **opt-in**, not the
 default, until its remaining presentation work is completed.
 
+**Development branch:** `feat/native-notification-draw-policy` tests
+selectively skipping native card drawing beneath BB-UI and reading
+notification opening intents directly from active Android notifications.
+See [notification rendering experiment](docs/NATIVE_NOTIFICATION_RENDERING.md).
+This work is **not merged** and does not remove Android's native row objects.
+
 ## Start here
 
 - [Design philosophy and architecture](docs/DESIGN_PHILOSOPHY.md) —
