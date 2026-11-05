@@ -479,10 +479,6 @@ public final class PullDownHook implements IXposedHookLoadPackage {
     }
 
     private static void updateStatusAppearance() {
-        UnifiedShadeHost currentShade = shadeHost;
-        if (currentShade != null) {
-            currentShade.setStatusBarFocused(NAVIGATION.isStatusBarFocused());
-        }
         View bar = nativeStatusBar.get();
         if (bar == null) bar = decoratedStatusBar;
         if (bar == null) return;
