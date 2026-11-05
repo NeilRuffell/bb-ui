@@ -19,6 +19,7 @@ import android.widget.TextView;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 import java.util.HashSet;
 
@@ -45,7 +46,6 @@ final class BB6NativeQsPanel extends FrameLayout {
     private final boolean lockscreenMode;
     private final NativeQuickSettingsTiles.Session nativeSession;
     private final LinearLayout list;
-    private final ScrollView scroll;
     private final List<Row> rows = new ArrayList<>();
     private boolean active;
     private float downY;
@@ -74,7 +74,6 @@ final class BB6NativeQsPanel extends FrameLayout {
             this.status = status;
         }
     }
-
 
     /** A stable list item; native state updates do not require new row views. */
     private static final class TileRow {
@@ -105,7 +104,8 @@ final class BB6NativeQsPanel extends FrameLayout {
         }
 
         @Override protected int computeScrollDeltaToGetChildRectOnScreen(Rect rect) {
-            if (getChildCount() == 0) return 0;
+            if (getChildCount() == 0 || getHeight() <= 0
+                    || getChildAt(0).getBottom() <= 0) return 0;
             int scrollY = getScrollY();
             return QuickSettingsRowScrollPolicy.scrollDelta(
                     scrollY,
@@ -129,7 +129,7 @@ final class BB6NativeQsPanel extends FrameLayout {
         setFocusableInTouchMode(true);
         setBackgroundColor(palette.canvas);
 
-        scroll = new RowScrollView(context);
+        ScrollView scroll = new RowScrollView(context);
         scroll.setFillViewport(true);
         scroll.setVerticalScrollBarEnabled(false);
         addView(scroll, new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
@@ -215,7 +215,7 @@ final class BB6NativeQsPanel extends FrameLayout {
                 TileRow wanted = desired.get(i);
                 Row existing = rows.get(i);
                 if (!existing.key.equals(wanted.key)
-                        || !java.util.Objects.equals(existing.spec, wanted.spec)
+                        || !Objects.equals(existing.spec, wanted.spec)
                         || existing.lockedKind != wanted.lockedKind) {
                     structureChanged = true;
                     break;
@@ -304,10 +304,6 @@ final class BB6NativeQsPanel extends FrameLayout {
                 LayoutParams.MATCH_PARENT, dp(55)));
 
         ImageView icon = new ImageView(getContext());
-        Drawable drawable = tile == null ? null :
-                NativeQuickSettingsTiles.iconDrawable(getContext(), tile.icon);
-        if (drawable != null) icon.setImageDrawable(drawable);
-        else icon.setImageResource(android.R.drawable.ic_menu_manage);
         row.addView(icon, new LinearLayout.LayoutParams(dp(23), dp(23)));
 
         LinearLayout labels = new LinearLayout(getContext());
@@ -319,15 +315,12 @@ final class BB6NativeQsPanel extends FrameLayout {
         row.addView(labels, labelsParams);
 
         TextView primary = new TextView(getContext());
-        primary.setText(TextUtils.isEmpty(title) ? (spec == null ? "Unavailable" : spec) : title);
         primary.setTextSize(15);
         primary.setSingleLine(true);
         primary.setEllipsize(TextUtils.TruncateAt.END);
         labels.addView(primary);
 
         TextView secondary = new TextView(getContext());
-        secondary.setText(tile == null ? "Unavailable" :
-                tile.disabledByPolicy ? "Restricted" : tile.statusText());
         secondary.setTextSize(12);
         secondary.setSingleLine(true);
         secondary.setEllipsize(TextUtils.TruncateAt.END);
@@ -335,10 +328,6 @@ final class BB6NativeQsPanel extends FrameLayout {
 
         Row item = new Row(key, spec, kind, tile, row, icon, primary, secondary);
         rows.add(item);
-        String description = tile == null ? "Unavailable" :
-                (tile.contentDescription == null ? String.valueOf(title == null ? spec : title)
-                        : tile.contentDescription.toString());
-        row.setContentDescription(description + ", " + secondary.getText());
         row.setOnClickListener(view -> dispatch(item, NativeQuickSettingsTiles.Action.PRIMARY));
         row.setOnLongClickListener(view -> {
             dispatch(item, NativeQuickSettingsTiles.Action.LONG_PRESS);
