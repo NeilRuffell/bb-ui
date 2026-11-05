@@ -690,7 +690,14 @@ public final class PullDownHook implements IXposedHookLoadPackage {
                     @Override public boolean onReply(String key, int index, String reply) {
                         return sendNotificationReply(key, index, reply);
                     }
-                }, NAVIGATION, nativeMedia::send);
+                }, NAVIGATION, new TwoColumnPanel.MediaControlListener() {
+                    @Override public boolean onControl(MediaSession.Token token, int action) {
+                        return nativeMedia.send(token, action);
+                    }
+                    @Override public boolean onSeek(MediaSession.Token token, long positionMs) {
+                        return nativeMedia.seekTo(token, positionMs);
+                    }
+                });
         BB6ConnectionsPanel connections = new BB6ConnectionsPanel(context,
                 new BB6ConnectionsPanel.Listener() {
                     @Override public void onClose() {
