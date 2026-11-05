@@ -330,9 +330,9 @@ final class NativeShadeHostBridge {
         int width = window.getWidth();
         int height = window.getHeight();
         if (width <= 0 || height <= 0) return;
-        Rect clip = NativeShadeStatusBandPolicy.clipBounds(
+        int[] bounds = NativeShadeStatusBandPolicy.clipBounds(
                 width, height, reservedStatusBandHeight);
-        window.setClipBounds(clip);
+        window.setClipBounds(new Rect(bounds[0], bounds[1], bounds[2], bounds[3]));
     }
 
     private static void endWindowClip() {
