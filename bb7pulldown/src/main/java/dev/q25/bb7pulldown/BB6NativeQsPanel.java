@@ -420,7 +420,11 @@ final class BB6NativeQsPanel extends FrameLayout {
                     if (lockscreenMode) listener.onClose();
                     else if (navigation != null) {
                         navigation.focusStatusBarFromPage(ShadeStatusNavigation.QUICK_SETTINGS);
-                        list.clearFocus();
+                        // Keep ListView as the hardware key receiver. The shared
+                        // controller now owns status-bar selection, so its
+                        // dispatchKeyEvent() consumes Left/Right/Down/Enter.
+                        // Clearing actual View focus here strands key events
+                        // outside this panel while its status zone stays active.
                         styleVisibleRows();
                     }
                 } else if (selected < 0) {
