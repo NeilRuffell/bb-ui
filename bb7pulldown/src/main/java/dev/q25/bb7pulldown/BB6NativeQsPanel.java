@@ -584,7 +584,13 @@ final class BB6NativeQsPanel extends FrameLayout {
         if (code == KeyEvent.KEYCODE_MENU) {
             if (event.getAction() == KeyEvent.ACTION_UP) {
                 int selected = selectedIndex();
-                if (selected >= 0) dispatchPress(selected, true);
+                if (selected >= 0) {
+                    // Preserve MENU's existing secondary-action behavior.
+                    Row row = rows.get(selected);
+                    dispatchAt(selected, row.tile != null && row.tile.hasSecondaryAction
+                            ? NativeQuickSettingsTiles.Action.SECONDARY
+                            : NativeQuickSettingsTiles.Action.LONG_PRESS);
+                }
             }
             return true;
         }
