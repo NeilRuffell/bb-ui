@@ -83,6 +83,7 @@ final class NativeMediaSessions {
     }
 
     private final MediaSessionManager manager;
+    private final Context context;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final Listener listener;
     private final Map<MediaSession.Token, MediaController> controllers = new LinkedHashMap<>();
@@ -93,6 +94,7 @@ final class NativeMediaSessions {
     private boolean started;
 
     NativeMediaSessions(Context context, Listener listener) {
+        this.context = context.getApplicationContext();
         manager = (MediaSessionManager) context.getSystemService(
                 Context.MEDIA_SESSION_SERVICE);
         this.listener = listener;
@@ -209,7 +211,7 @@ final class NativeMediaSessions {
                 Bitmap artwork = artworkBitmap(metadata);
                 if (artwork == null) {
                     artwork = SystemUiNotificationObserver.mediaNotificationArtwork(
-                            controller.getSessionToken());
+                            controller.getSessionToken(), context);
                 }
                 entries.add(new Entry(controller.getSessionToken(), controller.getPackageName(),
                         title, artist, playing,
