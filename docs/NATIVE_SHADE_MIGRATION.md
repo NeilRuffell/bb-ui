@@ -317,3 +317,47 @@ These observations are Q25 runtime acceptance criteria, not guaranteed
 by CI. If the original bar still switches format, inspect whether
 Captured actual native status-bar visibility StateFlow via ... appears.
 Use debug.bb7pulldown.native_shade.enabled=false for rollback.
+## Native status-bar contents missing during shade (version 0.9.81)
+
+Q25 device testing of 0.9.80 verified the normal native status-bar format
+and BB blue focus background, but the clock, notification icons, network
+indicators and battery still disappeared while either BB shade was open.
+
+Direct inspection of the uploaded Q25 SystemUI.apk identified the exact
+Kotlin coroutine delegate field in classes3.dex:
+
+    kotlinx.coroutines.flow.ReadonlyStateFlow.$$delegate_0
+
+The earlier code mistakenly addressed $delegate_0 (one dollar sign) and
+used a best-effort field scan. Version 0.9.81 performs an exact verified
+lookup, checks StateFlowImpl.setValue(Object), hooks the compiled
+StatusBarVisibilityInteractor constructor, and also captures that
+interactor when injected into HomeStatusBarViewModelImpl.
+
+The single affected upstream state is
+StatusBarVisibilityInteractor.isShadeVisibleOnAnyDisplay. During a BB
+native-shade session its native shade-visible emissions are overridden
+to false, preserving the original collapsed status-bar clock, icons and
+system info. Native values are restored when BB UI unmounts. The
+existing native shade full expansion, window clipping and focus
+background remain unchanged.
+
+### Diagnostics
+
+    adb -s 202512003630 logcat -d -s \
+      'BB7-StatusBar:V' 'BB7-NativeShade:V' '*:S' | tail -100
+
+New expected messages:
+- Q25 native status-bar content visibility hook registered;
+  exact ReadonlyStateFlow delegate=$$delegate_0
+- Captured native status-bar visibility StateFlow via interactor constructed
+  (or via status bar ViewModel)
+- Preserving existing status-bar content during BB native shade
+- Restored normal native status-bar visibility policy
+
+If 'Native status-bar visibility flow NOT CAPTURED' appears, check the
+detailed constructor/field log; the Q25 runtime still needs diagnosis.
+The above states are test targets, not guaranteed until device verified.
+
+Rollback remains: set debug.bb7pulldown.native_shade.enabled=false
+and restart com.android.systemui. Never merge until Q25 verified.
