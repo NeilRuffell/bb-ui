@@ -59,6 +59,8 @@ final class NativeQuickSettingsTiles {
         final CharSequence secondary;
         final CharSequence contentDescription;
         final int state;
+        /** Native QSTile.BooleanState.value, or null for non-toggle tiles. */
+        final Boolean checked;
         final boolean available;
         final boolean disabledByPolicy;
         final boolean hasSecondaryAction;
@@ -66,14 +68,15 @@ final class NativeQuickSettingsTiles {
         final Object icon;
 
         TileInfo(String spec, CharSequence label, CharSequence secondary,
-                CharSequence contentDescription, int state, boolean available,
-                boolean disabledByPolicy, boolean hasSecondaryAction,
+                CharSequence contentDescription, int state, Boolean checked,
+                boolean available, boolean disabledByPolicy, boolean hasSecondaryAction,
                 boolean hasLongAction, Object icon) {
             this.spec = spec;
             this.label = label;
             this.secondary = secondary;
             this.contentDescription = contentDescription;
             this.state = state;
+            this.checked = checked;
             this.available = available;
             this.disabledByPolicy = disabledByPolicy;
             this.hasSecondaryAction = hasSecondaryAction;
@@ -317,6 +320,24 @@ final class NativeQuickSettingsTiles {
         return null;
     }
 
+    /**
+     * A checkmark represents a real native BooleanState, never a guessed
+     * toggle based on an arbitrary tile's ACTIVE/INACTIVE display state.
+     * Action-only tiles and menus have no checkbox.
+     */
+    private static Boolean nativeChecked(Object state) {
+        for (Class<?> type = state.getClass(); type != null; type = type.getSuperclass()) {
+            if ("com.android.systemui.plugins.qs.QSTile$BooleanState".equals(type.getName())) {
+                try {
+                    return XposedHelpers.getBooleanField(state, "value");
+                } catch (Throwable error) {
+                    return null;
+                }
+            }
+        }
+        return null;
+    }
+
     static Drawable iconDrawable(Context context, Object icon) {
         if (icon == null) return null;
         try {
@@ -496,7 +517,8 @@ final class NativeQuickSettingsTiles {
                         }
                         result.add(new TileInfo(spec, title, charField(state, "secondaryLabel"),
                                 charField(state, "contentDescription"),
-                                XposedHelpers.getIntField(state, "state"), available,
+                                XposedHelpers.getIntField(state, "state"),
+                                nativeChecked(state), available,
                                 booleanField(state, "disabledByPolicy", false),
                                 booleanField(state, "handlesSecondaryClick", false),
                                 booleanField(state, "handlesLongClick", true), icon));
