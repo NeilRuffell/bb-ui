@@ -43,9 +43,17 @@ final class NativeMediaSessions {
         final boolean canPrevious;
         final boolean canPlayPause;
         final boolean canNext;
+        final boolean canSeek;
+        final long durationMs;
+        final long positionMs;
+        final long positionUpdatedAtMs;
+        final float playbackSpeed;
+        final boolean advancing;
 
         Entry(MediaSession.Token token, String packageName, String title, String artist,
-                boolean playing, boolean canPrevious, boolean canPlayPause, boolean canNext) {
+                boolean playing, boolean canPrevious, boolean canPlayPause, boolean canNext,
+                boolean canSeek, long durationMs, long positionMs,
+                long positionUpdatedAtMs, float playbackSpeed, boolean advancing) {
             this.token = token;
             this.packageName = packageName;
             this.title = title;
@@ -54,6 +62,17 @@ final class NativeMediaSessions {
             this.canPrevious = canPrevious;
             this.canPlayPause = canPlayPause;
             this.canNext = canNext;
+            this.canSeek = canSeek;
+            this.durationMs = durationMs;
+            this.positionMs = positionMs;
+            this.positionUpdatedAtMs = positionUpdatedAtMs;
+            this.playbackSpeed = playbackSpeed;
+            this.advancing = advancing;
+        }
+
+        long positionAt(long elapsedRealtimeMs) {
+            return MediaSeekPolicy.positionAt(positionMs, durationMs,
+                    positionUpdatedAtMs, playbackSpeed, advancing, elapsedRealtimeMs);
         }
     }
 
@@ -179,13 +198,18 @@ final class NativeMediaSessions {
                 if (artist.isEmpty()) {
                     artist = metadataValue(metadata, MediaMetadata.METADATA_KEY_DISPLAY_SUBTITLE);
                 }
+                long durationMs = metadata == null ? 0
+                        : Math.max(0, metadata.getLong(MediaMetadata.METADATA_KEY_DURATION));
                 entries.add(new Entry(controller.getSessionToken(), controller.getPackageName(),
                         title, artist, playing,
                         (actions & PlaybackState.ACTION_SKIP_TO_PREVIOUS) != 0,
                         (actions & (PlaybackState.ACTION_PLAY_PAUSE
                                 | (playing ? PlaybackState.ACTION_PAUSE
                                         : PlaybackState.ACTION_PLAY))) != 0,
-                        (actions & PlaybackState.ACTION_SKIP_TO_NEXT) != 0));
+                        (actions & PlaybackState.ACTION_SKIP_TO_NEXT) != 0,
+                        durationMs > 0 && (actions & PlaybackState.ACTION_SEEK_TO) != 0,
+                        durationMs, state.getPosition(), state.getLastPositionUpdateTime(),
+                        state.getPlaybackSpeed(), state.getState() == PlaybackState.STATE_PLAYING));
             } catch (RuntimeException error) {
                 Log.w(TAG, "Cannot read native playback state", error);
             }
@@ -239,6 +263,29 @@ final class NativeMediaSessions {
             }
         } catch (RuntimeException error) {
             Log.w(TAG, "Native media transport command failed", error);
+            return false;
+        }
+    }
+
+    /** Seek exclusively through the current Android media session, when permitted. */
+    boolean seekTo(MediaSession.Token token, long positionMs) {
+        if (!started || token == null) return false;
+        MediaController controller = controllers.get(token);
+        if (controller == null) return false;
+        try {
+            PlaybackState state = controller.getPlaybackState();
+            MediaMetadata metadata = controller.getMetadata();
+            long duration = metadata == null ? 0
+                    : metadata.getLong(MediaMetadata.METADATA_KEY_DURATION);
+            if (state == null || duration <= 0
+                    || (state.getActions() & PlaybackState.ACTION_SEEK_TO) == 0) {
+                return false;
+            }
+            controller.getTransportControls().seekTo(
+                    MediaSeekPolicy.clamp(positionMs, duration));
+            return true;
+        } catch (RuntimeException error) {
+            Log.w(TAG, "Native media seek command failed", error);
             return false;
         }
     }
