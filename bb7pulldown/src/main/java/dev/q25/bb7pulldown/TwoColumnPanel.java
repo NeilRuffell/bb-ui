@@ -1022,6 +1022,8 @@ final class TwoColumnPanel extends FrameLayout {
             row.setClickable(true);
             row.setOnFocusChangeListener((view, focused) -> {
                 if (focused && !notificationPaneActive) select(pkg);
+                // Redraw on both focus gain and loss, not just package changes.
+                updateSelectedHighlight();
             });
             row.setOnClickListener(view -> {
                 select(pkg);
@@ -1724,10 +1726,17 @@ final class TwoColumnPanel extends FrameLayout {
         });
     }
 
+    /** Refresh when the native status-bar focus zone changes. */
+    void refreshAppIconFocus() {
+        updateSelectedHighlight();
+    }
+
     private void updateSelectedHighlight() {
         for (int i = 0; i < iconRows.size(); i++) {
             FrameLayout row = iconRows.get(i);
-            boolean selected = renderedPackages.get(i).equals(selectedPackage);
+            boolean selected = AppSelectionPolicy.shouldHighlight(
+                    renderedPackages.get(i), selectedPackage, row.isFocused(),
+                    navigation.isStatusBarFocused());
             row.setSelected(selected);
             if (selected) {
                 row.setBackground(BB7Theme.selected(dp(3), dp(1)));
