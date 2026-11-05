@@ -97,6 +97,8 @@ final class TwoColumnPanel extends FrameLayout {
     private final ImageView mediaAppIcon;
     private final ImageView[] mediaButtons = new ImageView[3];
     private final TextView mediaNowPlaying;
+    private final MediaModeStatusIcon mediaShuffleStatus;
+    private final MediaModeStatusIcon mediaRepeatStatus;
     private final TextView mediaIndex;
     private List<NativeMediaSessions.Entry> mediaSessions = Collections.emptyList();
     private MediaSession.Token selectedMediaToken;
@@ -215,6 +217,20 @@ final class TwoColumnPanel extends FrameLayout {
         mediaNowPlaying.setFocusable(false);
         mediaRow.addView(mediaNowPlaying, new LinearLayout.LayoutParams(
                 0, LayoutParams.MATCH_PARENT, 1f));
+
+        // Passive native-mode indicators occupy the space previously used by
+        // the collapsed transport buttons; absent/off modes take no space.
+        mediaShuffleStatus = new MediaModeStatusIcon(context, MediaModeStatusIcon.SHUFFLE);
+        LinearLayout.LayoutParams shuffleStatusLayout = new LinearLayout.LayoutParams(
+                dp(28), dp(28));
+        shuffleStatusLayout.rightMargin = dp(3);
+        mediaRow.addView(mediaShuffleStatus, shuffleStatusLayout);
+
+        mediaRepeatStatus = new MediaModeStatusIcon(context, MediaModeStatusIcon.REPEAT);
+        LinearLayout.LayoutParams repeatStatusLayout = new LinearLayout.LayoutParams(
+                dp(28), dp(28));
+        repeatStatusLayout.rightMargin = dp(3);
+        mediaRow.addView(mediaRepeatStatus, repeatStatusLayout);
 
         final int[] icons = {
                 android.R.drawable.ic_media_previous,
@@ -522,6 +538,7 @@ final class TwoColumnPanel extends FrameLayout {
         }
         if (nowPlaying.isEmpty()) nowPlaying = "Now playing";
         mediaNowPlaying.setText(nowPlaying);
+        updateCollapsedMediaStatuses(entry);
         expandedMediaTitle.setText(entry.title.isEmpty() ? "Now playing" : entry.title);
         expandedMediaArtist.setText(entry.artist);
         expandedMediaArtist.setVisibility(entry.artist.isEmpty() ? View.GONE : View.VISIBLE);
@@ -535,7 +552,12 @@ final class TwoColumnPanel extends FrameLayout {
                 ? View.VISIBLE : View.GONE);
         mediaRow.setContentDescription("Now playing: " + nowPlaying
                 + (mediaSessions.size() > 1
-                        ? ", " + (index + 1) + " of " + mediaSessions.size() : ""));
+                        ? ", " + (index + 1) + " of " + mediaSessions.size() : "")
+                + (MediaModePolicy.showShuffleStatus(entry.canShuffle, entry.shuffleMode)
+                        ? ", shuffle on" : "")
+                + (MediaModePolicy.showRepeatStatus(entry.canRepeat, entry.repeatMode)
+                        ? entry.repeatMode == MediaModePolicy.REPEAT_ONE
+                                ? ", repeat one" : ", repeat on" : ""));
         renderMediaProgress();
         updateMediaArtwork();
         updateMediaHighlight();
@@ -583,6 +605,20 @@ final class TwoColumnPanel extends FrameLayout {
         }
     }
 
+    /** Display state only: these icons never issue commands or consume focus. */
+    private void updateCollapsedMediaStatuses(NativeMediaSessions.Entry entry) {
+        boolean collapsed = !mediaControlsOpen && entry != null;
+        boolean shuffleOn = collapsed
+                && MediaModePolicy.showShuffleStatus(entry.canShuffle, entry.shuffleMode);
+        boolean repeatOn = collapsed
+                && MediaModePolicy.showRepeatStatus(entry.canRepeat, entry.repeatMode);
+        mediaShuffleStatus.setVisibility(shuffleOn ? View.VISIBLE : View.GONE);
+        mediaRepeatStatus.setVisibility(repeatOn ? View.VISIBLE : View.GONE);
+        if (repeatOn) {
+            mediaRepeatStatus.setRepeatOne(entry.repeatMode == MediaModePolicy.REPEAT_ONE);
+        }
+    }
+
     private void setMediaControlsOpen(boolean open) {
         if (mediaControlsOpen == open) return;
         mediaControlsOpen = open;
@@ -599,6 +635,7 @@ final class TwoColumnPanel extends FrameLayout {
         // transport buttons are available exclusively when expanded.
         mediaAppIcon.setVisibility(open ? View.GONE : View.VISIBLE);
         mediaNowPlaying.setVisibility(open ? View.GONE : View.VISIBLE);
+        updateCollapsedMediaStatuses(currentMediaSession());
         mediaIndex.setVisibility(open ? View.GONE
                 : mediaSessions.size() > 1 ? View.VISIBLE : View.GONE);
         mediaRow.setPadding(dp(open ? 10 : 9), dp(3),
@@ -771,6 +808,9 @@ final class TwoColumnPanel extends FrameLayout {
                 ? Color.WHITE : palette.title);
         mediaIndex.setTextColor(focused && !mediaControlsOpen
                 ? Color.WHITE : palette.muted);
+        int statusTint = focused && !mediaControlsOpen ? Color.WHITE : palette.body;
+        mediaShuffleStatus.setTint(statusTint);
+        mediaRepeatStatus.setTint(statusTint);
         boolean seekFocused = focused && mediaControlsOpen && mediaSeekSelected;
         // Never highlight the entire seek row: selection is visible exclusively
         // on the movable pill. The elapsed/total timestamps stay unchanged.
