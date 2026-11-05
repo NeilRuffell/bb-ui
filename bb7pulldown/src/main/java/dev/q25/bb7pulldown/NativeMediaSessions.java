@@ -206,6 +206,11 @@ final class NativeMediaSessions {
                 }
                 long durationMs = metadata == null ? 0
                         : Math.max(0, metadata.getLong(MediaMetadata.METADATA_KEY_DURATION));
+                Bitmap artwork = artworkBitmap(metadata);
+                if (artwork == null) {
+                    artwork = SystemUiNotificationObserver.mediaNotificationArtwork(
+                            controller.getSessionToken());
+                }
                 entries.add(new Entry(controller.getSessionToken(), controller.getPackageName(),
                         title, artist, playing,
                         (actions & PlaybackState.ACTION_SKIP_TO_PREVIOUS) != 0,
@@ -216,7 +221,7 @@ final class NativeMediaSessions {
                         durationMs > 0 && (actions & PlaybackState.ACTION_SEEK_TO) != 0,
                         durationMs, state.getPosition(), state.getLastPositionUpdateTime(),
                         state.getPlaybackSpeed(), state.getState() == PlaybackState.STATE_PLAYING,
-                        artworkBitmap(metadata), artworkUri(metadata)));
+                        artwork, artworkUri(metadata)));
             } catch (RuntimeException error) {
                 Log.w(TAG, "Cannot read native playback state", error);
             }
