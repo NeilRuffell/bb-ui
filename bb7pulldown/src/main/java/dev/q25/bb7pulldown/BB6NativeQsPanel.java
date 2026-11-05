@@ -208,7 +208,7 @@ final class BB6NativeQsPanel extends FrameLayout {
     void focusFirst() {
         if (navigation != null) navigation.focusContent();
         list.requestFocus();
-        if (!rows.isEmpty()) list.setSelection(HEADER_COUNT);
+        if (!rows.isEmpty()) list.setSelectionFromTop(HEADER_COUNT, firstRowOffset());
         styleVisibleRows();
     }
 
@@ -252,6 +252,9 @@ final class BB6NativeQsPanel extends FrameLayout {
         if (structureChanged) {
             int before = selectedIndex();
             String selectedKey = before >= 0 ? rows.get(before).key : null;
+            View oldSelectedView = list.getSelectedView();
+            int selectedTop = oldSelectedView == null ? firstRowOffset()
+                    : oldSelectedView.getTop();
             rows.clear();
             rows.addAll(desired);
             empty.setVisibility(rows.isEmpty() ? View.VISIBLE : View.GONE);
@@ -267,9 +270,11 @@ final class BB6NativeQsPanel extends FrameLayout {
                 if (next < 0 && !rows.isEmpty()) {
                     next = Math.min(before, rows.size() - 1);
                 }
-                if (next >= 0) list.setSelection(next + HEADER_COUNT);
+                if (next >= 0) {
+                    list.setSelectionFromTop(next + HEADER_COUNT, selectedTop);
+                }
             } else if (list.hasFocus() && !rows.isEmpty()) {
-                list.setSelection(HEADER_COUNT);
+                list.setSelectionFromTop(HEADER_COUNT, firstRowOffset());
             }
         } else {
             // No notifyDataSetChanged(): rebinding can otherwise reset the
@@ -424,8 +429,10 @@ final class BB6NativeQsPanel extends FrameLayout {
                     int first = Math.max(HEADER_COUNT, list.getFirstVisiblePosition());
                     int last = Math.min(rows.size(), list.getLastVisiblePosition());
                     list.requestFocus();
-                    list.setSelection(code == KeyEvent.KEYCODE_DPAD_UP
-                            ? Math.max(first, last) : first);
+                    list.setSelectionFromTop(code == KeyEvent.KEYCODE_DPAD_UP
+                            ? Math.max(first, last) : first,
+                            code == KeyEvent.KEYCODE_DPAD_UP
+                                    ? list.getHeight() - dp(55) : 0);
                 } else {
                     // This is ListView's own one-item arrow navigation.
                     // Do not give the event to any ScrollView/page-scroll handler.
@@ -492,6 +499,12 @@ final class BB6NativeQsPanel extends FrameLayout {
                 break;
         }
         return super.dispatchTouchEvent(event);
+    }
+
+    /** Start the first tile immediately below the nonselectable list header. */
+    private int firstRowOffset() {
+        // Header: 7dp top inset + 37dp label + 2dp bottom + the list divider.
+        return dp(7) + dp(37) + dp(2) + list.getDividerHeight();
     }
 
     private int dp(int value) {
