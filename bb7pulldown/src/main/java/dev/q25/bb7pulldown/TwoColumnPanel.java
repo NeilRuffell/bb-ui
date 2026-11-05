@@ -61,6 +61,9 @@ final class TwoColumnPanel extends FrameLayout {
     }
 
     private static final String TAG = "BB7-PullDown";
+    // BBOS-style silver scrubber; the focused state belongs to the thumb alone.
+    private static final int MEDIA_SEEK_SILVER = 0xffc9ced5;
+    private static final int MEDIA_SEEK_TRACK = 0xff454b53;
     private final BB7Theme.Palette palette;
     private final CloseListener onClose;
     private final ShadeUiController navigation;
@@ -260,8 +263,13 @@ final class TwoColumnPanel extends FrameLayout {
         // Parent row owns trackpad focus; SeekBar owns direct touch dragging.
         mediaSeekBar.setFocusable(false);
         mediaSeekBar.setFocusableInTouchMode(false);
-        mediaSeekBar.setProgressTintList(ColorStateList.valueOf(BB7Theme.BLUE_MIDDLE));
-        mediaSeekBar.setThumbTintList(ColorStateList.valueOf(BB7Theme.BLUE_MIDDLE));
+        mediaSeekBar.setProgressTintList(ColorStateList.valueOf(MEDIA_SEEK_SILVER));
+        mediaSeekBar.setProgressBackgroundTintList(ColorStateList.valueOf(MEDIA_SEEK_TRACK));
+        mediaSeekBar.setSecondaryProgressTintList(ColorStateList.valueOf(MEDIA_SEEK_TRACK));
+        // Preserve the silver pill's own fill and border rather than applying
+        // the current Android theme's SeekBar thumb tint.
+        mediaSeekBar.setThumbTintList(null);
+        mediaSeekBar.setThumb(mediaSeekThumb(false));
         mediaSeekBar.setContentDescription("Playback position");
         mediaSeekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override public void onStartTrackingTouch(SeekBar seekBar) {
@@ -661,6 +669,21 @@ final class TwoColumnPanel extends FrameLayout {
         super.onDetachedFromWindow();
     }
 
+    /** BBOS-style elongated silver thumb; only the selected pill brightens. */
+    private GradientDrawable mediaSeekThumb(boolean selected) {
+        GradientDrawable pill = new GradientDrawable(
+                GradientDrawable.Orientation.TOP_BOTTOM,
+                selected
+                        ? new int[] {0xfff7f8fa, 0xffc8ced6}
+                        : new int[] {0xffe5e9ef, 0xffaeb6c0});
+        pill.setShape(GradientDrawable.RECTANGLE);
+        pill.setCornerRadius(dp(10));
+        pill.setSize(dp(selected ? 56 : 54), dp(selected ? 18 : 16));
+        pill.setStroke(dp(selected ? 2 : 1),
+                selected ? 0xffffffff : 0xff87919c);
+        return pill;
+    }
+
     private void updateMediaHighlight() {
         boolean focused = mediaRow.isFocused();
         mediaRow.setBackground(focused && !mediaControlsOpen
@@ -674,13 +697,16 @@ final class TwoColumnPanel extends FrameLayout {
         mediaIndex.setTextColor(focused && !mediaControlsOpen
                 ? Color.WHITE : palette.muted);
         boolean seekFocused = focused && mediaControlsOpen && mediaSeekSelected;
-        mediaSeekRow.setBackground(seekFocused ? BB7Theme.selected(dp(3), dp(1))
-                : new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
-                        palette == BB7Theme.Palette.DARK
-                                ? new int[] {0xff2f4053, 0xff1e2c3b}
-                                : new int[] {0xffecf1f7, 0xffd8e2ec}));
-        mediaElapsed.setTextColor(seekFocused ? Color.WHITE : palette.muted);
-        mediaDuration.setTextColor(seekFocused ? Color.WHITE : palette.muted);
+        // Never highlight the entire seek row: selection is visible exclusively
+        // on the movable pill. The elapsed/total timestamps stay unchanged.
+        mediaSeekRow.setBackground(new GradientDrawable(
+                GradientDrawable.Orientation.TOP_BOTTOM,
+                palette == BB7Theme.Palette.DARK
+                        ? new int[] {0xff2f4053, 0xff1e2c3b}
+                        : new int[] {0xffecf1f7, 0xffd8e2ec}));
+        mediaSeekBar.setThumb(mediaSeekThumb(seekFocused));
+        mediaElapsed.setTextColor(palette.muted);
+        mediaDuration.setTextColor(palette.muted);
         int index = mediaSessionIndex();
         if (index < 0) return;
         NativeMediaSessions.Entry entry = mediaSessions.get(index);
