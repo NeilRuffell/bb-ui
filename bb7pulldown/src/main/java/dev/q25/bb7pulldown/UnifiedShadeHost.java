@@ -1,6 +1,12 @@
 package dev.q25.bb7pulldown;
 
+import dev.q25.trackpad.theme.BB7Theme;
+
 import android.content.Context;
+import android.graphics.Color;
+import android.graphics.drawable.GradientDrawable;
+import android.view.Gravity;
+import android.widget.TextView;
 import android.view.View;
 import android.view.MotionEvent;
 import android.widget.FrameLayout;
@@ -16,6 +22,11 @@ final class UnifiedShadeHost extends FrameLayout {
     static final int QUICK_SETTINGS = ShadeStatusNavigation.QUICK_SETTINGS;
 
     private final ShadeDateHeader dateHeader;
+    private final LinearLayout mediaModeHeader;
+    private final TextView mediaShuffle;
+    private final TextView mediaRepeat;
+    private boolean mediaExpanded;
+    private int displayedPage = NOTIFICATIONS;
     private final TwoColumnPanel notifications;
     private final BB6NativeQsPanel connections;
     private final ShadeUiController navigation;
@@ -63,6 +74,38 @@ final class UnifiedShadeHost extends FrameLayout {
         });
         layout.addView(dateHeader, ShadeDateHeader.layoutParams(context));
 
+        // BBOS6 media header replaces the taller date bar only while expanded.
+        // This host owns both headers; no stock SystemUI view is modified.
+        mediaModeHeader = new LinearLayout(context);
+        mediaModeHeader.setOrientation(LinearLayout.HORIZONTAL);
+        mediaModeHeader.setGravity(Gravity.CENTER_VERTICAL);
+        mediaModeHeader.setPadding(dp(8), 0, dp(8), 0);
+        mediaModeHeader.setBackground(new GradientDrawable(
+                GradientDrawable.Orientation.TOP_BOTTOM, BB7Theme.gradientColors()));
+        mediaModeHeader.setVisibility(View.GONE);
+        layout.addView(mediaModeHeader, new LinearLayout.LayoutParams(
+                LayoutParams.MATCH_PARENT, dp(32)));
+
+        TextView heading = new TextView(context);
+        heading.setText("Media");
+        heading.setTextColor(Color.WHITE);
+        heading.setTextSize(12);
+        heading.setGravity(Gravity.CENTER_VERTICAL);
+        mediaModeHeader.addView(heading, new LinearLayout.LayoutParams(
+                0, LayoutParams.MATCH_PARENT, 1f));
+
+        mediaShuffle = modeButton(context);
+        mediaShuffle.setOnClickListener(view -> notifications.activateMediaHeaderMode(
+                MediaModePolicy.SHUFFLE));
+        mediaModeHeader.addView(mediaShuffle, new LinearLayout.LayoutParams(
+                LayoutParams.WRAP_CONTENT, dp(28)));
+
+        mediaRepeat = modeButton(context);
+        mediaRepeat.setOnClickListener(view -> notifications.activateMediaHeaderMode(
+                MediaModePolicy.REPEAT));
+        mediaModeHeader.addView(mediaRepeat, new LinearLayout.LayoutParams(
+                LayoutParams.WRAP_CONTENT, dp(28)));
+
         FrameLayout pages = new FrameLayout(context);
         layout.addView(pages, new LinearLayout.LayoutParams(
                 LayoutParams.MATCH_PARENT, 0, 1f));
@@ -71,6 +114,9 @@ final class UnifiedShadeHost extends FrameLayout {
         pages.addView(connections, new FrameLayout.LayoutParams(
                 LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
 
+        // Media focus remains in TwoColumnPanel; these header items are passive
+        // to hardware focus, but can be activated directly by touch.
+        notifications.setMediaHeaderListener(this::onMediaHeader);
         // Do not request focus until the one-time entrance animation finishes.
         setPage(initialPage);
     }
@@ -79,9 +125,73 @@ final class UnifiedShadeHost extends FrameLayout {
         if (next != NOTIFICATIONS && next != QUICK_SETTINGS) {
             throw new IllegalArgumentException("Unknown shade page");
         }
+        displayedPage = next;
         notifications.setVisibility(next == NOTIFICATIONS ? View.VISIBLE : View.GONE);
         connections.setVisibility(next == QUICK_SETTINGS ? View.VISIBLE : View.GONE);
         connections.setActive(next == QUICK_SETTINGS);
+        updateHeaderVisibility();
+    }
+
+    private static TextView modeButton(Context context) {
+        TextView button = new TextView(context);
+        button.setTextSize(12);
+        button.setTextColor(Color.WHITE);
+        button.setGravity(Gravity.CENTER);
+        button.setPadding(12, 0, 12, 0);
+        button.setFocusable(false);
+        button.setClickable(true);
+        return button;
+    }
+
+    private void onMediaHeader(boolean expanded, NativeMediaSessions.Entry entry,
+            boolean modeSelected, int selectedMode) {
+        mediaExpanded = expanded;
+        boolean shuffle = entry != null && entry.canShuffle;
+        boolean repeat = entry != null && entry.canRepeat;
+        mediaShuffle.setVisibility(shuffle ? View.VISIBLE : View.GONE);
+        mediaRepeat.setVisibility(repeat ? View.VISIBLE : View.GONE);
+        if (shuffle) {
+            boolean enabled = entry.shuffleMode != MediaModePolicy.SHUFFLE_NONE;
+            mediaShuffle.setText(enabled ? "Shuffle On" : "Shuffle");
+            mediaShuffle.setContentDescription(enabled ? "Shuffle on" : "Shuffle off");
+            styleMode(mediaShuffle, enabled, modeSelected
+                    && selectedMode == MediaModePolicy.SHUFFLE);
+        }
+        if (repeat) {
+            String label = entry.repeatMode == MediaModePolicy.REPEAT_ONE ? "Repeat 1"
+                    : entry.repeatMode == MediaModePolicy.REPEAT_ALL ? "Repeat All"
+                    : "Repeat";
+            mediaRepeat.setText(label);
+            mediaRepeat.setContentDescription(label);
+            styleMode(mediaRepeat,
+                    entry.repeatMode != MediaModePolicy.REPEAT_NONE,
+                    modeSelected && selectedMode == MediaModePolicy.REPEAT);
+        }
+        updateHeaderVisibility();
+    }
+
+    private void styleMode(TextView view, boolean enabled, boolean selected) {
+        if (selected) {
+            GradientDrawable selectedBackground = new GradientDrawable();
+            selectedBackground.setColor(0xff153a65);
+            selectedBackground.setCornerRadius(dp(4));
+            selectedBackground.setStroke(dp(1), BB7Theme.BLUE_BORDER);
+            view.setBackground(selectedBackground);
+        } else if (enabled) {
+            GradientDrawable active = new GradientDrawable();
+            active.setColor(0x663c5369);
+            active.setCornerRadius(dp(4));
+            view.setBackground(active);
+        } else {
+            view.setBackground(null);
+        }
+        view.setAlpha(enabled || selected ? 1f : 0.78f);
+    }
+
+    private void updateHeaderVisibility() {
+        boolean showMedia = mediaExpanded && displayedPage == NOTIFICATIONS;
+        dateHeader.setVisibility(showMedia ? View.GONE : View.VISIBLE);
+        mediaModeHeader.setVisibility(showMedia ? View.VISIBLE : View.GONE);
     }
 
     int page() {
