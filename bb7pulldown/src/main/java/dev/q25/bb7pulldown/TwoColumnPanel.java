@@ -229,6 +229,9 @@ final class TwoColumnPanel extends FrameLayout {
             button.setScaleType(ImageView.ScaleType.FIT_CENTER);
             button.setPadding(dp(9), dp(9), dp(9), dp(9));
             button.setFocusable(false); // Trackpad focus remains on the parent row.
+            // Transport buttons belong exclusively to the expanded media view.
+            // Initially collapsed: these must be hidden even before first open.
+            button.setVisibility(View.GONE);
             button.setClickable(true);
             button.setContentDescription(descriptions[i]);
             button.setOnClickListener(view -> {
@@ -592,8 +595,8 @@ final class TwoColumnPanel extends FrameLayout {
         mediaColumns.setVisibility(open ? View.GONE : View.VISIBLE);
 
         // Reuse the same focusable transport row and native media actions.
-        // Only its expanded presentation changes; collapsed layout is restored
-        // byte-for-byte in size, spacing, and visible child order.
+        // The collapsed bar shows only app icon, track info and session index;
+        // transport buttons are available exclusively when expanded.
         mediaAppIcon.setVisibility(open ? View.GONE : View.VISIBLE);
         mediaNowPlaying.setVisibility(open ? View.GONE : View.VISIBLE);
         mediaIndex.setVisibility(open ? View.GONE
@@ -603,6 +606,7 @@ final class TwoColumnPanel extends FrameLayout {
         mediaRow.setLayoutParams(new LinearLayout.LayoutParams(
                 LayoutParams.MATCH_PARENT, dp(open ? 62 : 46)));
         for (ImageView button : mediaButtons) {
+            button.setVisibility(open ? View.VISIBLE : View.GONE);
             button.setLayoutParams(open
                     ? new LinearLayout.LayoutParams(0, LayoutParams.MATCH_PARENT, 1f)
                     : new LinearLayout.LayoutParams(dp(39), dp(39)));
