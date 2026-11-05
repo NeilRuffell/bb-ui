@@ -722,20 +722,26 @@ public final class PullDownHook implements IXposedHookLoadPackage {
         UnifiedShadeHost root = new UnifiedShadeHost(
                 context, notifications, connections, NAVIGATION, initialPage,
                 PullDownHook::dismissShade);
-        WindowManager.LayoutParams params = new WindowManager.LayoutParams(
-                WindowManager.LayoutParams.MATCH_PARENT,
-                Math.max(1, context.getResources().getDisplayMetrics().heightPixels
-                        - nativeStatusBarHeight(context)),
-                STATUS_BAR_SUB_PANEL_WINDOW_TYPE,
-                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
-                PixelFormat.OPAQUE);
-        params.setTitle("BB UI Unified Shade");
-        params.gravity = Gravity.TOP | Gravity.START;
-        params.y = nativeStatusBarHeight(context);
-        params.setFitInsetsTypes(0);
-        params.layoutInDisplayCutoutMode =
-                WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS;
-        int height = params.height;
+        // Construct legacy window parameters only in rollback mode.
+        // Native mode must not allocate a second shade window at all.
+        WindowManager.LayoutParams params = null;
+        int height = 0;
+        if (!nativeMode) {
+            params = new WindowManager.LayoutParams(
+                    WindowManager.LayoutParams.MATCH_PARENT,
+                    Math.max(1, context.getResources().getDisplayMetrics().heightPixels
+                            - nativeStatusBarHeight(context)),
+                    STATUS_BAR_SUB_PANEL_WINDOW_TYPE,
+                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                    PixelFormat.OPAQUE);
+            params.setTitle("BB UI Unified Shade");
+            params.gravity = Gravity.TOP | Gravity.START;
+            params.y = nativeStatusBarHeight(context);
+            params.setFitInsetsTypes(0);
+            params.layoutInDisplayCutoutMode =
+                    WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS;
+            height = params.height;
+        }
         root.setTranslationY(nativeMode ? 0f : -height);
         boolean attached = false;
         try {
