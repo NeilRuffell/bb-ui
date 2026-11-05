@@ -319,6 +319,11 @@ public final class PullDownHook implements IXposedHookLoadPackage {
     private static boolean handleTopEdgeTouch(View view, MotionEvent event) {
         int action = event.getActionMasked();
         if (action == MotionEvent.ACTION_DOWN) {
+            // If native integration is enabled but SystemUI's controller is
+            // not ready, leave the touch to Android instead of consuming it.
+            if (NativeShadeHostBridge.requested() && !NativeShadeHostBridge.ready()) {
+                return false;
+            }
             if (!enabled() || shadeHost != null || openingOrClosing || locked(view.getContext())
                     || event.getPointerCount() != 1
                     || event.getToolType(0) != MotionEvent.TOOL_TYPE_FINGER) return false;
