@@ -38,7 +38,7 @@ final class NativeShadeHostBridge {
     private static volatile WeakReference<UnifiedShadeHost> mountedRef =
             new WeakReference<>(null);
     private static final Map<View, Integer> accessibility = new IdentityHashMap<>();
-    private static Boolean observedExpanded;
+    private static volatile Boolean observedExpanded;
 
     private NativeShadeHostBridge() {}
 
@@ -230,8 +230,13 @@ final class NativeShadeHostBridge {
                     XposedHelpers.callMethod(controller, "isExpandedWithoutHeadsUp"));
             if (observedExpanded != null && observedExpanded == expanded) return;
             observedExpanded = expanded;
+            Log.i(TAG, "Native panel expansion changed: expanded=" + expanded
+                    + " fraction=" + fraction);
             view.post(() -> {
-                if (controller == controllerRef.get()) {
+                // Ignore stale posted transitions when a gesture reverses or
+                // opens while an earlier collapsed callback is still queued.
+                if (controller == controllerRef.get()
+                        && Boolean.valueOf(expanded).equals(observedExpanded)) {
                     PullDownHook.onNativeShadeExpansionChanged(expanded);
                 }
             });
