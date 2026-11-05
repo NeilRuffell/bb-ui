@@ -1,5 +1,10 @@
 # Q25 native shade Back integration
 
+**Merged status:** The native Back routing below is included in
+`master` as part of v0.9.83. The named test branch and its rollback
+commands document the original validation period. Current installation
+instructions are in the [README](../README.md).
+
 Branch: `fix/native-shade-back-routing`
 Base: proven Q25 BB native shade `feat/native-bb-shade-host` at
 `56344315657bf7318e0622fe7e825b7ea8d1872e`.
@@ -70,8 +75,10 @@ instead of extending hooks by guesswork.
 
 ## Rollback
 
-This is a test branch. The known working feature branch and master
-are untouched. Return to the working feature branch:
+Historical test-branch rollback instructions follow. To disable native
+shade mode on a current master build, set
+`debug.bb7pulldown.native_shade.enabled=false` and restart SystemUI.
+To check out the earlier working feature branch instead:
 
 ```sh
 cd ~/Projects/bb-ui

@@ -1,3 +1,13 @@
+> **Current architecture:** This file preserves the original trackpad
+> navigation design, but its branch/version and window-adapter sections
+> describe an earlier stage. The native SystemUI shade is now available
+> in `master` behind `debug.bb7pulldown.native_shade.enabled`.
+> For the authoritative current ownership model see
+> [Design philosophy](docs/DESIGN_PHILOSOPHY.md) and
+> [Native shade migration](docs/NATIVE_SHADE_MIGRATION.md).
+> Current unlocked QS presentation uses `BB6NativeQsPanel`, not
+> `BB6ConnectionsPanel`.
+
 # BB UI — unified status-bar and shade navigation
 
 Development branch: `refactor/systemui-shade-focus-controller`

@@ -1,9 +1,20 @@
 # BB-UI native SystemUI shade migration
 
-**Status:** Phase 1 complete in source; Q25 hardware test pending.
-**Branch:** feat/native-bb-shade-host (not merged)
-**Base:** feat/q25-simple-heads-up-notifications, commit 590a6d2
-**Version:** 0.9.80-native-stable-statusbar-q25-dev
+**Current state (master):** Native shade window ownership and Q25 Back
+routing are merged in version `0.9.83-native-fast-back-q25-dev`.
+Native shade mode is **opt-in**. Q25 tests confirmed the original native
+status bar remains visible, and the Back callback now runs without the
+previous animated shade-dismissal delay.
+
+**Architectural limit:** Phase 1 unifies the window and native back/input
+ownership; interim BB notification and QS view renderers still exist.
+This is NOT yet the completed one-renderer migration.
+
+**Design contract:** [Design philosophy](DESIGN_PHILOSOPHY.md)
+
+**History below:** Phase-by-phase diagnostics and older branch/test
+instructions document the development path. The earliest 'test pending',
+'not merged', and per-version rollback notes are historical.
 
 ## Objective
 
@@ -38,7 +49,7 @@ Compiled classes2.dex declares:
 These were checked against actual compiled Q25 DEX, not assumed from
 upstream LineageOS Java sources.
 
-## Phase 1: native window ownership (this branch)
+## Phase 1: native window ownership (merged; opt-in)
 
 NativeShadeHostBridge hooks the native panel controller, captures its
 existing NotificationPanelView, and follows its expansion state through
@@ -100,14 +111,15 @@ Port the same UI and navigation controllers into the LineageOS SystemUI
 module, replace Xposed reflection with direct references/dependencies, then
 remove Vector as a boot requirement.
 
-## Installation
+## Installation (current native mode)
 
-This experiment defaults OFF so users retain the previously working
-overlay shade until they explicitly opt in.
+Native mode defaults OFF to retain the older standalone shade unless
+explicitly enabled.
 
     cd ~/Projects/bb-ui
     git fetch origin
-    git switch --track origin/feat/native-bb-shade-host
+    git switch master
+    git pull --ff-only
     gradle :app:assembleDebug :app:testDebugUnitTest && \
     adb -s 202512003630 install -r app/build/outputs/apk/debug/app-debug.apk && \
     adb -s 202512003630 shell setprop debug.bb7pulldown.native_shade.enabled true && \
@@ -139,7 +151,8 @@ The module must NOT log "Unified shade window attached" in native mode.
 
 This returns to the existing working BB UI overlay shade, preserving the
 colour-status-icon, popup simplification, square-corner and global-width
-changes. Nothing is merged to master without Q25 test results.
+changes. The native shade and Back routing have passed Q25 tests and are merged.
+The additional older notes below remain historical.
 
 ## Hardware tests before Phase 2
 
