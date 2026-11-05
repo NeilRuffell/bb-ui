@@ -4,6 +4,7 @@ import dev.q25.trackpad.theme.BB7Theme;
 
 import android.app.KeyguardManager;
 import android.content.Context;
+import android.media.session.MediaSession;
 import android.content.BroadcastReceiver;
 import android.content.Intent;
 import android.content.IntentFilter;
