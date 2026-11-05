@@ -28,13 +28,20 @@ final class ShadeDateHeader extends TextClock {
         setFormat24Hour(DATE_FORMAT);
         setTextSize(TEXT_SIZE_SP);
         setTypeface(null, Typeface.NORMAL);
-        setTextColor(Color.WHITE);
+        final BB7Theme.Palette palette = BB7Theme.palette(context);
+        setTextColor(palette == BB7Theme.Palette.DARK
+                ? Color.WHITE : palette.title);
         setGravity(Gravity.CENTER);
         setSingleLine(true);
         setEllipsize(TextUtils.TruncateAt.END);
         setPadding(dp(8), 0, dp(8), 0);
+        // The date bar is neutral in every focus zone. Only the native
+        // status bar and the actual selected shade controls change with focus.
+        final int[] colors = palette == BB7Theme.Palette.DARK
+                ? new int[]{0xff526477, 0xff3b4e60, 0xff263747}
+                : new int[]{0xfff9fbfe, 0xffe5ecf4, 0xffc8d4e1};
         setBackground(new GradientDrawable(
-                GradientDrawable.Orientation.TOP_BOTTOM, BB7Theme.gradientColors()));
+                GradientDrawable.Orientation.TOP_BOTTOM, colors));
         setFocusable(false);
         setClickable(false);
         setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_YES);
