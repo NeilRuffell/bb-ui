@@ -3,7 +3,7 @@
 **Status:** Phase 1 complete in source; Q25 hardware test pending.
 **Branch:** feat/native-bb-shade-host (not merged)
 **Base:** feat/q25-simple-heads-up-notifications, commit 590a6d2
-**Version:** 0.9.76-native-shade-host-experimental-dev
+**Version:** 0.9.77-native-window-root-shade-q25-dev
 
 ## Objective
 
@@ -29,6 +29,8 @@ Compiled classes2.dex declares:
 - NotificationPanelViewController.onFinishInflate(): void
 - NotificationPanelViewController.setExpandedFraction(float): void
 - NotificationPanelViewController.setExpandedHeightInternal(float): void
+- NotificationShadeWindowView.onAttachedToWindow(): void
+- NotificationShadeWindowView.dispatchTouchEvent(MotionEvent): boolean
 - NotificationPanelViewController.expandToNotifications(): void
 - NotificationPanelViewController.instantCollapse(): void
 - NotificationPanelViewController.isExpandedWithoutHeadsUp(): boolean
@@ -43,17 +45,31 @@ existing NotificationPanelView, and follows its expansion state through
 both fraction updates and touch-driven internal height updates.
 
 With native mode enabled:
-- A BB UnifiedShadeHost becomes a child of the existing native shade
-  FrameLayout. No WindowManager TYPE_STATUS_BAR_SUB_PANEL shade is created.
+- A BB UnifiedShadeHost becomes the top child of the existing native
+  NotificationShadeWindowView root (not NotificationPanelView). This is
+  essential: Q25's shared notification stack is a SIBLING of the panel,
+  so mounting inside the panel left native notifications visibly exposed.
+  No WindowManager TYPE_STATUS_BAR_SUB_PANEL shade is created.
 - Native expandToNotifications() opens the shade, instantCollapse() closes.
+  If a partial native drag is already in progress, native
+  setExpandedFraction(1f) completes the transition rather than leaving
+  part of the stock shade visible.
 - Native shade expansion (including heads-up downward drags) can display
   the same BB UI presentation without opening another shade window.
 - BB date/media header, notification page, QS page, favourite app grouping,
   hardware/trackpad focus, notification actions, media and real QS tile
   sessions are preserved.
-- Original native notification views remain in the native panel for layout
-  and lifecycle; the opaque BB child covers them, and their accessibility
-  targets are temporarily suppressed while mounted.
+- Original native notification/QS views remain in the same native window
+  for lifecycle and services. BB UI's opaque full-window child covers
+  their presentation, including sibling notification stack/scrims.
+  The BB content begins below the native status-bar height.
+  Underlying accessibility targets are temporarily suppressed.
+- NotificationShadeWindowView.dispatchTouchEvent() routes touches directly
+  to BB UI while mounted, BEFORE stock touch handlers can expand Android's
+  native rows or QS. A native gesture whose ACTION_DOWN occurred before the
+  BB host mounted is consumed to completion without delivering orphaned
+  MOVE/UP events to BB UI. Normal native heads-up touches continue when
+  the BB shade is closed.
 - The BB6 keyguard is excluded from this unlocked-shade transition.
 
 The former small standalone status-bar keyboard-focus surface is still
@@ -109,8 +125,10 @@ No ROM rebuild, flash or device reboot required.
 Expected after opening a shade:
 - Native SystemUI shade ownership hooks registered
 - Captured native NotificationPanelView
-- BB UI mounted inside native NotificationPanelView; one shade window
-- Native SystemUI notification shade expansion requested
+- Captured native NotificationShadeWindowView root
+- BB UI mounted at native NotificationShadeWindowView root; stock notification stack covered; one shade window
+- Native SystemUI notification shade expanded for BB UI
+- Native shade-window touch now routed exclusively to BB UI (upon a fresh touch)
 
 The module must NOT log "Unified shade window attached" in native mode.
 
@@ -135,3 +153,38 @@ changes. Nothing is merged to master without Q25 test results.
 8. Stock popup and shade remain available under rollback mode.
 
 Pass all eight tests before treating Phase 1 as a usable migration.
+
+## Device feedback and correction, v0.9.77
+
+The first Q25 hardware test of v0.9.76 proved that mounting into
+NotificationPanelView was insufficient: the stock notification stack
+remained visible and could be expanded with touch, although the trackpad
+operated BB UI. Logs showed tiny positive native expansion fractions
+(e.g. 0.0047) while BB UI was mounted. The recorded AndroidRuntime crashes
+were ADB-induced SystemUI restarts.
+
+The Q25 APK and LineageOS super_notification_shade.xml confirm that the
+native notification stack is a sibling of NotificationPanelView within
+NotificationShadeWindowView. This revision changes the mount point to the
+real native window root, blocks the native window's stock touch dispatcher
+while BB UI is active, and completes native expansion to fraction 1.0.
+
+These are Phase 1 *ownership and touch* corrections, not new notification
+pipelines. The native notification and QS services remain intact. The
+original BB notification/QS presentation is still retained as an interim
+child; Phase 2 consolidation is pending.
+
+### Corrected test diagnostics
+
+Run the logcat command above after testing the shade. Confirm native root
+capture, native-window BB mount, touch handoff and a fully expanded native
+fraction. Verify visually that Android's stock notification stack and QS
+cannot be seen or expanded by touching/swiping ANY area while BB UI is
+open, including after entering via a heads-up popup. Check notification
+clicks, in-shade reply/actions, QS, trackpad, Home and lock/unlock.
+
+### Important rollback
+
+If touch or keyguard interaction regresses, use the existing independent
+`debug.bb7pulldown.native_shade.enabled false` property and restart
+`com.android.systemui`. The tested prior BB overlay stays available.
