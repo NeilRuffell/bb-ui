@@ -147,6 +147,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
         installRecentsInterception(lp.classLoader);
         installNativeShadeState(lp.classLoader);
         SystemUiNotificationObserver.install(lp.classLoader);
+        NativeStatusBarColorIcons.install(lp.classLoader);
         NativeQuickSettingsTiles.install(lp.classLoader);
         NativeNotificationClicks.install(lp.classLoader);
         Class<?> viewClass = XposedHelpers.findClassIfExists(STATUS_BAR, lp.classLoader);
