@@ -500,7 +500,8 @@ final class TwoColumnPanel extends FrameLayout {
                 entry.playing ? "Pause" : "Play");
         mediaIndex.setText(mediaSessions.size() > 1
                 ? (index + 1) + "/" + mediaSessions.size() : "");
-        mediaIndex.setVisibility(mediaSessions.size() > 1 ? View.VISIBLE : View.GONE);
+        mediaIndex.setVisibility(!mediaControlsOpen && mediaSessions.size() > 1
+                ? View.VISIBLE : View.GONE);
         mediaRow.setContentDescription("Now playing: " + nowPlaying
                 + (mediaSessions.size() > 1
                         ? ", " + (index + 1) + " of " + mediaSessions.size() : ""));
@@ -567,7 +568,7 @@ final class TwoColumnPanel extends FrameLayout {
         mediaNowPlaying.setVisibility(open ? View.GONE : View.VISIBLE);
         mediaIndex.setVisibility(open ? View.GONE
                 : mediaSessions.size() > 1 ? View.VISIBLE : View.GONE);
-        mediaRow.setPadding(dp(open ? 10 : 9), dp(open ? 3 : 3),
+        mediaRow.setPadding(dp(open ? 10 : 9), dp(3),
                 dp(open ? 10 : 9), dp(3));
         mediaRow.setLayoutParams(new LinearLayout.LayoutParams(
                 LayoutParams.MATCH_PARENT, dp(open ? 62 : 46)));
