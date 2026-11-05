@@ -30,6 +30,15 @@ final class MediaModePolicy {
         return REPEAT_NONE;
     }
 
+    /** Show only enabled modes that the currently active session advertises. */
+    static boolean showShuffleStatus(boolean canShuffle, int mode) {
+        return canShuffle && mode > SHUFFLE_NONE;
+    }
+
+    static boolean showRepeatStatus(boolean canRepeat, int mode) {
+        return canRepeat && mode > REPEAT_NONE;
+    }
+
     static int firstAvailable(boolean canShuffle, boolean canRepeat) {
         if (canShuffle) return SHUFFLE;
         if (canRepeat) return REPEAT;
