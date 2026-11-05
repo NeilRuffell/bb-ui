@@ -145,6 +145,8 @@ public final class PullDownHook implements IXposedHookLoadPackage {
         // Popup presentation only; BB shade and its notification actions are untouched.
         NativeSimpleHeadsUp.install(lp.classLoader);
         NativeSquareHeadsUpCorners.install(lp.classLoader);
+        // Shared SystemUI notification width policy: remove Android side gutters globally.
+        NativeFullWidthNotifications.install(lp.classLoader);
 
         if (!enabled()) {
             Log.i(TAG, "Disabled by " + ENABLE_PROP + "; stock status bar retained");

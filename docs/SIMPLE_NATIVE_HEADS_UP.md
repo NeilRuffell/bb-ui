@@ -139,3 +139,72 @@ Install the APK as described above from this branch, then confirm:
 Diagnostic lines use `BB7-HeadsUp`, including
 `Native popup-only square-corner hooks registered` and
 `Applied square corners to first pinned heads-up popup`.
+
+
+## Global notification side insets (version 0.9.74)
+
+**Design decision:** BB UI does not preserve Android's default notification
+side gutters. Remove the shared native SystemUI padding at the measurement
+source, including both heads-up popups and the stock notification stack.
+
+Q25's `SystemUI.apk` (`classes2.dex`) exposes
+`NotificationStackScrollLayout.initView()`,
+`NotificationStackScrollLayout.onMeasure(int,int)`,
+`mMinimumPaddings`, `mSidePaddings`, and
+`mFullWidthNotificationsInLandscape`. The Q25's R8 build has no separately
+hookable `updateSidePadding()` method.
+
+`NativeFullWidthNotifications` sets the resource-derived
+`mMinimumPaddings` to zero after native initialization and before each native
+stack measurement. It also sets the native full-width-landscape flag to prevent
+landscape QS-column alignment from adding additional gutters. SystemUI then
+measures the notification children across the entire stack width and centers
+them using its existing layout code. **No artificial offsets, negative margins,
+row scaling or manual child-width changes.**
+
+This is intentionally global to the native SystemUI notification stack, NOT
+limited to pinned heads-up popups. BB UI's distinct notification shade
+(`TwoColumnPanel`) has its own layout and actions and is not modified.
+
+### Build/install
+
+On `feat/q25-simple-heads-up-notifications`:
+
+```sh
+cd ~/Projects/bb-ui
+git fetch origin
+git switch feat/q25-simple-heads-up-notifications
+git pull --ff-only
+gradle :app:assembleDebug :app:testDebugUnitTest &&
+adb -s 202512003630 install -r app/build/outputs/apk/debug/app-debug.apk &&
+adb -s 202512003630 shell setprop debug.bb7pulldown.notification_full_width.enabled true &&
+adb -s 202512003630 shell am crash com.android.systemui
+```
+
+Log checks:
+
+```sh
+adb -s 202512003630 logcat -d -s 'BB7-NotifWidth:V' '*:S' | tail -60
+```
+
+Expected: `Global native notification side inset removal registered` and
+`Native notification stack measured with zero side inset`.
+Check the popup's **actual screen edges** visually; the zero-side-padding log
+only verifies the native stack, not other possible outer-window insets.
+
+### Independent rollback
+
+```sh
+adb -s 202512003630 shell setprop debug.bb7pulldown.notification_full_width.enabled false
+adb -s 202512003630 shell am crash com.android.systemui
+```
+
+This restores the stock spacing while keeping BB UI's existing popup
+simplification and square-corner hooks active.
+
+### Device test
+
+Confirm that heads-up popups reach both screen edges, portrait and landscape
+if supported, and that notification taps, swipes, grouping and BB UI shade
+remain functional. Verify that no extra outside margin persists; if it does,
+inspect its actual parent window layout rather than compensating with offsets.
