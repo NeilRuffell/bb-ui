@@ -47,7 +47,6 @@ final class SystemUiNotificationObserver {
     private static final Object LOCK = new Object();
     // Keys avoid duplicate posts and preserve the insertion order across apps.
     private static final Map<String, NotificationItem> NOTIFICATIONS = new LinkedHashMap<>();
-    private static final Map<String, PendingIntent> OPEN_ACTIONS = new LinkedHashMap<>();
     // Real platform notification references: action intents and clearability are never synthesized.
     private static final Map<String, StatusBarNotification> ACTIVE_SBNS = new LinkedHashMap<>();
     private static volatile List<String> activePackages = Collections.emptyList();
@@ -142,7 +141,6 @@ final class SystemUiNotificationObserver {
                         NOTIFICATIONS.put(sbn.getKey(), toItem(sbn,
                                 ((NotificationListenerService) param.thisObject).getCurrentRanking()));
                         ACTIVE_SBNS.put(sbn.getKey(), sbn);
-                        saveOpenAction(sbn);
                         publishLocked();
                     }
                 }
@@ -171,7 +169,6 @@ final class SystemUiNotificationObserver {
                     synchronized (LOCK) {
                         NOTIFICATIONS.remove(sbn.getKey());
                         ACTIVE_SBNS.remove(sbn.getKey());
-                        OPEN_ACTIONS.remove(sbn.getKey());
                         NativeNotificationClicks.forget(sbn.getKey());
                         publishLocked();
                     }
@@ -206,16 +203,15 @@ final class SystemUiNotificationObserver {
                 Log.w(TAG, "Active notification snapshot unavailable source=" + source);
                 return;
             }
+            // Take one native ranking snapshot, not one per notification.
+            NotificationListenerService.RankingMap rankings = service.getCurrentRanking();
             synchronized (LOCK) {
                 NOTIFICATIONS.clear();
                 ACTIVE_SBNS.clear();
-                OPEN_ACTIONS.clear();
                 for (StatusBarNotification sbn : current) {
                     if (sbn == null) continue;
-                    NOTIFICATIONS.put(sbn.getKey(), toItem(sbn,
-                            service.getCurrentRanking()));
+                    NOTIFICATIONS.put(sbn.getKey(), toItem(sbn, rankings));
                     ACTIVE_SBNS.put(sbn.getKey(), sbn);
-                    saveOpenAction(sbn);
                 }
                 if (!snapshotLogged || "open".equals(source)) {
                     snapshotLogged = true;
@@ -312,11 +308,17 @@ final class SystemUiNotificationObserver {
         }
     }
 
-    /** Return only the real Android action attached to an active notification. */
+    /**
+     * Read the real app-supplied PendingIntent from the currently active
+     * Android notification. Do not maintain a second open-intent cache.
+     */
     static PendingIntent getOpenAction(String notificationKey) {
         synchronized (LOCK) {
-            if (!NOTIFICATIONS.containsKey(notificationKey)) return null;
-            return OPEN_ACTIONS.get(notificationKey);
+            StatusBarNotification sbn = ACTIVE_SBNS.get(notificationKey);
+            Notification notification = sbn == null ? null : sbn.getNotification();
+            return notification == null ? null
+                    : (notification.contentIntent != null
+                            ? notification.contentIntent : notification.fullScreenIntent);
         }
     }
 
@@ -354,16 +356,6 @@ final class SystemUiNotificationObserver {
             Log.e(TAG, "Native notification dismissal failed", error);
             return false;
         }
-    }
-
-    /** Must hold LOCK. Mirrors stock NotificationActivityStarter intent choice. */
-    private static void saveOpenAction(StatusBarNotification sbn) {
-        Notification notification = sbn.getNotification();
-        PendingIntent action = notification == null ? null :
-                (notification.contentIntent != null
-                        ? notification.contentIntent : notification.fullScreenIntent);
-        if (action == null) OPEN_ACTIONS.remove(sbn.getKey());
-        else OPEN_ACTIONS.put(sbn.getKey(), action);
     }
 
     /** Guard against stale notification cards during live notification updates. */

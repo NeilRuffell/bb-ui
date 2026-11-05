@@ -160,6 +160,10 @@ final class NativeShadeHostBridge {
             // not to our BB child; intercept its real native decision instead
             // of waiting for Android to animateCollapseShade().
             NativeShadeBackBridge.install(loader);
+            // Suppress redundant stock CARD DRAWING only while the real BB
+            // child is mounted. Android still owns/inflates notification rows
+            // for its pipeline, clickers and lifecycle.
+            NativeNotificationRenderBridge.install(loader);
             installed = true;
             Log.i(TAG, "Native SystemUI shade-window ownership hooks registered");
         } catch (Throwable error) {
@@ -222,6 +226,18 @@ final class NativeShadeHostBridge {
 
     static FrameLayout shadeWindow() {
         return shadeWindowRef.get();
+    }
+
+    /**
+     * Read-only native presentation ownership for the stock-row drawing gate.
+     * No SystemProperties lookup or reflection during Android's draw pass.
+     * The view's actual parent is authoritative.
+     */
+    static FrameLayout windowWithBbPresentation() {
+        FrameLayout nativeWindow = shadeWindowRef.get();
+        UnifiedShadeHost bb = mountedRef.get();
+        return nativeWindow != null && bb != null && bb.getParent() == nativeWindow
+                ? nativeWindow : null;
     }
 
     static boolean ownsNativeShadeWindow() {
