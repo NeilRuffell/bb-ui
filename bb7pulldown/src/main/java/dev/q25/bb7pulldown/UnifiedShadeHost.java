@@ -212,10 +212,6 @@ final class UnifiedShadeHost extends FrameLayout {
         }
     }
 
-    void setStatusBarFocused(boolean focused) {
-        dateHeader.setShadeContentFocused(!focused);
-    }
-
     void clearStatusBarFocus() {
         navigation.focusContent();
     }

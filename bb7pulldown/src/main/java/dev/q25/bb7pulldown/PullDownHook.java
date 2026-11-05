@@ -101,6 +101,8 @@ public final class PullDownHook implements IXposedHookLoadPackage {
     private static final ShadeUiController NAVIGATION = new ShadeUiController(
             new ShadeUiController.Listener() {
                 @Override public void onStatusFocusChanged(int zone) {
+                    TwoColumnPanel activePanel = panel;
+                    if (activePanel != null) activePanel.refreshAppIconFocus();
                     updateStatusAppearance();
                 }
 
@@ -479,10 +481,6 @@ public final class PullDownHook implements IXposedHookLoadPackage {
     }
 
     private static void updateStatusAppearance() {
-        UnifiedShadeHost currentShade = shadeHost;
-        if (currentShade != null) {
-            currentShade.setStatusBarFocused(NAVIGATION.isStatusBarFocused());
-        }
         View bar = nativeStatusBar.get();
         if (bar == null) bar = decoratedStatusBar;
         if (bar == null) return;
