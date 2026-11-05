@@ -347,7 +347,8 @@ final class NativeShadeHostBridge {
             }
             return consume;
         }
-        if (nativeGestureInProgress && action != MotionEvent.ACTION_DOWN) {
+        if (NativeShadeModePolicy.swallowOpeningGestureTail(
+                mounted, nativeGestureInProgress, action == MotionEvent.ACTION_DOWN)) {
             // Initial native pull-down started before BB UI was mounted.
             // It has no matching DOWN in BB; swallow the gesture tail.
             if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
