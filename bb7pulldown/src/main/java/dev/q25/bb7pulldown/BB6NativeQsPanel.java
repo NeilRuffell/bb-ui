@@ -235,6 +235,7 @@ final class BB6NativeQsPanel extends FrameLayout {
             }
         }
 
+        empty.setVisibility(desired.isEmpty() ? View.VISIBLE : View.GONE);
         boolean structureChanged = desired.size() != rows.size();
         if (!structureChanged) {
             for (int i = 0; i < desired.size(); i++) {
@@ -257,7 +258,6 @@ final class BB6NativeQsPanel extends FrameLayout {
                     : oldSelectedView.getTop();
             rows.clear();
             rows.addAll(desired);
-            empty.setVisibility(rows.isEmpty() ? View.VISIBLE : View.GONE);
             adapter.notifyDataSetChanged();
             if (selectedKey != null) {
                 int next = -1;
