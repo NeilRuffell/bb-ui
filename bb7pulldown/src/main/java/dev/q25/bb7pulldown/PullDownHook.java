@@ -521,15 +521,12 @@ public final class PullDownHook implements IXposedHookLoadPackage {
             dismissShadeImmediately();
             return;
         }
-        // The primary action may launch a SystemUI-owned dialog (Bluetooth,
-        // Internet, etc.), not just toggle an in-process setting. Remove the
-        // BB overlay BEFORE dispatching. Doing the reverse can change window
-        // focus and detach the QS view while the native dialog is laying out.
-        //
-        // Native QSTile objects remain owned by CurrentTilesInteractor when
-        // our listening session ends; we never create or destroy those tiles.
-        dismissShadeImmediately();
-        Log.i(TAG, "Native QS action after shade removal: " + spec
+        // QS activation is not a request to close the shade. Keep its native
+        // listening session, selected list row, and SystemUI window mounted
+        // while the real QSTile handles the click (including native dialogs).
+        // Explicit Back, swipe dismissal, Home and screen-off retain their
+        // existing independent close paths.
+        Log.i(TAG, "Native QS action with shade retained: " + spec
                 + " (" + action + ")");
         boolean accepted = NativeQuickSettingsTiles.activate(spec, action);
         if (!accepted) {
