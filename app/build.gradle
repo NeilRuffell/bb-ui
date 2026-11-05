@@ -7,8 +7,8 @@ android {
         applicationId 'dev.q25.trackpad'
         minSdk 33
         targetSdk 28
-        versionCode 122
-        versionName '0.9.92-qs-toggle-checkbox-q25-test'
+        versionCode 123
+        versionName '0.9.93-qs-long-press-settings-q25-test'
     }
     // Compile legacy feature sources into this one APK. These directories
     // are source roots only; their former application modules are not built.
