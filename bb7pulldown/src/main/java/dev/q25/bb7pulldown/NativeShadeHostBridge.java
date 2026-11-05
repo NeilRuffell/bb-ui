@@ -3,6 +3,7 @@ package dev.q25.bb7pulldown;
 import dev.q25.trackpad.theme.BB7Theme;
 
 import android.util.Log;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewParent;
@@ -18,11 +19,14 @@ import de.robv.android.xposed.XposedHelpers;
 
 /**
  * Native SystemUI window owner for the first BB-UI shade migration stage.
- * Uses compiled Q25 NotificationPanelViewController and its FrameLayout view.
- * No independent WindowManager shade exists while this integration is active.
+ * Keeps Q25's native NotificationShadeWindowView, notification stack and QS
+ * backend, but mounts the BB UI presentation at the WINDOW root so it covers
+ * the native notification stack (a sibling of NotificationPanelView).
+ * No independent WindowManager shade is created in this mode.
  *
- * Phase 1 retains BB UI notification/QS renderers as children of the native
- * panel. Phase 2 will migrate those widgets to native rows and QS containers.
+ * Touches in an active BB session are routed to its existing trackpad/touch
+ * controls before native shade touch handlers can start another expansion.
+ * Phase 2 will migrate duplicate BB rows and QS layouts to native views.
  */
 final class NativeShadeHostBridge {
     private static final String TAG = "BB7-NativeShade";
@@ -31,14 +35,24 @@ final class NativeShadeHostBridge {
             "com.android.systemui.shade.NotificationPanelViewController";
     private static final String PANEL =
             "com.android.systemui.shade.NotificationPanelView";
+    private static final String SHADE_WINDOW =
+            "com.android.systemui.shade.NotificationShadeWindowView";
 
     private static boolean installed;
     private static volatile WeakReference<Object> controllerRef = new WeakReference<>(null);
     private static volatile WeakReference<FrameLayout> panelRef = new WeakReference<>(null);
+    private static volatile WeakReference<FrameLayout> shadeWindowRef =
+            new WeakReference<>(null);
     private static volatile WeakReference<UnifiedShadeHost> mountedRef =
             new WeakReference<>(null);
     private static final Map<View, Integer> accessibility = new IdentityHashMap<>();
     private static volatile Boolean observedExpanded;
+    private static boolean firstTouchRoutedLogged;
+    // A gesture that opened SystemUI's shade does not have an ACTION_DOWN
+    // delivered to the BB child. Swallow its tail instead of sending an
+    // orphaned MOVE/UP event or continuing the native drag.
+    private static boolean nativeGestureInProgress;
+    private static boolean bbGestureInProgress;
 
     private NativeShadeHostBridge() {}
 
@@ -62,7 +76,8 @@ final class NativeShadeHostBridge {
         if (installed || !requested()) return;
         Class<?> type = XposedHelpers.findClassIfExists(CONTROLLER, loader);
         Class<?> panel = XposedHelpers.findClassIfExists(PANEL, loader);
-        if (type == null || panel == null) {
+        Class<?> window = XposedHelpers.findClassIfExists(SHADE_WINDOW, loader);
+        if (type == null || panel == null || window == null) {
             Log.e(TAG, "Q25 native shade controller/view missing");
             return;
         }
@@ -74,6 +89,8 @@ final class NativeShadeHostBridge {
             type.getDeclaredMethod("expandToNotifications");
             type.getDeclaredMethod("instantCollapse");
             type.getDeclaredMethod("isExpandedWithoutHeadsUp");
+            window.getDeclaredMethod("onAttachedToWindow");
+            window.getDeclaredMethod("dispatchTouchEvent", MotionEvent.class);
         } catch (NoSuchFieldException | NoSuchMethodException error) {
             Log.e(TAG, "Q25 native shade signature mismatch; no replacement started", error);
             return;
@@ -104,8 +121,33 @@ final class NativeShadeHostBridge {
                             if (!param.hasThrowable()) notifyExpansion(param.thisObject);
                         }
                     });
+            // The NotificationStackScrollLayout is a sibling of
+            // NotificationPanelView in Q25's super_notification_shade.xml.
+            // Observe and modify the actual existing window root instead.
+            XposedHelpers.findAndHookMethod(window, "onAttachedToWindow",
+                    new XC_MethodHook() {
+                        @Override protected void afterHookedMethod(MethodHookParam param) {
+                            if (!param.hasThrowable() && param.thisObject instanceof FrameLayout) {
+                                captureWindow((FrameLayout) param.thisObject);
+                            }
+                        }
+                    });
+            XposedHelpers.findAndHookMethod(window, "dispatchTouchEvent",
+                    MotionEvent.class, new XC_MethodHook() {
+                        @Override protected void beforeHookedMethod(MethodHookParam param) {
+                            if (param.args.length != 1
+                                    || !(param.args[0] instanceof MotionEvent)
+                                    || !(param.thisObject instanceof FrameLayout)) return;
+                            if (routeWindowTouch((FrameLayout) param.thisObject,
+                                    (MotionEvent) param.args[0])) {
+                                // Prevent stock notification/QS expansion touch handling
+                                // after the BB host becomes the visible surface.
+                                param.setResult(true);
+                            }
+                        }
+                    });
             installed = true;
-            Log.i(TAG, "Native SystemUI shade ownership hooks registered");
+            Log.i(TAG, "Native SystemUI shade-window ownership hooks registered");
         } catch (Throwable error) {
             Log.e(TAG, "Failed to install native shade hooks", error);
         }
@@ -117,35 +159,50 @@ final class NativeShadeHostBridge {
             if (!(candidate instanceof FrameLayout)
                     || !PANEL.equals(candidate.getClass().getName())) return;
             FrameLayout nativePanel = (FrameLayout) candidate;
-            FrameLayout prior = panelRef.get();
+            FrameLayout previous = panelRef.get();
             controllerRef = new WeakReference<>(controller);
             panelRef = new WeakReference<>(nativePanel);
-            if (prior != nativePanel) {
-                Log.i(TAG, "Captured native NotificationPanelView");
-                UnifiedShadeHost root = mountedRef.get();
-                if (root != null && root.getParent() == prior) {
-                    int topMargin = root.getLayoutParams() instanceof FrameLayout.LayoutParams
-                            ? ((FrameLayout.LayoutParams) root.getLayoutParams()).topMargin : 0;
-                    // Re-inflation can happen before the new panel has its
-                    // window token. Wait until it is attached before moving
-                    // the BB host, or it would be stranded on the old panel.
-                    nativePanel.post(() -> {
-                        if (panelRef.get() != nativePanel
-                                || mountedRef.get() != root) return;
-                        if (root.getParent() == prior) {
-                            detach(root);
-                            if (!attach(root, topMargin)) {
-                                Log.e(TAG, "Could not reattach BB host after native reinflation");
-                                PullDownHook.onNativeShadeHostUnavailable();
-                            }
-                        } else if (root.getParent() == null) {
-                            PullDownHook.onNativeShadeHostUnavailable();
-                        }
-                    });
+            if (previous != nativePanel) {
+                Log.i(TAG, "Captured native NotificationPanelView controller");
+            }
+            // If the native window is already attached, discover it through
+            // the actual view hierarchy. Otherwise onAttachedToWindow will
+            // capture it once SystemUI creates its window.
+            ViewParent ancestor = nativePanel.getParent();
+            while (ancestor instanceof View) {
+                if (SHADE_WINDOW.equals(ancestor.getClass().getName())) {
+                    captureWindow((FrameLayout) ancestor);
+                    break;
                 }
+                ancestor = ancestor.getParent();
             }
         } catch (Throwable error) {
             Log.w(TAG, "Could not capture native shade view", error);
+        }
+    }
+
+    private static void captureWindow(FrameLayout window) {
+        if (!SHADE_WINDOW.equals(window.getClass().getName())) return;
+        FrameLayout previous = shadeWindowRef.get();
+        shadeWindowRef = new WeakReference<>(window);
+        if (previous == window) return;
+        Log.i(TAG, "Captured native NotificationShadeWindowView root");
+
+        UnifiedShadeHost mounted = mountedRef.get();
+        if (mounted != null && mounted.getParent() == previous && previous != null) {
+            final int topInset = mounted.getPaddingTop();
+            // Native root reinflation: preserve the BB session, then remount
+            // in the new native window only once its view token is ready.
+            window.post(() -> {
+                if (shadeWindowRef.get() != window || mountedRef.get() != mounted) return;
+                if (mounted.getParent() == previous) {
+                    detach(mounted);
+                    if (!attach(mounted, topInset)) {
+                        Log.e(TAG, "Unable to migrate BB host to new native shade window");
+                        PullDownHook.onNativeShadeHostUnavailable();
+                    }
+                }
+            });
         }
     }
 
@@ -154,34 +211,40 @@ final class NativeShadeHostBridge {
     }
 
     static boolean ready() {
-        FrameLayout panel = panelRef.get();
-        return active() && controllerRef.get() != null && panel != null
-                && panel.isAttachedToWindow();
+        FrameLayout window = shadeWindowRef.get();
+        return active() && controllerRef.get() != null && panelRef.get() != null
+                && window != null && window.isAttachedToWindow();
     }
 
     static boolean attach(UnifiedShadeHost root, int topInset) {
-        FrameLayout panel = panelRef.get();
-        if (!ready() || root.getParent() != null) return false;
+        FrameLayout window = shadeWindowRef.get();
+        if (!ready() || window == null || root.getParent() != null) return false;
         try {
             accessibility.clear();
-            for (int i = 0; i < panel.getChildCount(); i++) {
-                View child = panel.getChildAt(i);
+            for (int i = 0; i < window.getChildCount(); i++) {
+                View child = window.getChildAt(i);
                 accessibility.put(child, child.getImportantForAccessibility());
                 child.setImportantForAccessibility(
                         View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
             }
             FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
-            params.topMargin = Math.max(0, topInset);
-            root.setBackgroundColor(BB7Theme.palette(panel.getContext()).canvas);
+            // The BB canvas covers the entire native window so its sibling
+            // notification stack/scrims cannot show around it. Interior
+            // content begins below the original status-bar height.
+            root.setPadding(0, Math.max(0, topInset), 0, 0);
+            root.setBackgroundColor(BB7Theme.palette(window.getContext()).canvas);
             root.setFocusable(true);
             root.setFocusableInTouchMode(true);
             root.setClickable(true);
             root.setTranslationY(0f);
-            panel.addView(root, params);
+            window.addView(root, params);
             root.bringToFront();
             mountedRef = new WeakReference<>(root);
-            Log.i(TAG, "BB UI mounted inside native NotificationPanelView; one shade window");
+            nativeGestureInProgress = false;
+            bbGestureInProgress = false;
+            Log.i(TAG, "BB UI mounted at native NotificationShadeWindowView root;"
+                    + " stock notification stack covered; one shade window");
             return true;
         } catch (Throwable error) {
             ViewParent parent = root.getParent();
@@ -190,7 +253,7 @@ final class NativeShadeHostBridge {
                 catch (Throwable ignored) { }
             }
             restoreAccessibility();
-            Log.e(TAG, "Could not mount BB UI in native shade", error);
+            Log.e(TAG, "Could not mount BB UI at native shade-window root", error);
             return false;
         }
     }
@@ -225,12 +288,19 @@ final class NativeShadeHostBridge {
         Object controller = controllerRef.get();
         if (!ready()) return false;
         try {
-            // The native gesture may already have started opening this panel.
+            // A native gesture can be at a very small expansion fraction.
+            // The previous implementation skipped completion as soon as it
+            // saw any nonzero expansion, leaving a partly expanded stock shade.
             if (!Boolean.TRUE.equals(
                     XposedHelpers.callMethod(controller, "isExpandedWithoutHeadsUp"))) {
                 XposedHelpers.callMethod(controller, "expandToNotifications");
             }
-            Log.i(TAG, "Native SystemUI notification shade expansion requested");
+            float fraction = XposedHelpers.getFloatField(controller, "mExpandedFraction");
+            if (fraction < 0.999f) {
+                XposedHelpers.callMethod(controller, "setExpandedFraction", 1f);
+            }
+            Log.i(TAG, "Native SystemUI notification shade expanded for BB UI"
+                    + " (previous fraction=" + fraction + ")");
             return true;
         } catch (Throwable error) {
             Log.e(TAG, "Native shade expansion failed", error);
@@ -247,6 +317,62 @@ final class NativeShadeHostBridge {
         } catch (Throwable error) {
             Log.e(TAG, "Native shade collapse failed", error);
         }
+    }
+
+
+    /**
+     * Route touches at the existing native shade window, before SystemUI's
+     * InteractionEventHandler can deliver them to the stock stack/QS panel.
+     * We do not modify or synthesize any native notification gestures when
+     * the BB shade is closed.
+     */
+    private static boolean routeWindowTouch(FrameLayout window, MotionEvent source) {
+        if (!active() || window != shadeWindowRef.get()) return false;
+        UnifiedShadeHost bb = mountedRef.get();
+        boolean mounted = bb != null && bb.getParent() == window;
+        int action = source.getActionMasked();
+
+        if (action == MotionEvent.ACTION_DOWN) {
+            nativeGestureInProgress = !mounted;
+            bbGestureInProgress = mounted;
+        }
+        if (!mounted) {
+            // If BB UI was just detached in the middle of a touch, do not
+            // deliver the trailing MOVE/UP to the stock shade.
+            boolean consume = bbGestureInProgress;
+            if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+                bbGestureInProgress = false;
+                nativeGestureInProgress = false;
+            }
+            return consume;
+        }
+        if (nativeGestureInProgress && action != MotionEvent.ACTION_DOWN) {
+            // Initial native pull-down started before BB UI was mounted.
+            // It has no matching DOWN in BB; swallow the gesture tail.
+            if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+                nativeGestureInProgress = false;
+            }
+            return true;
+        }
+        MotionEvent translated = MotionEvent.obtain(source);
+        try {
+            translated.offsetLocation(window.getScrollX() - bb.getLeft(),
+                    window.getScrollY() - bb.getTop());
+            bb.dispatchTouchEvent(translated);
+            if (!firstTouchRoutedLogged) {
+                firstTouchRoutedLogged = true;
+                Log.i(TAG, "Native shade-window touch now routed exclusively to BB UI");
+            }
+        } catch (Throwable error) {
+            Log.e(TAG, "BB touch dispatch failed; blocking stock shade interaction", error);
+        } finally {
+            translated.recycle();
+            if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+                bbGestureInProgress = false;
+                nativeGestureInProgress = false;
+            }
+        }
+        return true;
     }
 
     /** Includes stock shade gestures and heads-up downward expansion. */
