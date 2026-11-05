@@ -73,6 +73,8 @@ final class TwoColumnPanel extends FrameLayout {
     private final FrameLayout mediaArtworkFrame;
     private final ImageView mediaArtworkImage;
     private final TextView mediaArtworkPlaceholder;
+    private final TextView expandedMediaTitle;
+    private final TextView expandedMediaArtist;
     private final MediaArtworkLoader mediaArtworkLoader = new MediaArtworkLoader();
     private MediaSession.Token shownArtworkToken;
     private String shownArtworkTitle;
@@ -302,27 +304,66 @@ final class TwoColumnPanel extends FrameLayout {
         mediaContainer.addView(mediaSeekRow, new LinearLayout.LayoutParams(
                 LayoutParams.MATCH_PARENT, dp(48)));
 
-        // Expanded music view replaces the notification columns and fills their space.
-        // The album art remains passive; hardware focus stays on the transport/seek row.
+        // Expanded-only artwork and metadata: artwork on the left, track info
+        // centered vertically on the right. The collapsed 46dp row is unchanged.
         mediaArtworkFrame = new FrameLayout(context);
         mediaArtworkFrame.setBackgroundColor(palette.canvas);
         mediaArtworkFrame.setFocusable(false);
         mediaArtworkFrame.setVisibility(View.GONE);
 
+        LinearLayout artworkInfo = new LinearLayout(context);
+        artworkInfo.setOrientation(LinearLayout.HORIZONTAL);
+        artworkInfo.setGravity(Gravity.CENTER_VERTICAL);
+        artworkInfo.setPadding(dp(10), dp(8), dp(10), dp(8));
+        artworkInfo.setFocusable(false);
+        mediaArtworkFrame.addView(artworkInfo, new FrameLayout.LayoutParams(
+                LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
+
+        FrameLayout artworkArea = new FrameLayout(context);
+        artworkArea.setFocusable(false);
+        artworkInfo.addView(artworkArea, new LinearLayout.LayoutParams(
+                0, LayoutParams.MATCH_PARENT, 1f));
+
         mediaArtworkImage = new ImageView(context);
         mediaArtworkImage.setScaleType(ImageView.ScaleType.FIT_CENTER);
-        mediaArtworkImage.setPadding(dp(16), dp(16), dp(16), dp(16));
+        mediaArtworkImage.setPadding(dp(6), dp(6), dp(6), dp(6));
         mediaArtworkImage.setFocusable(false);
         mediaArtworkImage.setContentDescription("Album artwork");
-        mediaArtworkFrame.addView(mediaArtworkImage, new FrameLayout.LayoutParams(
+        artworkArea.addView(mediaArtworkImage, new FrameLayout.LayoutParams(
                 LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
 
         mediaArtworkPlaceholder = text("Artwork unavailable", 13, palette.muted);
         mediaArtworkPlaceholder.setGravity(Gravity.CENTER);
         mediaArtworkPlaceholder.setFocusable(false);
-        mediaArtworkFrame.addView(mediaArtworkPlaceholder, new FrameLayout.LayoutParams(
+        artworkArea.addView(mediaArtworkPlaceholder, new FrameLayout.LayoutParams(
                 LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
-        mediaContainer.addView(mediaArtworkFrame, new LinearLayout.LayoutParams(
+
+        LinearLayout metadataArea = new LinearLayout(context);
+        metadataArea.setOrientation(LinearLayout.VERTICAL);
+        metadataArea.setGravity(Gravity.CENTER_VERTICAL);
+        metadataArea.setPadding(dp(14), dp(8), dp(8), dp(8));
+        metadataArea.setFocusable(false);
+        artworkInfo.addView(metadataArea, new LinearLayout.LayoutParams(
+                0, LayoutParams.MATCH_PARENT, 1f));
+
+        expandedMediaTitle = text("", 18, palette.title);
+        expandedMediaTitle.setMaxLines(3);
+        expandedMediaTitle.setEllipsize(TextUtils.TruncateAt.END);
+        expandedMediaTitle.setFocusable(false);
+        metadataArea.addView(expandedMediaTitle, new LinearLayout.LayoutParams(
+                LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
+
+        expandedMediaArtist = text("", 13, palette.muted);
+        expandedMediaArtist.setMaxLines(3);
+        expandedMediaArtist.setEllipsize(TextUtils.TruncateAt.END);
+        expandedMediaArtist.setPadding(0, dp(8), 0, 0);
+        expandedMediaArtist.setFocusable(false);
+        metadataArea.addView(expandedMediaArtist, new LinearLayout.LayoutParams(
+                LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
+
+        // Artwork/info consumes the remaining height above the dedicated
+        // full-width transport row and the existing seek bar.
+        mediaContainer.addView(mediaArtworkFrame, 0, new LinearLayout.LayoutParams(
                 LayoutParams.MATCH_PARENT, 0, 1f));
 
         mediaColumns = new LinearLayout(context);
@@ -450,6 +491,9 @@ final class TwoColumnPanel extends FrameLayout {
         }
         if (nowPlaying.isEmpty()) nowPlaying = "Now playing";
         mediaNowPlaying.setText(nowPlaying);
+        expandedMediaTitle.setText(entry.title.isEmpty() ? "Now playing" : entry.title);
+        expandedMediaArtist.setText(entry.artist);
+        expandedMediaArtist.setVisibility(entry.artist.isEmpty() ? View.GONE : View.VISIBLE);
         mediaButtons[NativeMediaSessions.PLAY_PAUSE].setImageResource(entry.playing
                 ? android.R.drawable.ic_media_pause : android.R.drawable.ic_media_play);
         mediaButtons[NativeMediaSessions.PLAY_PAUSE].setContentDescription(
@@ -515,6 +559,25 @@ final class TwoColumnPanel extends FrameLayout {
         mediaSeekRow.setVisibility(open ? View.VISIBLE : View.GONE);
         mediaArtworkFrame.setVisibility(open ? View.VISIBLE : View.GONE);
         mediaColumns.setVisibility(open ? View.GONE : View.VISIBLE);
+
+        // Reuse the same focusable transport row and native media actions.
+        // Only its expanded presentation changes; collapsed layout is restored
+        // byte-for-byte in size, spacing, and visible child order.
+        mediaAppIcon.setVisibility(open ? View.GONE : View.VISIBLE);
+        mediaNowPlaying.setVisibility(open ? View.GONE : View.VISIBLE);
+        mediaIndex.setVisibility(open ? View.GONE
+                : mediaSessions.size() > 1 ? View.VISIBLE : View.GONE);
+        mediaRow.setPadding(dp(open ? 10 : 9), dp(open ? 3 : 3),
+                dp(open ? 10 : 9), dp(3));
+        mediaRow.setLayoutParams(new LinearLayout.LayoutParams(
+                LayoutParams.MATCH_PARENT, dp(open ? 62 : 46)));
+        for (ImageView button : mediaButtons) {
+            button.setLayoutParams(open
+                    ? new LinearLayout.LayoutParams(0, LayoutParams.MATCH_PARENT, 1f)
+                    : new LinearLayout.LayoutParams(dp(39), dp(39)));
+            button.setPadding(dp(open ? 14 : 9), dp(open ? 14 : 9),
+                    dp(open ? 14 : 9), dp(open ? 14 : 9));
+        }
         mediaContainer.setLayoutParams(new LinearLayout.LayoutParams(
                 LayoutParams.MATCH_PARENT,
                 open ? 0 : LayoutParams.WRAP_CONTENT, open ? 1f : 0f));
