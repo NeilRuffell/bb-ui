@@ -3,7 +3,7 @@
 **Status:** Phase 1 complete in source; Q25 hardware test pending.
 **Branch:** feat/native-bb-shade-host (not merged)
 **Base:** feat/q25-simple-heads-up-notifications, commit 590a6d2
-**Version:** 0.9.79-native-stable-statusbar-q25-dev
+**Version:** 0.9.80-native-stable-statusbar-q25-dev
 
 ## Objective
 
@@ -295,3 +295,25 @@ debug.bb7pulldown.native_shade.enabled=false property if necessary.
 ROM implementation: keep the home status-bar visibility model enabled
 throughout BB native shade sessions, and clip native shade/chrome layers
 below the native status bar at the source; do not duplicate statusbar UI.
+### Native shade backdrop blur suppression (version 0.9.80)
+
+The Q25 APK contains
+NotificationShadeDepthController.computeBlurAndZoomOut(): kotlin.Pair
+and a root field identifying the NotificationShadeWindowView.
+
+While the BB presentation is attached to that exact native window,
+NativeShadeBlurPolicyHook returns the same native pair type with
+blurRadius=0 and zoomOut=0. This avoids the stock shade's backdrop
+blur/zoom over the real status bar and its blue trackpad selection.
+It does not modify the native blur pipeline outside BB sessions,
+does not create replacement status-bar views, and does not touch
+the lockscreen's blur state.
+
+Check logcat for:
+- Q25 native shade blur policy hook registered
+- Native shade backdrop blur/zoom suppressed while BB UI is mounted
+
+These observations are Q25 runtime acceptance criteria, not guaranteed
+by CI. If the original bar still switches format, inspect whether
+Captured actual native status-bar visibility StateFlow via ... appears.
+Use debug.bb7pulldown.native_shade.enabled=false for rollback.
