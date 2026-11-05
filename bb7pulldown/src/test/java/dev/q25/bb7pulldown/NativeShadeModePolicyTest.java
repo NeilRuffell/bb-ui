@@ -24,6 +24,13 @@ public class NativeShadeModePolicyTest {
         assertFalse(NativeShadeModePolicy.openFromNative(true, true, false, true));
     }
 
+    @Test public void nativeOpeningGestureTailCannotReachBbOrStockShade() {
+        assertTrue(NativeShadeModePolicy.swallowOpeningGestureTail(true, true, false));
+        assertFalse(NativeShadeModePolicy.swallowOpeningGestureTail(false, true, false));
+        assertFalse(NativeShadeModePolicy.swallowOpeningGestureTail(true, false, false));
+        assertFalse(NativeShadeModePolicy.swallowOpeningGestureTail(true, true, true));
+    }
+
     @Test public void nativeCollapseDetachesTheBbChild() {
         assertTrue(NativeShadeModePolicy.detachOnCollapse(true, false, true));
         assertFalse(NativeShadeModePolicy.detachOnCollapse(true, true, true));
