@@ -3,7 +3,6 @@ package dev.q25.bb7pulldown;
 import android.util.Log;
 
 import java.lang.ref.WeakReference;
-import java.lang.reflect.Field;
 
 import de.robv.android.xposed.XC_MethodHook;
 import de.robv.android.xposed.XposedBridge;
@@ -85,7 +84,8 @@ final class NativeShadeStatusBarVisibility {
                             boolean nativeVisible = (Boolean) param.args[0];
                             lastNativeValue = nativeVisible;
                             if (bbMounted && nativeVisible) {
-                                param.args[0] = Boolean.FALSE;
+                                param.args[0] = NativeStatusBarVisibilityPolicy
+                                        .isStockShadeVisible(nativeVisible, true);
                                 if (!overrideLogged) {
                                     overrideLogged = true;
                                     Log.i(TAG, "Suppressed native shade-only status bar hide;"
