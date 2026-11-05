@@ -632,6 +632,13 @@ public final class PullDownHook implements IXposedHookLoadPackage {
      * Native SystemUI expanded/collapsed, including a stock heads-up
      * pull-down gesture. Enter BB presentation in the same native window.
      */
+    static void onNativeShadeHostUnavailable() {
+        if (shadeHost != null && NativeShadeHostBridge.requested()) {
+            Log.w(TAG, "Native shade host lost; releasing BB UI session");
+            dismissShadeImmediately();
+        }
+    }
+
     static void onNativeShadeExpansionChanged(boolean expanded) {
         if (!NativeShadeHostBridge.active()) return;
         nativeShadeExpanded = expanded;
@@ -767,7 +774,11 @@ public final class PullDownHook implements IXposedHookLoadPackage {
             if (nativeMode) {
                 Log.i(TAG, "BB UI session attached inside native shade: page=" + initialPage);
                 openingOrClosing = false;
-                NativeShadeHostBridge.requestNativeOpen();
+                if (!NativeShadeHostBridge.requestNativeOpen()) {
+                    Log.e(TAG, "Native shade controller refused expansion; releasing BB UI host");
+                    dismissShadeImmediately();
+                    return;
+                }
                 root.post(() -> {
                     if (shadeHost == root) root.focusContent();
                 });
