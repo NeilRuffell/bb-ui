@@ -493,8 +493,9 @@ final class BB6NativeQsPanel extends FrameLayout {
     }
 
     /**
-     * Use the existing QSTile's secondary/toggle action where LineageOS
-     * exposes one; its primary action remains the native details popup.
+     * Short press uses the existing QSTile's secondary/toggle action when
+     * LineageOS exposes one. Holding the trackpad delegates to the native
+     * long-click action (typically its Settings page), never the detail popup.
      * No direct Wi-Fi, Bluetooth or telephony API is used by BBUI.
      */
     private void dispatchPress(int index, boolean longPress) {
