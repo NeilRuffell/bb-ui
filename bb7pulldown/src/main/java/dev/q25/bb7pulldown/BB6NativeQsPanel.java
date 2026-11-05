@@ -428,11 +428,14 @@ final class BB6NativeQsPanel extends FrameLayout {
                     // if touch scrolling has cleared ListView's selection.
                     int first = Math.max(HEADER_COUNT, list.getFirstVisiblePosition());
                     int last = Math.min(rows.size(), list.getLastVisiblePosition());
+                    int target = code == KeyEvent.KEYCODE_DPAD_UP
+                            ? Math.max(first, last) : first;
+                    int visibleIndex = target - list.getFirstVisiblePosition();
+                    View visible = visibleIndex >= 0 && visibleIndex < list.getChildCount()
+                            ? list.getChildAt(visibleIndex) : null;
+                    int top = visible == null ? 0 : visible.getTop();
                     list.requestFocus();
-                    list.setSelectionFromTop(code == KeyEvent.KEYCODE_DPAD_UP
-                            ? Math.max(first, last) : first,
-                            code == KeyEvent.KEYCODE_DPAD_UP
-                                    ? list.getHeight() - dp(55) : 0);
+                    list.setSelectionFromTop(target, top);
                 } else {
                     // This is ListView's own one-item arrow navigation.
                     // Do not give the event to any ScrollView/page-scroll handler.
