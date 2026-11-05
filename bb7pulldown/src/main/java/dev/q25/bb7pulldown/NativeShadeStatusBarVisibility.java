@@ -2,198 +2,116 @@ package dev.q25.bb7pulldown;
 
 import android.util.Log;
 
-import java.lang.ref.WeakReference;
-
 import de.robv.android.xposed.XC_MethodHook;
-import de.robv.android.xposed.XposedBridge;
 import de.robv.android.xposed.XposedHelpers;
 
 /**
- * Preserve the real collapsed status-bar contents while BB UI is displayed
- * in SystemUI's native shade window. No duplicated icon or clock views.
+ * Preserve the REAL native status-bar contents while BB UI owns SystemUI's
+ * notification shade window. No cloned status-bar views or coroutine StateFlow
+ * mutations are used.
  *
- * Verified Q25 SystemUI APK declarations:
- * - StatusBarVisibilityInteractor.isShadeVisibleOnAnyDisplay : ReadonlyStateFlow
- * - StatusBarVisibilityInteractor.thisDisplayId : int
- * - ReadonlyStateFlow.$$delegate_0 : StateFlow
- * - StateFlowImpl.setValue(Object) : void
- * - HomeStatusBarViewModelImpl constructor has the interactor as a parameter.
+ * Verified on the supplied Q25 SystemUI APK (classes2.dex):
+ *   StatusBarVisibilityInteractor$isHomeScreenStatusBarAllowedLegacy$1
+ *       .invokeSuspend(Object): Object
+ *   StatusBarVisibilityInteractor$isHomeStatusBarAllowedByScene$1
+ *       .invokeSuspend(Object): Object
  *
- * In legacy shade mode, isShadeVisibleOnAnyDisplay normally becomes true
- * when shade expansion exceeds 40%, hiding the home status bar. While the
- * BB presentation is mounted, retain false for THIS flow only. All other
- * native state, including lockscreen visibility, remains SystemUI-owned.
+ * LineageOS 24 derives home status-bar availability from these two decisions,
+ * selecting one by SceneContainerFlag. A fully expanded native shade ordinarily
+ * makes either decision false. Only while BB UI is actually mounted inside the
+ * native shade-window root, preserve the home bar by returning true. This
+ * leaves Android's real clock, status icons and battery views under their
+ * existing lifecycle, configuration, colors and user visibility settings.
+ *
+ * Unlike the earlier attempt, this does not require capturing
+ * StatusBarVisibilityInteractor.isShadeVisibleOnAnyDisplay or locating the
+ * ReadonlyStateFlow's backing instance. The Q25 logs demonstrated that capture
+ * never succeeded, so the previous hook had no effect on native visibility.
  */
 final class NativeShadeStatusBarVisibility {
     private static final String TAG = "BB7-StatusBar";
-    private static final String INTERACTOR =
-            "com.android.systemui.statusbar.pipeline.shared.domain.interactor"
-                    + ".StatusBarVisibilityInteractor";
-    private static final String VIEW_MODEL =
-            "com.android.systemui.statusbar.pipeline.shared.ui.viewmodel"
-                    + ".HomeStatusBarViewModelImpl";
-    private static final String READONLY = "kotlinx.coroutines.flow.ReadonlyStateFlow";
-    private static final String STATE_IMPL = "kotlinx.coroutines.flow.StateFlowImpl";
-    private static final String DELEGATE = "$$delegate_0";
+    private static final String PREFIX =
+            "com.android.systemui.statusbar.pipeline.shared.domain.interactor."
+                    + "StatusBarVisibilityInteractor$";
+    private static final String LEGACY =
+            PREFIX + "isHomeScreenStatusBarAllowedLegacy$1";
+    private static final String SCENE =
+            PREFIX + "isHomeStatusBarAllowedByScene$1";
 
-    private static volatile WeakReference<Object> nativeVisibility =
-            new WeakReference<>(null);
-    private static volatile Boolean lastNativeValue;
-    private static volatile boolean bbMounted;
     private static boolean installed;
-    private static boolean overrideLogged;
-
-    // Do not mistake our own temporary state writes for native emissions.
-    private static final ThreadLocal<Boolean> ownWrite = new ThreadLocal<>();
+    private static boolean legacyLogged;
+    private static boolean sceneLogged;
+    private static boolean unexpectedResultLogged;
 
     private NativeShadeStatusBarVisibility() {}
 
     static synchronized void install(ClassLoader loader) {
         if (installed) return;
 
-        Class<?> interactor = XposedHelpers.findClassIfExists(INTERACTOR, loader);
-        Class<?> viewModel = XposedHelpers.findClassIfExists(VIEW_MODEL, loader);
-        Class<?> wrapper = XposedHelpers.findClassIfExists(READONLY, loader);
-        Class<?> state = XposedHelpers.findClassIfExists(STATE_IMPL, loader);
-        if (interactor == null || wrapper == null || state == null) {
-            Log.e(TAG, "Native Q25 visibility classes missing (interactor="
-                    + (interactor != null) + " wrapper=" + (wrapper != null)
-                    + " state=" + (state != null) + ")");
+        final Class<?> legacy = XposedHelpers.findClassIfExists(LEGACY, loader);
+        final Class<?> scene = XposedHelpers.findClassIfExists(SCENE, loader);
+        if (legacy == null || scene == null) {
+            Log.e(TAG, "Q25 native home status-bar decision classes unavailable; "
+                    + "legacy=" + (legacy != null) + " scene=" + (scene != null));
             return;
         }
 
         try {
-            interactor.getDeclaredField("isShadeVisibleOnAnyDisplay");
-            interactor.getDeclaredField("thisDisplayId");
-            wrapper.getDeclaredField(DELEGATE);
-            state.getDeclaredMethod("setValue", Object.class);
-        } catch (NoSuchFieldException | NoSuchMethodException error) {
-            Log.e(TAG, "Native Q25 visibility signatures changed; no override installed", error);
-            return;
-        }
+            legacy.getDeclaredMethod("invokeSuspend", Object.class);
+            scene.getDeclaredMethod("invokeSuspend", Object.class);
 
-        try {
-            XposedHelpers.findAndHookMethod(state, "setValue", Object.class,
-                    new XC_MethodHook() {
-                        @Override protected void beforeHookedMethod(MethodHookParam param) {
-                            if (param.thisObject != nativeVisibility.get()
-                                    || param.args.length == 0
-                                    || !(param.args[0] instanceof Boolean)
-                                    || Boolean.TRUE.equals(ownWrite.get())) return;
-
-                            boolean nativeVisible = (Boolean) param.args[0];
-                            lastNativeValue = nativeVisible;
-                            if (bbMounted && nativeVisible) {
-                                param.args[0] = NativeStatusBarVisibilityPolicy
-                                        .isStockShadeVisible(nativeVisible, true);
-                                if (!overrideLogged) {
-                                    overrideLogged = true;
-                                    Log.i(TAG, "Suppressed native shade-only status bar hide;"
-                                            + " original clock and icons remain eligible");
-                                }
-                            }
-                        }
-                    });
-
-            // Capture the finished interactor, including the field assigned
-            // by its Kotlin constructor. Q25's primary display ID is zero.
-            XposedBridge.hookAllConstructors(interactor, new XC_MethodHook() {
-                @Override protected void afterHookedMethod(MethodHookParam param) {
-                    if (!param.hasThrowable()) {
-                        capture(param.thisObject, interactor, state, "interactor constructed");
-                    }
-                }
-            });
-
-            // Alternative acquisition when Dagger instantiates a ViewModel
-            // with an interactor that was created before this hook registered.
-            if (viewModel != null) {
-                XposedBridge.hookAllConstructors(viewModel, new XC_MethodHook() {
-                    @Override protected void beforeHookedMethod(MethodHookParam param) {
-                        if (nativeVisibility.get() != null) return;
-                        for (Object argument : param.args) {
-                            if (interactor.isInstance(argument)) {
-                                capture(argument, interactor, state, "status bar ViewModel");
-                                break;
-                            }
-                        }
-                    }
-                });
-            }
-
+            XposedHelpers.findAndHookMethod(legacy, "invokeSuspend", Object.class,
+                    decisionHook(false));
+            XposedHelpers.findAndHookMethod(scene, "invokeSuspend", Object.class,
+                    decisionHook(true));
             installed = true;
-            Log.i(TAG, "Q25 native status-bar content visibility hook registered;"
-                    + " exact ReadonlyStateFlow delegate=" + DELEGATE
-                    + " ViewModel=" + (viewModel != null));
+            Log.i(TAG, "Q25 native status-bar content decisions hooked"
+                    + " (legacy and scene; no StateFlow capture)");
         } catch (Throwable error) {
-            Log.e(TAG, "Native status-bar visibility hook installation failed", error);
+            Log.e(TAG, "Cannot hook Q25 native home status-bar decisions", error);
         }
     }
 
-    private static void capture(Object candidate, Class<?> expectedInteractor,
-            Class<?> expectedState, String source) {
-        if (candidate == null || !expectedInteractor.isInstance(candidate)) return;
-        try {
-            if (XposedHelpers.getIntField(candidate, "thisDisplayId") != 0) return;
-            Object readonly = XposedHelpers.getObjectField(
-                    candidate, "isShadeVisibleOnAnyDisplay");
-            if (readonly == null) {
-                Log.w(TAG, "Native status-bar flow not yet initialized via " + source);
-                return;
+    private static XC_MethodHook decisionHook(boolean scene) {
+        return new XC_MethodHook() {
+            @Override protected void afterHookedMethod(MethodHookParam param) {
+                if (param.hasThrowable() || !NativeShadeHostBridge.ownsNativeShadeWindow()) {
+                    return;
+                }
+
+                Object original = param.getResult();
+                if (!(original instanceof Boolean)) {
+                    if (!unexpectedResultLogged) {
+                        unexpectedResultLogged = true;
+                        Log.w(TAG, "Home status-bar decision result not Boolean; type="
+                                + (original == null ? "null"
+                                        : original.getClass().getName()));
+                    }
+                    return;
+                }
+
+                boolean nativeAllowed = (Boolean) original;
+                if (!nativeAllowed) {
+                    param.setResult(NativeStatusBarVisibilityPolicy
+                            .keepHomeStatusBarAllowed(nativeAllowed, true));
+                }
+                if (scene && !sceneLogged) {
+                    sceneLogged = true;
+                    Log.i(TAG, "Retained genuine home status-bar content in scene shade");
+                } else if (!scene && !legacyLogged) {
+                    legacyLogged = true;
+                    Log.i(TAG, "Retained genuine home status-bar content in legacy shade");
+                }
             }
-
-            Object delegate = XposedHelpers.getObjectField(readonly, DELEGATE);
-            if (!expectedState.isInstance(delegate)) {
-                // Record the actual runtime type, do not guess a different
-                // field name or modify an arbitrary unrelated StateFlow.
-                Log.w(TAG, "Native visibility delegate type unexpected via " + source
-                        + ": " + (delegate == null ? "null"
-                                : delegate.getClass().getName()));
-                return;
-            }
-
-            nativeVisibility = new WeakReference<>(delegate);
-            Object current = XposedHelpers.callMethod(delegate, "getValue");
-            if (current instanceof Boolean) lastNativeValue = (Boolean) current;
-            Log.i(TAG, "Captured native status-bar visibility StateFlow via " + source
-                    + "; currentShadeVisible=" + current);
-            if (bbMounted) writeValue(delegate, Boolean.FALSE);
-        } catch (Throwable error) {
-            Log.e(TAG, "Cannot capture Q25 visibility state via " + source, error);
-        }
+        };
     }
 
-    private static void writeValue(Object state, Boolean value) {
-        ownWrite.set(Boolean.TRUE);
-        try {
-            XposedHelpers.callMethod(state, "setValue", value);
-        } finally {
-            ownWrite.remove();
-        }
-    }
-
+    /** Native ownership controls the policy; no state capture or restoration. */
     static void onBbShadeMountChanged(boolean mounted) {
-        bbMounted = mounted;
-        Object state = nativeVisibility.get();
-        if (state == null) {
-            Log.w(TAG, "Native status-bar visibility flow NOT CAPTURED; "
-                    + "check constructor capture and Q25 field diagnostics");
-            return;
-        }
-
-        try {
-            if (mounted) {
-                Object current = XposedHelpers.callMethod(state, "getValue");
-                if (current instanceof Boolean) lastNativeValue = (Boolean) current;
-                writeValue(state, Boolean.FALSE);
-                Log.i(TAG, "Preserving existing status-bar content during BB native shade");
-            } else {
-                Boolean original = lastNativeValue;
-                if (original != null) writeValue(state, original);
-                Log.i(TAG, "Restored normal native status-bar visibility policy");
-            }
-        } catch (Throwable error) {
-            Log.e(TAG, "Cannot update native visibility for BB shade transition", error);
+        if (installed) {
+            Log.i(TAG, mounted
+                    ? "BB native shade mounted; native status-bar decisions preserved"
+                    : "BB native shade unmounted; stock status-bar decisions restored");
         }
     }
 }
