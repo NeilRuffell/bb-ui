@@ -148,7 +148,7 @@ side gutters. Remove the shared native SystemUI padding at the measurement
 source, including both heads-up popups and the stock notification stack.
 
 Q25's `SystemUI.apk` (`classes2.dex`) exposes
-`NotificationStackScrollLayout.initView()`,
+`NotificationStackScrollLayout.initView(Context, NotificationSwipeHelper, NotificationStackSizeCalculator)`,
 `NotificationStackScrollLayout.onMeasure(int,int)`,
 `mMinimumPaddings`, `mSidePaddings`, and
 `mFullWidthNotificationsInLandscape`. The Q25's R8 build has no separately
@@ -208,3 +208,21 @@ Confirm that heads-up popups reach both screen edges, portrait and landscape
 if supported, and that notification taps, swipes, grouping and BB UI shade
 remain functional. Verify that no extra outside margin persists; if it does,
 inspect its actual parent window layout rather than compensating with offsets.
+
+### Q25 runtime correction (version 0.9.75)
+
+The original 0.9.74 runtime preflight incorrectly searched for the **nonexistent**
+zero-argument `initView()`, so the feature registered no hooks. The device
+reported `NoSuchMethodException`.
+
+The user-supplied APK was parsed directly (SHA-256:
+`65003bbe5b00146a0e20d8612660426be05e571cce22d244fdcd656a2b3be8c0`).
+It declares `initView(Context, NotificationSwipeHelper,
+NotificationStackSizeCalculator)`, plus `onMeasure(int,int)` and the exact
+`mMinimumPaddings` / `mSidePaddings` fields. `onMeasure` reads and writes those
+fields. This version hooks the correct 3-argument initialization method and
+keeps the global native measurement override.
+
+After installing, inspect `BB7-NotifWidth` logs. A successful test requires
+both the hook-registration line and the zero-side-inset measurement line,
+**plus visual confirmation** of edge-to-edge popup placement.

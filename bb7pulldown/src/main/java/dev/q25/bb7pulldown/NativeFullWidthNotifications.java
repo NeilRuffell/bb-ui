@@ -1,9 +1,9 @@
 package dev.q25.bb7pulldown;
 
+import android.content.Context;
 import android.util.Log;
 
 import de.robv.android.xposed.XC_MethodHook;
-import de.robv.android.xposed.XposedBridge;
 import de.robv.android.xposed.XposedHelpers;
 
 /**
@@ -15,7 +15,7 @@ import de.robv.android.xposed.XposedHelpers;
  * so heads-up popups and any stock notification rows use the same full width.
  *
  * Verified in Q25 SystemUI classes2.dex:
- *   NotificationStackScrollLayout.initView()
+ *   NotificationStackScrollLayout.initView(Context, NotificationSwipeHelper, NotificationStackSizeCalculator)
  *   NotificationStackScrollLayout.onMeasure(int, int)
  *   NotificationStackScrollLayout.mMinimumPaddings
  *   NotificationStackScrollLayout.mSidePaddings
@@ -51,8 +51,21 @@ final class NativeFullWidthNotifications {
             Log.w(TAG, "Q25 native notification stack missing; stock spacing retained");
             return;
         }
+        // The uploaded Q25 SystemUI classes2.dex has a THREE-argument initView.
+        // Its previous zero-argument preflight was incorrect and disabled this
+        // entire feature before any hooks were installed.
+        Class<?> swipeHelper = XposedHelpers.findClassIfExists(
+                "com.android.systemui.statusbar.notification.stack.NotificationSwipeHelper",
+                loader);
+        Class<?> sizeCalculator = XposedHelpers.findClassIfExists(
+                "com.android.systemui.statusbar.notification.stack.NotificationStackSizeCalculator",
+                loader);
+        if (swipeHelper == null || sizeCalculator == null) {
+            Log.w(TAG, "Q25 native stack initialization parameters unavailable");
+            return;
+        }
         try {
-            stack.getDeclaredMethod("initView");
+            stack.getDeclaredMethod("initView", Context.class, swipeHelper, sizeCalculator);
             stack.getDeclaredMethod("onMeasure", int.class, int.class);
             stack.getDeclaredField("mMinimumPaddings");
             stack.getDeclaredField("mSidePaddings");
@@ -65,12 +78,13 @@ final class NativeFullWidthNotifications {
         try {
             // Remove the underlying resource-derived value once native
             // stack initialization has finished, for every notification stack.
-            XposedBridge.hookAllMethods(stack, "initView", new XC_MethodHook() {
-                @Override protected void afterHookedMethod(MethodHookParam param) {
-                    if (param.hasThrowable()) return;
-                    forceFullWidth(param.thisObject);
-                }
-            });
+            XposedHelpers.findAndHookMethod(stack, "initView",
+                    Context.class, swipeHelper, sizeCalculator, new XC_MethodHook() {
+                        @Override protected void afterHookedMethod(MethodHookParam param) {
+                            if (param.hasThrowable()) return;
+                            forceFullWidth(param.thisObject);
+                        }
+                    });
 
             // Also enforce at the actual measurement source so that any
             // resource/configuration reload cannot reintroduce the gutter.
