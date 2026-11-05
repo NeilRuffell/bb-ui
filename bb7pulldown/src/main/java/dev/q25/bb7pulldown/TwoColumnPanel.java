@@ -420,12 +420,13 @@ final class TwoColumnPanel extends FrameLayout {
         return -1;
     }
 
-    private void cycleMediaSession(int step) {
+    /** Session browsing stops at the first and last session; never wraps. */
+    private void moveMediaSession(int step) {
         if (mediaSessions.isEmpty()) return;
         int index = mediaSessionIndex();
         if (index < 0) index = 0;
-        int next = (index + (step < 0 ? -1 : 1) + mediaSessions.size())
-                % mediaSessions.size();
+        int next = MediaNavigationPolicy.moveSession(index, step, mediaSessions.size());
+        if (next == index) return;
         selectedMediaToken = mediaSessions.get(next).token;
         mediaPendingToken = null;
         mediaSeekSelected = false;
@@ -661,26 +662,24 @@ final class TwoColumnPanel extends FrameLayout {
                                 selectedMediaButton, step, mediaButtons.length);
                         updateMediaHighlight();
                     } else {
-                        cycleMediaSession(step);
+                        moveMediaSession(step);
                     }
                 }
                 return true;
             case KeyEvent.KEYCODE_DPAD_UP:
             case KeyEvent.KEYCODE_DPAD_DOWN:
                 if (event.getAction() == KeyEvent.ACTION_DOWN) {
-                    if (mediaControlsOpen && mediaSeekSelected) {
-                        if (code == KeyEvent.KEYCODE_DPAD_UP) {
-                            mediaSeekSelected = false;
+                    if (mediaControlsOpen) {
+                        int current = mediaSeekSelected
+                                ? MediaNavigationPolicy.SEEK_BAR
+                                : MediaNavigationPolicy.TRANSPORT_CONTROLS;
+                        int direction = code == KeyEvent.KEYCODE_DPAD_DOWN ? 1 : -1;
+                        int next = MediaNavigationPolicy.moveRow(current, direction);
+                        // No wrap or session switching at either end of the
+                        // expanded player. The artwork is not a selectable row.
+                        if (next != current) {
+                            mediaSeekSelected = next == MediaNavigationPolicy.SEEK_BAR;
                             updateMediaHighlight();
-                        } else {
-                            cycleMediaSession(1);
-                        }
-                    } else if (mediaControlsOpen) {
-                        if (code == KeyEvent.KEYCODE_DPAD_DOWN) {
-                            mediaSeekSelected = true;
-                            updateMediaHighlight();
-                        } else {
-                            cycleMediaSession(-1);
                         }
                     } else if (code == KeyEvent.KEYCODE_DPAD_UP) {
                         enterStatusZone();
