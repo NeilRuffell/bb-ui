@@ -1,7 +1,5 @@
 package dev.q25.bb7pulldown;
 
-import dev.q25.trackpad.theme.BB7Theme;
-
 import android.util.Log;
 import android.view.MotionEvent;
 import android.view.View;
@@ -81,6 +79,9 @@ final class NativeShadeHostBridge {
             Log.e(TAG, "Q25 native shade controller/view missing");
             return;
         }
+        // Reuse the original SystemUI status-bar visibility pipeline rather
+        // than drawing replacement clocks/icons or reparenting native views.
+        NativeShadeStatusBarVisibility.install(loader);
         try {
             type.getDeclaredField("mView");
             type.getDeclaredMethod("onFinishInflate");
@@ -233,7 +234,11 @@ final class NativeShadeHostBridge {
             // notification stack/scrims cannot show around it. Interior
             // content begins below the original status-bar height.
             root.setPadding(0, Math.max(0, topInset), 0, 0);
-            root.setBackgroundColor(BB7Theme.palette(window.getContext()).canvas);
+            // Keep only the reserved native status-bar band transparent.
+            // BB notification and QS pages already own their opaque canvas
+            // below this padding; a root-wide opaque background was hiding
+            // the genuine SystemUI status-bar window underneath.
+            root.setBackground(null);
             root.setFocusable(true);
             root.setFocusableInTouchMode(true);
             root.setClickable(true);
@@ -241,6 +246,8 @@ final class NativeShadeHostBridge {
             window.addView(root, params);
             root.bringToFront();
             mountedRef = new WeakReference<>(root);
+            NativeShadeStatusBarVisibility.onBbShadeMountChanged(true);
+            Log.i(TAG, "Native status-bar region left transparent; original icons retained");
             // Do not reset nativeGestureInProgress: a heads-up or native
             // downward swipe may still be holding the pointer at mount time.
             // Its MOVE/UP must be consumed, not sent without an ACTION_DOWN.
@@ -267,7 +274,10 @@ final class NativeShadeHostBridge {
 
     static void detach(UnifiedShadeHost root) {
         if (root == null) return;
-        if (mountedRef.get() == root) mountedRef = new WeakReference<>(null);
+        if (mountedRef.get() == root) {
+            mountedRef = new WeakReference<>(null);
+            NativeShadeStatusBarVisibility.onBbShadeMountChanged(false);
+        }
         ViewParent parent = root.getParent();
         try {
             if (parent instanceof ViewGroup) ((ViewGroup) parent).removeView(root);
