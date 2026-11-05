@@ -1,11 +1,15 @@
 package dev.q25.bb7pulldown;
 
-/** Let the native status bar display while BB UI replaces the shade surface. */
+/** Shared, pure native home-status-bar decisions for the BB shade. */
 final class NativeStatusBarVisibilityPolicy {
     private NativeStatusBarVisibilityPolicy() {}
 
-    /** In legacy mode false means the expanded shade does not hide the bar. */
-    static boolean isStockShadeVisible(boolean nativeShadeVisible, boolean bbMounted) {
-        return nativeShadeVisible && !bbMounted;
+    /**
+     * Keep Android's home status-bar contents eligible while BB UI is
+     * mounted. When BB is absent, the original native decision is unchanged.
+     * Other native clock/icon user preferences remain independently applied.
+     */
+    static boolean keepHomeStatusBarAllowed(boolean nativeAllowed, boolean bbMounted) {
+        return nativeAllowed || bbMounted;
     }
 }
