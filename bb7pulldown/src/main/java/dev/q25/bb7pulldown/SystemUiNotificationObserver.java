@@ -6,6 +6,8 @@ import android.app.NotificationChannel;
 import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.drawable.Icon;
+import android.graphics.drawable.BitmapDrawable;
+import android.graphics.drawable.Drawable;
 import android.provider.Settings;
 import android.content.pm.ShortcutInfo;
 import android.app.PendingIntent;
@@ -258,7 +260,7 @@ final class SystemUiNotificationObserver {
      * artwork fallback when the session does not provide an embedded bitmap.
      * Return only already-materialized bitmap icons; URI icons require I/O.
      */
-    static Bitmap mediaNotificationArtwork(MediaSession.Token selectedToken) {
+    static Bitmap mediaNotificationArtwork(MediaSession.Token selectedToken, Context context) {
         if (selectedToken == null) return null;
         synchronized (LOCK) {
             for (StatusBarNotification sbn : ACTIVE_SBNS.values()) {
@@ -272,7 +274,10 @@ final class SystemUiNotificationObserver {
                     if (icon == null) continue;
                     int type = icon.getType();
                     if (type == Icon.TYPE_BITMAP || type == Icon.TYPE_ADAPTIVE_BITMAP) {
-                        return icon.getBitmap();
+                        Drawable drawable = icon.loadDrawable(context);
+                        if (drawable instanceof BitmapDrawable) {
+                            return ((BitmapDrawable) drawable).getBitmap();
+                        }
                     }
                 } catch (RuntimeException error) {
                     Log.w(TAG, "Unable to read native media notification artwork", error);
