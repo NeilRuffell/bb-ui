@@ -669,18 +669,17 @@ final class TwoColumnPanel extends FrameLayout {
         super.onDetachedFromWindow();
     }
 
-    /** BBOS-style elongated silver thumb; only the selected pill brightens. */
+    /** Silver by default; selected pill alone uses the existing BB UI blue. */
     private GradientDrawable mediaSeekThumb(boolean selected) {
         GradientDrawable pill = new GradientDrawable(
                 GradientDrawable.Orientation.TOP_BOTTOM,
-                selected
-                        ? new int[] {0xfff7f8fa, 0xffc8ced6}
+                selected ? BB7Theme.gradientColors()
                         : new int[] {0xffe5e9ef, 0xffaeb6c0});
         pill.setShape(GradientDrawable.RECTANGLE);
         pill.setCornerRadius(dp(10));
         pill.setSize(dp(selected ? 56 : 54), dp(selected ? 18 : 16));
         pill.setStroke(dp(selected ? 2 : 1),
-                selected ? 0xffffffff : 0xff87919c);
+                selected ? BB7Theme.BLUE_BORDER : 0xff87919c);
         return pill;
     }
 
