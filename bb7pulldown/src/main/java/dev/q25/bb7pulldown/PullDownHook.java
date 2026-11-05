@@ -139,6 +139,9 @@ public final class PullDownHook implements IXposedHookLoadPackage {
     @Override
     public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lp) {
         if (!PACKAGE.equals(lp.packageName) || !PACKAGE.equals(lp.processName)) return;
+        // Colour icons have their own independent rollback property, even when
+        // the custom BB7 shade is disabled.
+        NativeStatusBarColorIcons.install(lp.classLoader);
 
         if (!enabled()) {
             Log.i(TAG, "Disabled by " + ENABLE_PROP + "; stock status bar retained");
@@ -147,7 +150,6 @@ public final class PullDownHook implements IXposedHookLoadPackage {
         installRecentsInterception(lp.classLoader);
         installNativeShadeState(lp.classLoader);
         SystemUiNotificationObserver.install(lp.classLoader);
-        NativeStatusBarColorIcons.install(lp.classLoader);
         NativeQuickSettingsTiles.install(lp.classLoader);
         NativeNotificationClicks.install(lp.classLoader);
         Class<?> viewClass = XposedHelpers.findClassIfExists(STATUS_BAR, lp.classLoader);
