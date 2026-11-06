@@ -380,14 +380,13 @@ public final class BB6BlueprintHook implements IXposedHookLoadPackage {
     }
 
     /**
-     * LineageOS 24's AodBurnInLayer is an AndroidX Layer/ConstraintHelper.
-     * It transforms the IDs registered in getReferencedIds(). The previous
-     * prototype's crash was dereferencing a removed child ID. During native
-     * blueprint transitions we keep this reference list consistent.
+     * Some AOD layers expose AndroidX ConstraintHelper's public reference-ID
+     * API, but this must be verified against the actual loaded ROM class.
+     * Do not assume getReferencedIds() exists. Without a validated contract,
+     * leave the native AOD layer unchanged rather than guessing its fields.
      *
-     * The native burn-in anchor is retained; do not detach views or override
-     * any native transform method. This is an ID membership repair ONLY
-     * when a reference is provably absent in the original ConstraintLayout.
+     * The native burn-in anchor is retained. Only prune IDs confirmed absent
+     * from the original parent, and verify every reference-list mutation.
      */
     private static void hookAodReferenceConsistency(ClassLoader loader) {
         Class<?> layer = XposedHelpers.findClassIfExists(AOD_LAYER, loader);
