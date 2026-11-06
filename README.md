@@ -5,9 +5,9 @@ Android on the Zinwa Q25. The current test build is a single **Vector/LSPosed
 APK** that integrates with LineageOS SystemUI. The long-term target is a
 native LineageOS SystemUI implementation.
 
-**Current merged baseline:** `0.9.86-native-touch-drag-q25-dev`
-(versionCode 116). The native shade integration and its slide animation are
-**opt-in** until the remaining presentation work is complete.
+**Current APK version:** `0.9.95-bbos6-light-selection-q25-test`
+(versionCode 125). The native shade integration and its slide animation
+remain **opt-in** while the remaining presentation work continues.
 
 The BBOS6 shade now supports downward/upward slide animations and
 finger-following drag-to-open/close, while retaining keyboard/trackpad
@@ -25,6 +25,8 @@ independent rollback settings.
 - [Shade and trackpad navigation](SHADE_NAVIGATION.md).
 - [Native Quick Settings](docs/NATIVE_QS_UI.md).
 - [Native Back integration](docs/NATIVE_SHADE_BACK_ROUTING.md).
+- [BB6 lock-screen touchscreen investigation](docs/LOCKSCREEN_TOUCH_ROUTING.md) —
+  what changed, what is still unverified, and the tested recovery procedure.
 - [Historical development notes](docs/HISTORICAL_DEVELOPMENT_NOTES.md) —
   earlier features, commands and branch histories; **not current setup instructions**.
 

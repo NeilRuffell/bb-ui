@@ -64,10 +64,15 @@ patch.
    The shared notification container is
    `@id/shared_notification_container` in
    `res/layout/super_notification_shade.xml`.
-   Do not insert/bind the native notification-list section in the BB6
-   interactive lock-screen composition. Keep it in shade composition;
-   notification data must remain registered and available for the
-   `BB6LockScreenHeader` app-icon/count row.
+   In the current Vector/Q25 implementation, **keep**
+   `DefaultNotificationStackScrollLayoutSection` and the shared notification
+   containers attached even during BB6 keyguard. They supply native
+   notification bindings and touch handling shared with the shade; only
+   duplicate *drawing* is suppressed while BB6 owns the interactive screen.
+   A future native ROM replacement may omit stock visual composition only
+   after the equivalent native controllers, shade transitions, and notification
+   lifecycle have been preserved and validated. Notification data must remain
+   available to the `BB6LockScreenHeader` app-icon/count row.
    `src/com/android/systemui/keyguard/ui/view/layout/sections/AodNotificationIconsSection.kt`
    adds `@id/aod_notification_icon_container`; omit that section from the
    BB6 interactive presentation, but retain it in AOD.
@@ -114,17 +119,18 @@ proper source-level solution. Do not mask the crash by catching
 
 ## Development APK versus the final ROM
 
-The test APK uses `BB6NativeLockscreenComposition` to **detach** redundant
-View children from `KeyguardRootView` while BB6 owns interactive keyguard.
-It stores each original parent, index and layout parameters, and restores
-the same native children for AOD, native shade, bouncer and unlock. The native
-shared notification subtree is detached and reattached similarly.
-Nothing is made invisible or transparent as a substitute for removal.
+The investigated Vector integration uses `BB6BlueprintHook` for the
+interactive keyguard and `NativeNotificationRenderBridge` for conditional
+duplicate-card drawing suppression. It **does not detach** the native shared
+notification subtree. Native notification views, touch dispatch and controllers
+are retained through unlock and shade transitions. The older
+`BB6NativeLockscreenComposition` source contains a separate detachment
+prototype; it is not the current notification-stack lifecycle strategy.
 
-That detachment is a **development-stage compatibility adapter**, not the
-recommended ROM implementation. In LineageOS, construct the correct native
-blueprint in the first place so no redundant views are inflated/bound in
-the interactive BB6 composition.
+For native LineageOS integration, choose the proper blueprint at the
+composition level, without removing live shared notification hosts. Validate
+the equivalent controller and input behavior before eliminating stock visual
+bindings. See [touchscreen investigation](../../docs/LOCKSCREEN_TOUCH_ROUTING.md).
 
 ## Validation before a ROM merge
 

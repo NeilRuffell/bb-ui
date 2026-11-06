@@ -1,7 +1,8 @@
-# Native notification drawing experiment (Vector)
+# Native notification drawing (Vector)
 
-**Branch:** `feat/native-notification-draw-policy`  
-**Status:** Experimental, requires Q25 runtime validation. Not yet in master.
+**Status:** Updated by BB6 lock-screen investigation PR #39, approved for
+merge in November 2026. See [touchscreen investigation](LOCKSCREEN_TOUCH_ROUTING.md)
+for the remaining intermittent-device limitation.
 
 ## Goal
 
@@ -18,10 +19,10 @@ stock notification cards is unnecessary.
 
 `NativeNotificationRenderBridge` hooks only the native stack's own
 `dispatchDraw(Canvas)` method. Before its original draw pass, the bridge
-checks that this particular native stack is INSIDE the same currently mounted
-`NotificationShadeWindowView` as the BB host. If so, it skips that native
-stack's child drawing; all other windows and all non-BB sessions call the
-original native method.
+checks that the stack belongs either to the currently mounted BB shade in
+the same `NotificationShadeWindowView`, or to the *active* BB6 interactive
+lock-screen blueprint in that window. If so, it skips the native stack's
+child drawing; otherwise the original native drawing method is called.
 
 This avoids constructing a second window or reparenting/destroying native
 notification views. It preserves Android's notification records, native
@@ -44,24 +45,28 @@ controllers, without a tested platform-level integration. The final ROM
 should install the BB renderer in native SystemUI's presentation lifecycle
 and stop building the replaced stock view tree at its source.
 
-The existing BB6 lock-screen hook can permanently remove the native
-notification stack. This experiment does NOT modify the lock screen. In
-that configuration, there may be no stock stack left to draw, and no
-`Stock notification card drawing skipped...` log to emit. The device should
-still display the existing BB notifications.
+Previous BB6 lock-screen builds could permanently remove the native
+notification containers, even when the device was unlocked. PR #39 removes
+that behavior. The native notification-stack section stays in the blueprint,
+and its view hierarchy, touch routing and controllers remain attached.
+Only drawing of duplicate cards is gated while the BB6 blueprint is applied
+and the live keyguard state is interactive. This is a code correction, but
+the rare touchscreen fault's exact runtime cause remains unproven.
 
 ## Q25 install/test
 
 ```sh
 cd ~/Projects/bb-ui
 git fetch origin
-git switch --track origin/feat/native-notification-draw-policy
+git switch master
+git pull --ff-only
 gradle :app:assembleDebug :app:testDebugUnitTest &&
 adb -s 202512003630 install -r app/build/outputs/apk/debug/app-debug.apk &&
 adb -s 202512003630 shell setprop debug.bb7pulldown.enabled true &&
 adb -s 202512003630 shell setprop debug.bb7pulldown.native_shade.enabled true &&
 adb -s 202512003630 shell setprop debug.bb7pulldown.native_notif_draw.enabled true &&
-adb -s 202512003630 shell am crash com.android.systemui
+PID=$(adb -s 202512003630 shell pidof com.android.systemui | tr -d '\r')
+adb -s 202512003630 shell am crash "$PID"
 ```
 
 Open/close the notification shade, open cards, click and dismiss, test
@@ -77,9 +82,9 @@ Expected registration:
 `Q25 native notification dispatchDraw gate installed`.
 
 If a stock native row is present beneath BB and its draw method runs,
-expect `Stock notification card drawing skipped behind mounted BB shade`.
-Absence of that second message is NOT proof of a fault, since the existing
-lock-screen module may already have removed the stock stack.
+expect `Stock notification cards skipped in BB-owned shade/lockscreen; native rows retained`.
+Absence of this second message is not proof of a fault: it appears only when
+the native stack performs a draw while BBUI currently owns the presentation.
 
 ## Independent rollback
 
@@ -88,5 +93,7 @@ adb -s 202512003630 shell setprop debug.bb7pulldown.native_notif_draw.enabled fa
 adb -s 202512003630 shell am crash com.android.systemui
 ```
 
-This disables only the drawing gate; it does not disable the working
-native BB shade or its Back fix.
+This disables only the drawing gate; it does not disable the BB shade or
+its Back integration. Native stock cards may become visible behind the
+BB presentation. To recover from the *touchscreen fault*, use the separate
+BB6 lock-screen rollback in [the investigation notes](LOCKSCREEN_TOUCH_ROUTING.md).
