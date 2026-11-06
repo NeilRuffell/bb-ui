@@ -923,7 +923,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
                 context, notifications, connections, NAVIGATION, initialPage,
                 PullDownHook::dismissShade, PullDownHook::switchShadePage,
                 fromSelector ? transferredHeader : null);
-        if (fromSelector) root.prepareSelectorReveal();
+        if (fromSelector && !nativeMode) root.prepareSelectorReveal();
         // Construct legacy window parameters only in rollback mode.
         // Native mode must not allocate a second shade window at all.
         WindowManager.LayoutParams params = null;
@@ -955,7 +955,14 @@ public final class PullDownHook implements IXposedHookLoadPackage {
                 // Native gesture opening still slides its whole window as
                 // before. Selector confirmation leaves the window stationary;
                 // its already-transferred header never moves during reveal.
-                if (!fromSelector) {
+                if (fromSelector) {
+                    // Clip the entire native window just below the transferred
+                    // header, so stock SystemUI siblings cannot show through.
+                    if (!NativeShadeHostBridge.prepareSelectorReveal(
+                            ShadeDateHeader.layoutParams(context).height)) {
+                        Log.w(TAG, "Cannot prepare native selector reveal; using static shade");
+                    }
+                } else {
                     nativeSlidePrepared = NativeShadeSlideAnimator.prepareOpen(
                             NativeShadeHostBridge.shadeWindow(), pendingNativeTouchOpen != null);
                 }
@@ -988,15 +995,22 @@ public final class PullDownHook implements IXposedHookLoadPackage {
                     return;
                 }
                 if (fromSelector) {
-                    root.animateSelectorReveal(() -> {
+                    // Real shade window stays anchored. Only its clip boundary
+                    // travels DOWN from the existing selected header.
+                    Runnable completed = () -> {
                         if (shadeHost != root) return;
-                        // Existing drag-to-close and window-close animations
-                        // resume from the native window's actual open position.
+                        // Rejoin the original native drag-to-close lifecycle
+                        // once the one-off content reveal is finished.
                         NativeShadeSlideAnimator.adoptExpandedWindow(
                                 NativeShadeHostBridge.shadeWindow());
                         openingOrClosing = false;
                         root.focusContent();
-                    });
+                    };
+                    if (!NativeShadeHostBridge.animateSelectorReveal(completed)) {
+                        NativeShadeHostBridge.cancelSelectorReveal();
+                        Log.w(TAG, "Native clip animation unavailable; showing full shade");
+                        root.post(completed);
+                    }
                 } else if (nativeSlidePrepared) {
                     if (NativeShadeSlideAnimator.isTouchOpening()) {
                         // Status-bar MOVE/UP owns the window translation until
