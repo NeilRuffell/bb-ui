@@ -536,6 +536,11 @@ final class NativeShadeHostBridge {
         boolean mounted = bb != null && bb.getParent() == window;
         int action = source.getActionMasked();
 
+        // The selector's original subpanel stays mounted for the entire BB
+        // shade. When the native shade window is above it for touch dispatch,
+        // route only touches on the reserved header band to the SAME View.
+        if (mounted && PullDownHook.routeExternalHeaderTouch(source)) return true;
+
         if (action == MotionEvent.ACTION_DOWN) {
             nativeGestureInProgress = !mounted;
             bbGestureInProgress = mounted;
