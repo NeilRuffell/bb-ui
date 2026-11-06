@@ -343,9 +343,17 @@ public final class PullDownHook implements IXposedHookLoadPackage {
         int headerHeight = ShadeDateHeader.layoutParams(context).height;
         root.addView(header, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, headerHeight));
+        final float[] selectorTouchDown = new float[2];
         header.setOnTouchListener((view, event) -> {
+            if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
+                selectorTouchDown[0] = event.getRawX();
+                selectorTouchDown[1] = event.getRawY();
+                return true;
+            }
             if (event.getActionMasked() == MotionEvent.ACTION_UP
-                    && focusWindow == root && !locked(context)) {
+                    && focusWindow == root && !locked(context)
+                    && Math.abs(event.getRawX() - selectorTouchDown[0]) < dp(context, 12)
+                    && Math.abs(event.getRawY() - selectorTouchDown[1]) < dp(context, 12)) {
                 int zone = ShadeHeaderSegmentPolicy.zoneAt(event.getX(), view.getWidth());
                 if (zone != ShadeStatusNavigation.NONE) {
                     NAVIGATION.selectStandaloneHeaderZone(zone);
