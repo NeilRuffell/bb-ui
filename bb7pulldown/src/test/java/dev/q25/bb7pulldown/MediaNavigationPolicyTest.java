@@ -5,21 +5,21 @@ import org.junit.Test;
 import static org.junit.Assert.assertEquals;
 
 public class MediaNavigationPolicyTest {
-    @Test public void downFromSeekBarStopsAtSeekBar() {
-        assertEquals(MediaNavigationPolicy.SEEK_BAR,
-                MediaNavigationPolicy.moveRow(MediaNavigationPolicy.SEEK_BAR, 1));
+    @Test public void downFromTransportStopsAtTransport() {
+        assertEquals(MediaNavigationPolicy.TRANSPORT_CONTROLS,
+                MediaNavigationPolicy.moveRow(MediaNavigationPolicy.TRANSPORT_CONTROLS, 1));
     }
 
-    @Test public void upFromTransportStopsAtTransport() {
-        assertEquals(MediaNavigationPolicy.TRANSPORT_CONTROLS,
-                MediaNavigationPolicy.moveRow(MediaNavigationPolicy.TRANSPORT_CONTROLS, -1));
+    @Test public void upFromSeekBarStopsAtSeekBar() {
+        assertEquals(MediaNavigationPolicy.SEEK_BAR,
+                MediaNavigationPolicy.moveRow(MediaNavigationPolicy.SEEK_BAR, -1));
     }
 
     @Test public void transportAndSeekMoveToEachOtherOnce() {
         assertEquals(MediaNavigationPolicy.SEEK_BAR,
-                MediaNavigationPolicy.moveRow(MediaNavigationPolicy.TRANSPORT_CONTROLS, 1));
+                MediaNavigationPolicy.moveRow(MediaNavigationPolicy.TRANSPORT_CONTROLS, -1));
         assertEquals(MediaNavigationPolicy.TRANSPORT_CONTROLS,
-                MediaNavigationPolicy.moveRow(MediaNavigationPolicy.SEEK_BAR, -1));
+                MediaNavigationPolicy.moveRow(MediaNavigationPolicy.SEEK_BAR, 1));
     }
 
     @Test public void sessionNavigationStopsAtBothEnds() {
