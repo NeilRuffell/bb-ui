@@ -816,6 +816,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
                     }
                 }, NAVIGATION, false);
         notifications.setFavorites(activeFavorites);
+        notifications.setOrganizationMode(NotificationShadeModeClient.read(context));
         notifications.setNotifications(SystemUiNotificationObserver.itemsSnapshot());
 
         UnifiedShadeHost root = new UnifiedShadeHost(
@@ -1061,9 +1062,8 @@ public final class PullDownHook implements IXposedHookLoadPackage {
                 // is visible, so returning to notifications uses fresh rules.
                 if (panel != root || shadeHost == null) return;
                 activeFavorites = FavoritesClient.read(context);
-                if (notificationPageActive()) {
-                    root.setFavorites(activeFavorites);
-                }
+                root.setOrganizationMode(NotificationShadeModeClient.read(context));
+                root.setFavorites(activeFavorites);
                 FavoritesClient.reportObserved(context, activeFavorites,
                         SystemUiNotificationObserver.itemsSnapshot());
             }

@@ -147,6 +147,7 @@ final class TwoColumnPanel extends FrameLayout {
     private List<String> renderedPackages = Collections.emptyList();
     private List<NotificationItem> notifications = Collections.emptyList();
     private List<NotificationItem> visibleNotifications = Collections.emptyList();
+    private String organizationMode = NotificationShadeModePolicy.APPS;
     private FavoritesRules favorites = new FavoritesRules();
     private List<NotificationItem> renderedCards = Collections.emptyList();
     private String renderedCardPackage;
@@ -960,6 +961,14 @@ final class TwoColumnPanel extends FrameLayout {
         updateVisibleNotifications();
     }
 
+    /** Switch grouping without replacing the native shade or its navigation owner. */
+    void setOrganizationMode(String requested) {
+        String next = NotificationShadeModePolicy.normalized(requested);
+        if (next.equals(organizationMode)) return;
+        organizationMode = next;
+        updateVisibleNotifications();
+    }
+
     /** Update the two columns from the same notification snapshot. */
     void setNotifications(List<NotificationItem> items) {
         notifications = items == null ? Collections.emptyList()
@@ -977,8 +986,8 @@ final class TwoColumnPanel extends FrameLayout {
                 SystemUiNotificationObserver.notificationKeysForMediaTokens(representedTokens);
         visibleNotifications = NotificationSelectionPolicy.withoutRepresentedSilentMedia(
                 notifications, representedKeys);
-        setNotificationPackages(NotificationCategoryPolicy.categoriesFor(
-                visibleNotifications, favorites.enabled));
+        setNotificationPackages(NotificationShadeModePolicy.categoriesFor(
+                visibleNotifications, favorites.enabled, organizationMode));
         renderSelectedNotifications();
     }
 
@@ -1024,6 +1033,7 @@ final class TwoColumnPanel extends FrameLayout {
             final String pkg = distinct.get(i);
             final boolean silentCategory = NotificationCategoryPolicy.isSilent(pkg);
             final boolean favoritesCategory = NotificationCategoryPolicy.isFavorites(pkg);
+            final boolean typeCategory = NotificationTypePolicy.isType(pkg);
             if (silentCategory) {
                 // Remaining height pushes Silent to the bottom; excess app rows scroll.
                 View spacer = new View(getContext());
@@ -1057,6 +1067,9 @@ final class TwoColumnPanel extends FrameLayout {
                 drawable = getContext().getDrawable(android.R.drawable.btn_star_big_on);
                 if (drawable == null) drawable = pm.getDefaultActivityIcon();
                 label = "Favorite notifications";
+            } else if (typeCategory) {
+                drawable = new NotificationTypeIconDrawable(pkg);
+                label = NotificationTypePolicy.label(pkg) + " notifications";
             } else {
                 try {
                     drawable = pm.getApplicationIcon(pkg);
@@ -1069,7 +1082,8 @@ final class TwoColumnPanel extends FrameLayout {
             row.setContentDescription(label);
             iconLabels.add(label);
             icon.setImageDrawable(drawable);
-            if (silentCategory || favoritesCategory) icon.setColorFilter(palette.headingText);
+            if (silentCategory || favoritesCategory || typeCategory)
+                icon.setColorFilter(palette.headingText);
             icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
             icon.setFocusable(false);
             icon.setClickable(false);
@@ -1089,6 +1103,7 @@ final class TwoColumnPanel extends FrameLayout {
 
             TextView count = new TextView(getContext());
             count.setTextSize(11);
+            count.setMinWidth(dp(16));
             count.setTypeface(null, android.graphics.Typeface.BOLD);
             count.setTextColor(palette.headingText);
             count.setGravity(Gravity.CENTER);
@@ -1126,7 +1141,9 @@ final class TwoColumnPanel extends FrameLayout {
             int count = NotificationCategoryCounts.countFor(
                     visibleNotifications, favorites, renderedPackages.get(i));
             TextView label = iconCounts.get(i);
-            String value = Integer.toString(count);
+            // Keep the numeric slot reserved to avoid shifting persistent icons.
+            String value = NotificationTypePolicy.isType(renderedPackages.get(i))
+                    && count == 0 ? "" : Integer.toString(count);
             if (!TextUtils.equals(label.getText(), value)) label.setText(value);
             iconRows.get(i).setContentDescription(iconLabels.get(i) + ", " + count
                     + (count == 1 ? " notification" : " notifications"));
@@ -1159,11 +1176,8 @@ final class TwoColumnPanel extends FrameLayout {
     private void renderSelectedNotifications() {
         boolean silentCategory = NotificationCategoryPolicy.isSilent(selectedPackage);
         boolean favoritesCategory = NotificationCategoryPolicy.isFavorites(selectedPackage);
-        List<NotificationItem> selected = favoritesCategory
-                ? favorites.filter(visibleNotifications)
-                : silentCategory
-                ? NotificationSelectionPolicy.forSilent(visibleNotifications)
-                : NotificationSelectionPolicy.forPackage(visibleNotifications, selectedPackage);
+        List<NotificationItem> selected = NotificationShadeModePolicy.select(
+                visibleNotifications, favorites, selectedPackage);
         if (Objects.equals(renderedCardPackage, selectedPackage)
                 && renderedCards.equals(selected)) return;
 
@@ -1195,9 +1209,12 @@ final class TwoColumnPanel extends FrameLayout {
             return;
         }
 
+        boolean typeCategory = NotificationTypePolicy.isType(selectedPackage);
         CharSequence appName = favoritesCategory ? "Favorites"
-                : silentCategory ? "Silent" : selectedPackage;
-        if (!silentCategory && !favoritesCategory) {
+                : silentCategory ? "Silent"
+                : typeCategory ? NotificationTypePolicy.label(selectedPackage)
+                : selectedPackage;
+        if (!silentCategory && !favoritesCategory && !typeCategory) {
             try {
                 PackageManager pm = getContext().getPackageManager();
                 appName = pm.getApplicationLabel(pm.getApplicationInfo(selectedPackage, 0));
@@ -1207,6 +1224,7 @@ final class TwoColumnPanel extends FrameLayout {
 
         if (selected.isEmpty()) {
             addPlaceholder(favoritesCategory ? "No notifications match Favorites"
+                    : typeCategory ? "No notifications in this category"
                     : "No notifications for this app");
         } else {
             Long previousDay = null;
@@ -1811,7 +1829,8 @@ final class TwoColumnPanel extends FrameLayout {
             }
             iconCounts.get(i).setTextColor(selected ? Color.WHITE : palette.headingText);
             if (NotificationCategoryPolicy.isSilent(renderedPackages.get(i))
-                    || NotificationCategoryPolicy.isFavorites(renderedPackages.get(i))) {
+                    || NotificationCategoryPolicy.isFavorites(renderedPackages.get(i))
+                    || NotificationTypePolicy.isType(renderedPackages.get(i))) {
                 iconImages.get(i).setColorFilter(
                         selected ? Color.WHITE : palette.headingText);
             }

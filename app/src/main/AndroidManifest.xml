@@ -12,7 +12,7 @@
         <meta-data android:name="xposedminversion" android:value="82" />
 
         <activity android:name="dev.q25.bb7pulldown.FavoritesSettingsActivity"
-            android:label="BB UI Favorites" android:exported="true">
+            android:label="BB UI Settings" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
