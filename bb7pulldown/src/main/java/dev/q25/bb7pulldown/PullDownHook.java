@@ -98,6 +98,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
     // Same presentation class used by the fully opened shade; no page content
     // is attached until the user activates a header selection.
     private static ShadeDateHeader standaloneHeader;
+    private static boolean selectorTouchInProgress;
     private static BroadcastReceiver focusReceiver;
     private static Context focusReceiverContext;
 
@@ -114,7 +115,12 @@ public final class PullDownHook implements IXposedHookLoadPackage {
                     UnifiedShadeHost current = shadeHost;
                     if (current != null) current.updateHeaderFocus(zone);
                     ShadeDateHeader selector = standaloneHeader;
-                    if (selector != null) selector.setFocusedZone(zone);
+                    // Enter causes zone NONE before calling onShowPage. Keep
+                    // the original selected highlight throughout the handoff.
+                    if (selector != null && (zone != ShadeStatusNavigation.NONE
+                            || shadeHost != null && !openingOrClosing)) {
+                        selector.setFocusedZone(zone);
+                    }
                     updateStatusAppearance();
                 }
 
@@ -279,6 +285,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
     }
 
     private static void dismissStatusFocus() {
+        selectorTouchInProgress = false;
         NAVIGATION.leaveStandaloneStatusBar();
         unregisterSelectorScreenOffReceiver();
         View root = focusWindow;
@@ -298,7 +305,8 @@ public final class PullDownHook implements IXposedHookLoadPackage {
         BroadcastReceiver receiver = new BroadcastReceiver() {
             @Override public void onReceive(Context c, Intent intent) {
                 if (Intent.ACTION_SCREEN_OFF.equals(intent.getAction())) {
-                    dismissStatusFocus();
+                    if (shadeHost != null) dismissShadeImmediately();
+                    else dismissStatusFocus();
                 }
             }
         };
@@ -324,6 +332,60 @@ public final class PullDownHook implements IXposedHookLoadPackage {
         }
     }
 
+    /** Keep the selector's exact View/window while keyboard focus moves to
+     * the expanded native shade. Only window input flags are changed. */
+    private static void updateSelectorWindowInput(boolean headerVisible) {
+        View selector = focusWindow;
+        WindowManager manager = focusManager;
+        if (selector == null || manager == null || shadeHost == null) return;
+        if (!(selector.getLayoutParams() instanceof WindowManager.LayoutParams)) return;
+        WindowManager.LayoutParams attrs =
+                (WindowManager.LayoutParams) selector.getLayoutParams();
+        int flags = attrs.flags | WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE;
+        if (headerVisible) flags &= ~WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
+        else flags |= WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
+        if (attrs.flags == flags) return;
+        attrs.flags = flags;
+        try {
+            manager.updateViewLayout(selector, attrs);
+        } catch (RuntimeException error) {
+            Log.e(TAG, "Unable to move keyboard focus from selector to shade", error);
+        }
+    }
+
+    /** Header touch forwarding for a native shade window layered over the
+     * selector's unchanged Surface. Never synthesize a second View. */
+    static boolean routeExternalHeaderTouch(MotionEvent event) {
+        ShadeDateHeader header = standaloneHeader;
+        if (header == null || shadeHost == null || !header.isShown()) {
+            selectorTouchInProgress = false;
+            return false;
+        }
+        int action = event.getActionMasked();
+        int[] origin = new int[2];
+        header.getLocationOnScreen(origin);
+        if (action == MotionEvent.ACTION_DOWN) {
+            float x = event.getRawX();
+            float y = event.getRawY();
+            selectorTouchInProgress = x >= origin[0] && x < origin[0] + header.getWidth()
+                    && y >= origin[1] && y < origin[1] + header.getHeight();
+        }
+        if (!selectorTouchInProgress) return false;
+        MotionEvent translated = MotionEvent.obtain(event);
+        try {
+            translated.setLocation(event.getRawX() - origin[0],
+                    event.getRawY() - origin[1]);
+            header.dispatchTouchEvent(translated);
+        } finally {
+            translated.recycle();
+        }
+        if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL
+                || action == MotionEvent.ACTION_POINTER_DOWN) {
+            selectorTouchInProgress = false;
+        }
+        return true;
+    }
+
     private static void showStatusFocus(Context context) {
         if (shadeHost != null || openingOrClosing
                 || focusWindow != null || locked(context)) return;
@@ -346,22 +408,39 @@ public final class PullDownHook implements IXposedHookLoadPackage {
         root.addView(header, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, headerHeight));
         final float[] selectorTouchDown = new float[2];
+        final boolean[] selectorGestureMoved = new boolean[1];
+        final boolean[] selectorSwipeClosed = new boolean[1];
         header.setOnTouchListener((view, event) -> {
-            if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
+            int action = event.getActionMasked();
+            if (action == MotionEvent.ACTION_DOWN) {
                 selectorTouchDown[0] = event.getRawX();
                 selectorTouchDown[1] = event.getRawY();
+                selectorGestureMoved[0] = false;
+                selectorSwipeClosed[0] = false;
                 return true;
             }
-            if (event.getActionMasked() == MotionEvent.ACTION_UP
-                    && focusWindow == root && !locked(context)
-                    && Math.abs(event.getRawX() - selectorTouchDown[0]) < dp(context, 12)
-                    && Math.abs(event.getRawY() - selectorTouchDown[1]) < dp(context, 12)) {
+            if (action == MotionEvent.ACTION_MOVE) {
+                if (Math.abs(event.getRawX() - selectorTouchDown[0]) >= dp(context, 12)
+                        || Math.abs(event.getRawY() - selectorTouchDown[1]) >= dp(context, 12)) {
+                    selectorGestureMoved[0] = true;
+                }
+                if (shadeHost != null && !selectorSwipeClosed[0]
+                        && selectorTouchDown[1] - event.getRawY() >= dp(context, 65)) {
+                    selectorSwipeClosed[0] = true;
+                    dismissShade();
+                }
+                return true;
+            }
+            if (action == MotionEvent.ACTION_UP && focusWindow == root
+                    && !locked(context) && !selectorGestureMoved[0]
+                    && !selectorSwipeClosed[0]) {
                 int zone = ShadeHeaderSegmentPolicy.zoneAt(event.getX(), view.getWidth());
                 if (zone != ShadeStatusNavigation.NONE) {
-                    NAVIGATION.selectStandaloneHeaderZone(zone);
-                    // Same activation path as trackpad Enter; never bypass
-                    // the shared controller's page transition or cleanup.
-                    NAVIGATION.handleKey(KeyEvent.KEYCODE_ENTER, KeyEvent.ACTION_UP);
+                    if (shadeHost != null) switchShadePage(zone);
+                    else {
+                        NAVIGATION.selectStandaloneHeaderZone(zone);
+                        NAVIGATION.handleKey(KeyEvent.KEYCODE_ENTER, KeyEvent.ACTION_UP);
+                    }
                 }
             }
             return true;
