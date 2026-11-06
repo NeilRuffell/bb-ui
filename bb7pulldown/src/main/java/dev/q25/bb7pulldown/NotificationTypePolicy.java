@@ -71,10 +71,15 @@ final class NotificationTypePolicy {
     static List<NotificationItem> filter(List<NotificationItem> items, String category) {
         if (!isType(category) || items == null || items.isEmpty())
             return Collections.emptyList();
+        // A group summary can have a different category than its children.
+        // Remove redundant summaries across all types before splitting panes,
+        // otherwise an unclassified summary would reappear under Other.
+        List<NotificationItem> entries =
+                NotificationSelectionPolicy.withoutRedundantGroupSummaries(items);
         List<NotificationItem> matches = new ArrayList<>();
-        for (NotificationItem item : items) {
+        for (NotificationItem item : entries) {
             if (item != null && category.equals(typeOf(item))) matches.add(item);
         }
-        return NotificationSelectionPolicy.withoutRedundantGroupSummaries(matches);
+        return Collections.unmodifiableList(matches);
     }
 }

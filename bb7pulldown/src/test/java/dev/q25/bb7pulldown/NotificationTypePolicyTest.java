@@ -91,6 +91,18 @@ public class NotificationTypePolicyTest {
                 Collections.singletonList(all.get(0)), NotificationTypePolicy.MESSAGES).size());
     }
 
+    @Test public void crossTypeSummaryDoesNotLeakIntoOther() {
+        List<NotificationItem> all = Arrays.asList(
+                item("summary", "chat.app", "", "", "group", true, false,
+                        Collections.emptyList()),
+                item("child", "chat.app", "msg", "", "group", false, false,
+                        Collections.emptyList()));
+        assertEquals(0, NotificationTypePolicy.filter(
+                all, NotificationTypePolicy.OTHER).size());
+        assertEquals(1, NotificationTypePolicy.filter(
+                all, NotificationTypePolicy.MESSAGES).size());
+    }
+
     @Test public void silentNotificationsRetainTheirContentType() {
         NotificationItem silentMessage = item("s", "chat.app", "msg", "",
                 null, false, true, Collections.emptyList());
