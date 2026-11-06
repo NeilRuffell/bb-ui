@@ -141,6 +141,9 @@ final class TwoColumnPanel extends FrameLayout {
     private final ScrollView notificationScroller;
     private final TextView selectedAppHeading;
     private final List<FrameLayout> iconRows = new ArrayList<>();
+    private final List<ImageView> iconImages = new ArrayList<>();
+    private final List<TextView> iconCounts = new ArrayList<>();
+    private final List<CharSequence> iconLabels = new ArrayList<>();
     private List<String> renderedPackages = Collections.emptyList();
     private List<NotificationItem> notifications = Collections.emptyList();
     private List<NotificationItem> visibleNotifications = Collections.emptyList();
@@ -985,7 +988,11 @@ final class TwoColumnPanel extends FrameLayout {
      */
     void setNotificationPackages(List<String> packages) {
         List<String> distinct = NotificationAppIndex.uniquePackages(packages);
-        if (renderedPackages.equals(distinct)) return;
+        if (renderedPackages.equals(distinct)) {
+            // Counts can change without adding or removing an app.
+            updateNotificationCounts();
+            return;
+        }
 
         int previousIndex = renderedPackages.indexOf(selectedPackage);
         String previousPackage = selectedPackage;
@@ -1009,6 +1016,9 @@ final class TwoColumnPanel extends FrameLayout {
 
         iconList.removeAllViews();
         iconRows.clear();
+        iconImages.clear();
+        iconCounts.clear();
+        iconLabels.clear();
         PackageManager pm = getContext().getPackageManager();
         for (int i = 0; i < distinct.size(); i++) {
             final String pkg = distinct.get(i);
@@ -1057,20 +1067,49 @@ final class TwoColumnPanel extends FrameLayout {
                 }
             }
             row.setContentDescription(label);
+            iconLabels.add(label);
             icon.setImageDrawable(drawable);
             if (silentCategory || favoritesCategory) icon.setColorFilter(palette.headingText);
             icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
             icon.setFocusable(false);
             icon.setClickable(false);
             icon.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-            icon.setPadding(dp(5), dp(8), dp(5), dp(8));
-            row.addView(icon, new FrameLayout.LayoutParams(
+            // Keep one focusable/clickable row. Both children are display-only.
+            LinearLayout contents = new LinearLayout(getContext());
+            contents.setOrientation(LinearLayout.HORIZONTAL);
+            contents.setGravity(Gravity.CENTER_VERTICAL);
+            contents.setBaselineAligned(false);
+            contents.setFocusable(false);
+            contents.setClickable(false);
+            contents.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+
+            icon.setPadding(dp(3), dp(8), dp(1), dp(8));
+            contents.addView(icon, new LinearLayout.LayoutParams(
+                    0, LayoutParams.MATCH_PARENT, 1f));
+
+            TextView count = new TextView(getContext());
+            count.setTextSize(11);
+            count.setTypeface(null, android.graphics.Typeface.BOLD);
+            count.setTextColor(palette.headingText);
+            count.setGravity(Gravity.CENTER);
+            count.setIncludeFontPadding(false);
+            count.setSingleLine(true);
+            count.setPadding(0, 0, dp(3), 0);
+            count.setFocusable(false);
+            count.setClickable(false);
+            count.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+            contents.addView(count, new LinearLayout.LayoutParams(
+                    LayoutParams.WRAP_CONTENT, LayoutParams.MATCH_PARENT));
+            row.addView(contents, new FrameLayout.LayoutParams(
                     LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
             iconList.addView(row, new LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT, dp(56)));
             iconRows.add(row);
+            iconImages.add(icon);
+            iconCounts.add(count);
         }
 
+        updateNotificationCounts();
         updateSelectedHighlight();
         if ((hadRowFocus && !notificationPaneActive) || previousAppVanished) {
             // Removing a focused row may move focus to the root. Restore it
@@ -1079,6 +1118,19 @@ final class TwoColumnPanel extends FrameLayout {
         }
         Log.i(TAG, "App icon selector updated: count=" + distinct.size()
                 + " selectedIndex=" + newIndex);
+    }
+
+    /** Update count text in-place so incoming notifications cannot reset trackpad focus. */
+    private void updateNotificationCounts() {
+        for (int i = 0; i < renderedPackages.size(); i++) {
+            int count = NotificationCategoryCounts.countFor(
+                    visibleNotifications, favorites, renderedPackages.get(i));
+            TextView label = iconCounts.get(i);
+            String value = Integer.toString(count);
+            if (!TextUtils.equals(label.getText(), value)) label.setText(value);
+            iconRows.get(i).setContentDescription(iconLabels.get(i) + ", " + count
+                    + (count == 1 ? " notification" : " notifications"));
+        }
     }
 
     /** Called once the pull-down entrance animation finishes. */
@@ -1757,10 +1809,10 @@ final class TwoColumnPanel extends FrameLayout {
             } else {
                 row.setBackground(null);
             }
-            if ((NotificationCategoryPolicy.isSilent(renderedPackages.get(i))
-                    || NotificationCategoryPolicy.isFavorites(renderedPackages.get(i)))
-                    && row.getChildAt(0) instanceof ImageView) {
-                ((ImageView) row.getChildAt(0)).setColorFilter(
+            iconCounts.get(i).setTextColor(selected ? Color.WHITE : palette.headingText);
+            if (NotificationCategoryPolicy.isSilent(renderedPackages.get(i))
+                    || NotificationCategoryPolicy.isFavorites(renderedPackages.get(i))) {
+                iconImages.get(i).setColorFilter(
                         selected ? Color.WHITE : palette.headingText);
             }
         }
