@@ -167,7 +167,7 @@ final class SettingsPopupThemeHook {
                         XposedHelpers.callMethod(
                                 param.thisObject, "setBackgroundDrawable", surface);
                         XposedHelpers.callMethod(param.thisObject,
-                                "setListSelector", BB7Theme.selected(0f, lineWidth));
+                                "setListSelector", BB7Theme.selected(context, 0f, lineWidth));
                         Log.i(TAG, label + " native menu styled");
                     } catch (Throwable error) {
                         Log.w(TAG, label + " native menu keeps original appearance", error);
