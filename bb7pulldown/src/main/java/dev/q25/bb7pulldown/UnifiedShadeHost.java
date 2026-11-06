@@ -2,14 +2,20 @@ package dev.q25.bb7pulldown;
 
 import dev.q25.trackpad.theme.BB7Theme;
 
+import android.animation.Animator;
+import android.animation.AnimatorListenerAdapter;
+import android.animation.ValueAnimator;
 import android.content.Context;
 import android.graphics.Color;
+import android.graphics.Rect;
 import android.graphics.drawable.GradientDrawable;
 import android.view.Gravity;
 import android.widget.TextView;
 import android.view.View;
 import android.view.MotionEvent;
 import android.view.KeyEvent;
+import android.view.ViewParent;
+import android.view.animation.DecelerateInterpolator;
 import java.util.function.IntConsumer;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
@@ -24,6 +30,9 @@ final class UnifiedShadeHost extends FrameLayout {
     static final int QUICK_SETTINGS = ShadeStatusNavigation.QUICK_SETTINGS;
 
     private final ShadeDateHeader dateHeader;
+    private final FrameLayout contentViewport;
+    private ValueAnimator contentReveal;
+    private boolean selectorRevealPrepared;
     private final LinearLayout mediaModeHeader;
     private final TextView mediaShuffle;
     private final TextView mediaRepeat;
@@ -41,7 +50,8 @@ final class UnifiedShadeHost extends FrameLayout {
 
     UnifiedShadeHost(Context context, TwoColumnPanel notifications,
             BB6NativeQsPanel connections, ShadeUiController navigation,
-            int initialPage, Runnable closeShade, IntConsumer onHeaderPageSelected) {
+            int initialPage, Runnable closeShade, IntConsumer onHeaderPageSelected,
+            ShadeDateHeader transferredHeader) {
         super(context);
         this.notifications = notifications;
         this.connections = connections;
@@ -54,7 +64,13 @@ final class UnifiedShadeHost extends FrameLayout {
         addView(layout, new FrameLayout.LayoutParams(
                 LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
 
-        dateHeader = new ShadeDateHeader(context);
+        // The selector's *existing* View is reparented into this shade.
+        // Fresh headers are created only for ordinary gesture-based openings.
+        dateHeader = transferredHeader != null
+                ? transferredHeader : new ShadeDateHeader(context);
+        if (dateHeader.getParent() != null) {
+            throw new IllegalStateException("Selector header must be detached before transfer");
+        }
         // Previously the header lived inside each page and inherited its
         // swipe-up dismissal. Preserve that gesture at the shared host level.
         dateHeader.setOnTouchListener((view, event) -> {
@@ -131,9 +147,16 @@ final class UnifiedShadeHost extends FrameLayout {
         mediaModeHeader.addView(mediaRepeat, new LinearLayout.LayoutParams(
                 LayoutParams.WRAP_CONTENT, dp(28)));
 
-        FrameLayout pages = new FrameLayout(context);
-        layout.addView(pages, new LinearLayout.LayoutParams(
+        // Only the content viewport moves/reveals on selector confirmation.
+        // The header sits above it as an unaffected sibling.
+        contentViewport = new FrameLayout(context);
+        contentViewport.setClipChildren(true);
+        contentViewport.setClipToPadding(true);
+        layout.addView(contentViewport, new LinearLayout.LayoutParams(
                 LayoutParams.MATCH_PARENT, 0, 1f));
+        FrameLayout pages = new FrameLayout(context);
+        contentViewport.addView(pages, new FrameLayout.LayoutParams(
+                LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
         pages.addView(notifications, new FrameLayout.LayoutParams(
                 LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
         pages.addView(connections, new FrameLayout.LayoutParams(
@@ -144,6 +167,68 @@ final class UnifiedShadeHost extends FrameLayout {
         notifications.setMediaHeaderListener(this::onMediaHeader);
         // Do not request focus until the one-time entrance animation finishes.
         setPage(initialPage);
+    }
+
+    /**
+     * Selection from the compact header uses the same header instance.
+     * Reveal just the area below it, leaving its position fixed throughout.
+     * Ordinary status-bar touch swipes continue using the native window slide.
+     */
+    void prepareSelectorReveal() {
+        selectorRevealPrepared = true;
+        contentViewport.setClipBounds(new Rect(0, 0, 0, 0));
+        contentViewport.setImportantForAccessibility(
+                View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
+    }
+
+    void animateSelectorReveal(Runnable completed) {
+        if (!selectorRevealPrepared) {
+            completed.run();
+            return;
+        }
+        contentViewport.post(() -> {
+            if (!selectorRevealPrepared || !isAttachedToWindow()) return;
+            int width = contentViewport.getWidth();
+            int height = contentViewport.getHeight();
+            if (width <= 0 || height <= 0) {
+                finishSelectorReveal();
+                completed.run();
+                return;
+            }
+            ValueAnimator animation = ValueAnimator.ofInt(0, height);
+            contentReveal = animation;
+            animation.setDuration(220);
+            animation.setInterpolator(new DecelerateInterpolator(1.4f));
+            animation.addUpdateListener(frame -> contentViewport.setClipBounds(
+                    new Rect(0, 0, width, (Integer) frame.getAnimatedValue())));
+            animation.addListener(new AnimatorListenerAdapter() {
+                @Override public void onAnimationEnd(Animator finished) {
+                    if (contentReveal != finished) return;
+                    finishSelectorReveal();
+                    completed.run();
+                }
+            });
+            animation.start();
+        });
+    }
+
+    void finishSelectorReveal() {
+        selectorRevealPrepared = false;
+        ValueAnimator animation = contentReveal;
+        contentReveal = null;
+        if (animation != null) animation.cancel();
+        contentViewport.setClipBounds(null);
+        contentViewport.setImportantForAccessibility(
+                View.IMPORTANT_FOR_ACCESSIBILITY_AUTO);
+    }
+
+    /** Used only to recover the same header if native mounting fails. */
+    ShadeDateHeader detachTransferredHeader() {
+        ViewParent parent = dateHeader.getParent();
+        if (parent instanceof android.view.ViewGroup) {
+            ((android.view.ViewGroup) parent).removeView(dateHeader);
+        }
+        return dateHeader;
     }
 
     void setPage(int next) {
