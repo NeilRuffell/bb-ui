@@ -256,13 +256,13 @@ final class NativeStatusBarHubIcons {
             render(counts);
             renderedCounts = counts;
         }
-        refreshTint();
         if (!nativeHiddenByHub) {
             originalVisibility = nativeContainer.getVisibility();
             nativeContainer.setVisibility(View.GONE);
             nativeHiddenByHub = true;
         }
         strip.setVisibility(View.VISIBLE);
+        refreshTint();
     }
 
     /** Return null on an unrecognized native view to trigger the stock fallback. */

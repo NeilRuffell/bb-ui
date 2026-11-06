@@ -1,0 +1,85 @@
+# Native status bar — Hub category icons and counts
+
+BBUI can group status-bar notification indicators by native Android category
+without adding a second status bar or altering notification delivery.
+
+## User-visible mode
+
+- **By application** (default): existing app notification icons and existing
+  Q25 full-colour icon treatment remain completely unchanged.
+- **By notification type (Hub)**: the actual status bar displays one icon per
+  currently present native notification type, with the number before the icon
+  as in BlackBerry OS. Categories with no eligible notifications are omitted.
+  Supported categories are Messages, Email, Calls (including missed calls and
+  voicemail), Calendar, Reminders, Alarms, Other.
+- Switching modes in **BB UI Settings** takes effect through the existing
+  app-owned ContentProvider and its live mode-change observer.
+
+The status bar intentionally excludes the shade-only Favorites pseudo-category:
+Favorites matches an overlapping subset, and showing it would duplicate
+status-bar counts. Silent status-bar notifications are included only if native
+SystemUI already gave them a normal status-bar icon.
+
+## Ownership and safety
+
+- `NativeStatusBarHubIcons` targets only the real SystemUI
+  `NotificationIconContainer` underneath `notification_icon_area`.
+- The real native icon container remains attached; its notification-entry
+  lifecycle, filtering, ordering, privacy checks and companion AOD/shelf views
+  are not replaced or re-parented.
+- The category strip is a normal display-only child of the EXISTING status-bar
+  notification host, not an overlay window, foreground service, or independent
+  listener. App mode restores the original container.
+- Native status icon view membership is the eligibility source. Only icons
+  admitted by the native status-bar binder may contribute to counts. The
+  existing `NotificationTypePolicy` supplies type classification.
+- Group summaries are deduplicated across types before counting. The
+  displayed number refers to notification entries, not unread messages
+  within an application.
+- If the required Q25 view classes, notification references, or parent area
+  cannot be resolved, the hook leaves stock status icons visible.
+- Notification content, PendingIntents, dismissals, ranking, and original
+  notifications are never modified. All display updates run on SystemUI's
+  main thread.
+
+This development-stage view adapter is separate from the future direct
+LineageOS SystemUI implementation. The ROM port should integrate category
+grouping at the native icon-viewmodel/container layer.
+
+## Build and Q25 validation
+
+```sh
+cd ~/Projects/bb-ui
+git fetch origin
+git switch feat/statusbar-notification-categories || \
+  git switch --track origin/feat/statusbar-notification-categories
+git pull --ff-only
+gradle :app:testDebugUnitTest :app:assembleDebug &&
+adb -s 202512003630 install -r app/build/outputs/apk/debug/app-debug.apk &&
+adb -s 202512003630 shell am crash com.android.systemui
+```
+
+Select **By notification type (Hub)** in **BB UI Settings**.
+
+Test one/multiple app notifications of the same category, new arrivals and
+removals, group summaries, unclassified entries, mode switching while
+the shade is open and closed, SystemUI restart, screen lock/unlock, and
+status bar appearance on light/dark wallpaper. Verify native icon overflow
+and correct width allocation on the Q25 hardware.
+
+```sh
+adb -s 202512003630 logcat -d -s \
+  'BB7-StatusHub:V' 'BB7-StatusIcons:V' 'AndroidRuntime:E' '*:S' | tail -120
+```
+
+## Independent emergency rollback
+
+```sh
+adb -s 202512003630 shell setprop debug.bb7pulldown.hub_status_icons.enabled false
+adb -s 202512003630 shell am crash com.android.systemui
+```
+
+This restores the existing per-app native status icon behavior and does
+not disable the BBUI shade, category mode, or full-colour app icon hook.
+The property is checked when SystemUI installs the hook, so a SystemUI
+process restart is necessary to change its value.

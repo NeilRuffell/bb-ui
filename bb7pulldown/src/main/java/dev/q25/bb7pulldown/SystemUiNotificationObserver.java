@@ -379,6 +379,7 @@ final class SystemUiNotificationObserver {
         }
         Log.i(TAG, "Notification summaries updated: entries=" + items.size());
         PullDownHook.onNotificationItemsUpdated();
+        NativeStatusBarHubIcons.onNotificationsUpdated();
         BB6LockScreenHook.onNotificationsUpdated();
     }
 
