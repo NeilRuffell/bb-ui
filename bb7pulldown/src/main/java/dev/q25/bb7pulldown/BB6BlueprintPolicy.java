@@ -12,8 +12,7 @@ final class BB6BlueprintPolicy {
                 || "SmartspaceSection".equals(simpleName)
                 || "KeyguardSliceViewSection".equals(simpleName)
                 || "AodNotificationIconsSection".equals(simpleName)
-                || "AodPromotedNotificationSection".equals(simpleName)
-                || "DefaultNotificationStackScrollLayoutSection".equals(simpleName);
+                || "AodPromotedNotificationSection".equals(simpleName);
     }
 
     static boolean enabledForState(boolean locked, boolean interactive,

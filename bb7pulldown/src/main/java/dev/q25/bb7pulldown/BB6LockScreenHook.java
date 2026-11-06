@@ -520,7 +520,8 @@ public final class BB6LockScreenHook implements IXposedHookLoadPackage {
      */
     static FrameLayout interactiveWindow() {
         FrameLayout root = rootRef.get();
-        return root != null && isInteractiveBb6LockscreenActive() ? root : null;
+        return root != null && BB6BlueprintHook.isApplied()
+                && isInteractiveBb6LockscreenActive() ? root : null;
     }
 
     /**
