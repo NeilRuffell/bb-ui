@@ -63,6 +63,9 @@ final class UnifiedShadeHost extends FrameLayout {
         this.closeShade = closeShade;
         this.onHeaderPageSelected = onHeaderPageSelected;
         this.externalHeader = existingSelectorHeader != null;
+        // Enter already selected this exact visible header. The constructor
+        // must NOT clear its highlight while building the shade's content.
+        selectorHandoffActive = externalHeader;
         this.onExternalHeaderVisibility = onExternalHeaderVisibility;
 
         LinearLayout layout = new LinearLayout(context);
