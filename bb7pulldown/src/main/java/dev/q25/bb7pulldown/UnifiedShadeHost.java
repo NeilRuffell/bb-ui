@@ -14,7 +14,6 @@ import android.widget.TextView;
 import android.view.View;
 import android.view.MotionEvent;
 import android.view.KeyEvent;
-import android.view.ViewParent;
 import android.view.animation.DecelerateInterpolator;
 import java.util.function.IntConsumer;
 import android.widget.FrameLayout;
@@ -30,6 +29,9 @@ final class UnifiedShadeHost extends FrameLayout {
     static final int QUICK_SETTINGS = ShadeStatusNavigation.QUICK_SETTINGS;
 
     private final ShadeDateHeader dateHeader;
+    private final View headerPlaceholder;
+    private final boolean externalHeader;
+    private final java.util.function.Consumer<Boolean> onExternalHeaderVisibility;
     private final FrameLayout contentViewport;
     private ValueAnimator contentReveal;
     private boolean selectorRevealPrepared;
@@ -52,29 +54,32 @@ final class UnifiedShadeHost extends FrameLayout {
     UnifiedShadeHost(Context context, TwoColumnPanel notifications,
             BB6NativeQsPanel connections, ShadeUiController navigation,
             int initialPage, Runnable closeShade, IntConsumer onHeaderPageSelected,
-            ShadeDateHeader transferredHeader) {
+            ShadeDateHeader existingSelectorHeader,
+            java.util.function.Consumer<Boolean> onExternalHeaderVisibility) {
         super(context);
         this.notifications = notifications;
         this.connections = connections;
         this.navigation = navigation;
         this.closeShade = closeShade;
         this.onHeaderPageSelected = onHeaderPageSelected;
+        this.externalHeader = existingSelectorHeader != null;
+        this.onExternalHeaderVisibility = onExternalHeaderVisibility;
 
         LinearLayout layout = new LinearLayout(context);
         layout.setOrientation(LinearLayout.VERTICAL);
         addView(layout, new FrameLayout.LayoutParams(
                 LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
 
-        // The selector's *existing* View is reparented into this shade.
-        // Fresh headers are created only for ordinary gesture-based openings.
-        dateHeader = transferredHeader != null
-                ? transferredHeader : new ShadeDateHeader(context);
-        if (dateHeader.getParent() != null) {
-            throw new IllegalStateException("Selector header must be detached before transfer");
-        }
-        // Previously the header lived inside each page and inherited its
-        // swipe-up dismissal. Preserve that gesture at the shared host level.
-        dateHeader.setOnTouchListener((view, event) -> {
+        // The compact selector keeps the ORIGINAL header in its ORIGINAL
+        // WindowManager window throughout the expanded shade lifetime.
+        // The full shade reserves matching geometry rather than reparenting,
+        // removing, recreating or redrawing that visible view.
+        dateHeader = existingSelectorHeader != null
+                ? existingSelectorHeader : new ShadeDateHeader(context);
+        headerPlaceholder = externalHeader ? new View(context) : null;
+        // Normal gesture-open shade owns its own header touch routing. The
+        // already-mounted selector retains its existing touch handler.
+        if (!externalHeader) dateHeader.setOnTouchListener((view, event) -> {
             switch (event.getActionMasked()) {
                 case MotionEvent.ACTION_DOWN:
                     headerTouchDownY = event.getRawY();
@@ -109,7 +114,8 @@ final class UnifiedShadeHost extends FrameLayout {
                     return true;
             }
         });
-        layout.addView(dateHeader, ShadeDateHeader.layoutParams(context));
+        layout.addView(externalHeader ? headerPlaceholder : dateHeader,
+                ShadeDateHeader.layoutParams(context));
 
         // BBOS6 media header replaces the taller date bar only while expanded.
         // This host owns both headers; no stock SystemUI view is modified.
@@ -236,15 +242,6 @@ final class UnifiedShadeHost extends FrameLayout {
         updateHeaderVisibility();
     }
 
-    /** Used only to recover the same header if native mounting fails. */
-    ShadeDateHeader detachTransferredHeader() {
-        ViewParent parent = dateHeader.getParent();
-        if (parent instanceof android.view.ViewGroup) {
-            ((android.view.ViewGroup) parent).removeView(dateHeader);
-        }
-        return dateHeader;
-    }
-
     void setPage(int next) {
         if (next != NOTIFICATIONS && next != QUICK_SETTINGS) {
             throw new IllegalArgumentException("Unknown shade page");
@@ -324,7 +321,15 @@ final class UnifiedShadeHost extends FrameLayout {
         boolean showMedia = mediaExpanded && displayedPage == NOTIFICATIONS
                 && !navigation.isStatusBarFocused()
                 && !selectorRevealPrepared && !selectorHandoffActive;
-        dateHeader.setVisibility(showMedia ? View.GONE : View.VISIBLE);
+        if (externalHeader) {
+            headerPlaceholder.setVisibility(showMedia ? View.GONE : View.VISIBLE);
+            dateHeader.setVisibility(showMedia ? View.GONE : View.VISIBLE);
+            if (onExternalHeaderVisibility != null) {
+                onExternalHeaderVisibility.accept(!showMedia);
+            }
+        } else {
+            dateHeader.setVisibility(showMedia ? View.GONE : View.VISIBLE);
+        }
         mediaModeHeader.setVisibility(showMedia ? View.VISIBLE : View.GONE);
     }
 
