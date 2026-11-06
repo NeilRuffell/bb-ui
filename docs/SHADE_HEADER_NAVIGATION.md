@@ -11,8 +11,9 @@ The BlackBerry hardware key invokes SystemUI's normal
 `CommandQueue.toggleRecentApps` entry point. BB UI intercepts that
 command to reveal only a **49dp Notification / Quick Settings selector**.
 The real notification shade is **not** expanded until the selected page
-is confirmed. The selector uses the same `ShadeDateHeader` view displayed
-inside the full shade and the same `ShadeUiController` keyboard state. It
+is confirmed. The compact selector's original `ShadeDateHeader` remains mounted in its
+own window after page activation; the shade reserves its position without
+adding another header. Both use the same `ShadeUiController` state. It
 is positioned directly below the native status bar in a compact
 SystemUI-owned `TYPE_STATUS_BAR_SUB_PANEL` input window.
 
@@ -23,34 +24,45 @@ BB press) closes the selector without opening a shade. Tapping either
 segment opens its corresponding page. The selector also closes on
 screen-off, with its receiver unregistered after dismissal.
 
-When the shade is already open, pressing BB focuses that shade's
-existing navigation header; it does not create a second selector.
+When the shade is already open, pressing BB focuses the original
+still-mounted selector header; it does not create a second selector.
 
 ## Fixed-header transition on selection
 
-When Enter/trackpad click or a deliberate tap chooses a page, BB UI does
-**not** create another navigation header. The `ShadeDateHeader` View from
-the compact selector is detached from its input window and mounted as the
-header of `UnifiedShadeHost`. The now-empty selector window is removed
-only after the new shade is attached. Header size, screen position,
-labels and selected highlight stay consistent through the transition.
+**Verified cause of the prior blink:** The old implementation removed the
+selector header from its parent, added it to the new shade, and destroyed
+the old selector window while opening. Reusing the same Java View object
+did not preserve its rendered surface. Separately, keyboard activation
+cleared the selection highlight before starting the shade.
 
-The normal touch pull-down continues animating the full native shade
-window. For **selector-confirmed** opening, that full-window translation
-is skipped: the native `NotificationShadeWindowView` stays stationary
-and its **bottom clip edge** animates downward beginning immediately
-below the existing header. Clipping the entire native window (rather
-than only the BB foreground child) also prevents stock QS and notification
-views from flashing through while the BB page is being revealed. The
-native status-bar upper clipping boundary remains unchanged.
+**Fixed ownership contract:**
+- A BB-key press creates the compact selector header and window only once.
+  On Enter, **neither is removed, reparented, replaced or recreated**.
+- The expanded `UnifiedShadeHost` reserves an empty 49dp placeholder
+  directly behind the already-visible header. It does NOT attach or
+  create a second navigation-header view.
+- The original selected highlight is retained through the opening reveal.
+  Keyboard focus moves from the selector window to the native shade
+  through focus flags, not by rebuilding the selector.
+- The native shade window stays stationary for selector-confirmed opening.
+  Its entire rendering area is clipped from just **below the still-visible
+  selector**. The clip bottom moves downward during the opening animation,
+  while the top stays beneath the header throughout the shade session.
+  This prevents the native shade and stock QS content from painting over
+  the original header.
+- Touch drag-open from the original native status bar retains the previous
+  full-window animation and does not create a selector.
+- Legacy non-native mode uses a translucent top band in its shade window,
+  and reveals content in a viewport below the original selector.
+- Expanded media may intentionally hide the selector in favor of the
+  existing short media bar; returning to navigation focus reveals the same
+  original header. Screen-off, Back, and shade close paths clean up both
+  windows only at the end of their respective sessions.
 
-After the reveal, the window is registered as fully open with the existing
-native slide controller so drag-to-close and normal close animations remain
-available. The legacy non-native shade path reveals its content viewport
-beneath the same transferred header instead. Any interrupted reveal
-restores the prior native clipping during cleanup. If native attachment
-fails before the compact selector is removed, the original header is
-returned to that selector instead of leaving a blank bar.
+The original header window is removed **only** if the compact selector
+is dismissed without opening a page, or when the expanded shade is
+actually closed. A failed mount before the shade is attached preserves
+the original selector and restores its keyboard navigation.
 
 - **Notification** occupies the **left half** of the header.
 - **Quick Settings** occupies the **right half**.
@@ -108,8 +120,8 @@ appears directly below the native status bar with Notification
 highlighted; no notification or QS content should appear yet. Move
 Left/Right and press the trackpad: the same header must remain stationary,
 at the same size and screen position, while the selected page slides
-DOWN from its lower edge. There must be no second/duplicated header and
-no stock Android QS controls visible behind the reveal. Press BB twice
+DOWN from its lower edge. There must be no duplicated header, blank frame, or stock Android QS
+controls visible behind the reveal. Press BB twice
 to open then dismiss the selector; repeat with Back, touch selection,
 and screen off/on. Check that invoking BB with the shade already open
 focuses the existing header. Once in Notifications/QS, Up, Left/Right,
