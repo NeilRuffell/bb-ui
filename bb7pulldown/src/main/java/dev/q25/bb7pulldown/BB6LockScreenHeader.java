@@ -92,7 +92,7 @@ final class BB6LockScreenHeader extends LinearLayout {
                 updateNativeStatusBarHighlight(focused));
         StateListDrawable clockBackground = new StateListDrawable();
         clockBackground.addState(new int[]{android.R.attr.state_focused},
-                BB7Theme.selected(dp(5), dp(1)));
+                BB7Theme.selected(getContext(), dp(5), dp(1)));
         clockBackground.addState(new int[0], new GradientDrawable(
                 GradientDrawable.Orientation.TOP_BOTTOM,
                 new int[]{0x00000000, 0x00000000}));
@@ -210,7 +210,7 @@ final class BB6LockScreenHeader extends LinearLayout {
             // Only the view background is exchanged. Native carrier/signal/
             // battery children and their system-managed contents remain.
             nativeStatusBarBackground = nativeStatusBar.getBackground();
-            nativeStatusBar.setBackground(BB7Theme.selected(dp(5), dp(1)));
+            nativeStatusBar.setBackground(BB7Theme.selected(getContext(), dp(5), dp(1)));
             nativeStatusBarHighlighted = true;
         } else {
             if (nativeStatusBarHighlighted) {
