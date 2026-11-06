@@ -477,10 +477,15 @@ final class SystemUiNotificationObserver {
                 }
             }
         }
+        String nativeCategory = notification == null ? "" : notification.category;
+        String style = extras == null ? "" : extras.getString(Notification.EXTRA_TEMPLATE, "");
+        boolean videoCall = extras != null
+                && extras.getBoolean(Notification.EXTRA_CALL_IS_VIDEO, false);
         return new NotificationItem(sbn.getKey(), sbn.getPackageName(),
                 plain(title, 140), plain(body, 700), sbn.getPostTime(),
                 sbn.isClearable(), buttons, sbn.getGroupKey(), summary, silent,
-                new ArrayList<>(conversationIds), conversationTitle);
+                new ArrayList<>(conversationIds), conversationTitle,
+                nativeCategory, style, videoCall);
     }
 
     /** Drop app-supplied formatting before displaying text in the panel. */
