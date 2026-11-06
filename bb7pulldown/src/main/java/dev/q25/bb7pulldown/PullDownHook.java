@@ -106,6 +106,8 @@ public final class PullDownHook implements IXposedHookLoadPackage {
                 @Override public void onStatusFocusChanged(int zone) {
                     TwoColumnPanel activePanel = panel;
                     if (activePanel != null) activePanel.refreshAppIconFocus();
+                    UnifiedShadeHost current = shadeHost;
+                    if (current != null) current.updateHeaderFocus(zone);
                     updateStatusAppearance();
                 }
 
@@ -234,10 +236,11 @@ public final class PullDownHook implements IXposedHookLoadPackage {
                     // must run on SystemUI's main thread; consume the command now.
                     param.setResult(null); // void command: prevent Overview transition
                     new Handler(Looper.getMainLooper()).post(() -> {
-                        if (focusWindow != null) dismissStatusFocus();
-                        else showStatusFocus(bar.getContext());
+                        // A BB press opens the actual shade directly, not a
+                        // separate focus-only window over the status bar.
+                        showPanel(bar.getContext());
                     });
-                    Log.i(TAG, "Native Recents command consumed; foreground app preserved");
+                    Log.i(TAG, "BlackBerry key requested notification shade");
                 }
             });
             Log.i(TAG, "Native Recents command interception registered");
@@ -575,18 +578,9 @@ public final class PullDownHook implements IXposedHookLoadPackage {
                 decoratedStatusBar = target;
             }
             Drawable base = graphiteBackground(target.getContext());
-            int selectedZone = NAVIGATION.focusedZone();
-            if (selectedZone < 0 || target.getWidth() <= 0) {
-                target.setBackground(base);
-                return;
-            }
-            GradientDrawable selection = BB7Theme.selected(target.getContext(),
-                    dp(target.getContext(), 3), dp(target.getContext(), 1));
-            LayerDrawable background = new LayerDrawable(new Drawable[]{base, selection});
-            int mid = target.getWidth() / 2;
-            background.setLayerInset(1, selectedZone == 0 ? 0 : mid, 0,
-                    selectedZone == 0 ? target.getWidth() - mid : 0, 0);
-            target.setBackground(background);
+            // Focus selection belongs to the shared in-shade header only.
+            // The real status bar retains its base backdrop, not blue halves.
+            target.setBackground(base);
         });
     }
 
@@ -825,7 +819,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
 
         UnifiedShadeHost root = new UnifiedShadeHost(
                 context, notifications, connections, NAVIGATION, initialPage,
-                PullDownHook::dismissShade);
+                PullDownHook::dismissShade, PullDownHook::switchShadePage);
         // Construct legacy window parameters only in rollback mode.
         // Native mode must not allocate a second shade window at all.
         WindowManager.LayoutParams params = null;
