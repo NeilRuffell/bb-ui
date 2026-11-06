@@ -576,7 +576,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
                 target.setBackground(base);
                 return;
             }
-            GradientDrawable selection = BB7Theme.selected(
+            GradientDrawable selection = BB7Theme.selected(target.getContext(),
                     dp(target.getContext(), 3), dp(target.getContext(), 1));
             LayerDrawable background = new LayerDrawable(new Drawable[]{base, selection});
             int mid = target.getWidth() / 2;
