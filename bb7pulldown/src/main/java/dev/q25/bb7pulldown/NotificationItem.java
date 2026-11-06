@@ -43,6 +43,9 @@ final class NotificationItem {
     final boolean silent;
     final List<String> conversationIds;
     final String conversationTitle;
+    final String nativeCategory;
+    final String notificationStyle;
+    final boolean videoCall;
 
     NotificationItem(String key, String packageName, String title, String text, long postedAt) {
         this(key, packageName, title, text, postedAt, false, Collections.emptyList(),
@@ -66,6 +69,15 @@ final class NotificationItem {
             long postedAt, boolean clearable, List<ActionItem> actions,
             String groupKey, boolean groupSummary, boolean silent,
             List<String> conversationIds, String conversationTitle) {
+        this(key, packageName, title, text, postedAt, clearable, actions, groupKey,
+                groupSummary, silent, conversationIds, conversationTitle, "", "", false);
+    }
+
+    NotificationItem(String key, String packageName, String title, String text,
+            long postedAt, boolean clearable, List<ActionItem> actions,
+            String groupKey, boolean groupSummary, boolean silent,
+            List<String> conversationIds, String conversationTitle,
+            String nativeCategory, String notificationStyle, boolean videoCall) {
         this.key = key;
         this.packageName = packageName;
         this.title = title == null ? "" : title;
@@ -78,6 +90,9 @@ final class NotificationItem {
         this.conversationIds = Collections.unmodifiableList(conversationIds == null
                 ? Collections.emptyList() : new ArrayList<>(conversationIds));
         this.conversationTitle = conversationTitle == null ? "" : conversationTitle;
+        this.nativeCategory = nativeCategory == null ? "" : nativeCategory;
+        this.notificationStyle = notificationStyle == null ? "" : notificationStyle;
+        this.videoCall = videoCall;
         this.actions = Collections.unmodifiableList(
                 actions == null ? Collections.emptyList() : new ArrayList<>(actions));
     }
@@ -88,6 +103,9 @@ final class NotificationItem {
         NotificationItem other = (NotificationItem) object;
         return postedAt == other.postedAt && clearable == other.clearable
                 && groupSummary == other.groupSummary && silent == other.silent
+                && videoCall == other.videoCall
+                && Objects.equals(nativeCategory, other.nativeCategory)
+                && Objects.equals(notificationStyle, other.notificationStyle)
                 && Objects.equals(groupKey, other.groupKey)
                 && Objects.equals(conversationIds, other.conversationIds)
                 && Objects.equals(conversationTitle, other.conversationTitle)
@@ -99,6 +117,7 @@ final class NotificationItem {
 
     @Override public int hashCode() {
         return Objects.hash(key, packageName, title, text, postedAt, clearable, actions,
-                groupKey, groupSummary, silent, conversationIds, conversationTitle);
+                groupKey, groupSummary, silent, conversationIds, conversationTitle,
+                nativeCategory, notificationStyle, videoCall);
     }
 }

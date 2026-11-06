@@ -14,13 +14,6 @@ final class NotificationCategoryCounts {
 
     static int countFor(List<NotificationItem> visible, FavoritesRules favorites,
             String category) {
-        if (category == null) return 0;
-        if (NotificationCategoryPolicy.isFavorites(category)) {
-            return favorites == null ? 0 : favorites.filter(visible).size();
-        }
-        if (NotificationCategoryPolicy.isSilent(category)) {
-            return NotificationSelectionPolicy.forSilent(visible).size();
-        }
-        return NotificationSelectionPolicy.forPackage(visible, category).size();
+        return NotificationShadeModePolicy.select(visible, favorites, category).size();
     }
 }

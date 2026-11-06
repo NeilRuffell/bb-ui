@@ -23,9 +23,11 @@ public final class FavoritesSettingsProvider extends ContentProvider {
     static final String AUTHORITY = "dev.q25.trackpad.favorites";
     static final Uri RULES_URI = Uri.parse("content://" + AUTHORITY + "/rules");
     static final Uri CONVERSATIONS_URI = Uri.parse("content://" + AUTHORITY + "/conversations");
+    static final Uri MODE_URI = Uri.parse("content://" + AUTHORITY + "/shadeMode");
     static final String METHOD_REPORT_CONVERSATIONS = "reportConversations";
     private static final String PREFS = "bbui_favorites";
     private static final String RULES_KEY = "rules";
+    private static final String MODE_KEY = "shade_mode";
     private static final String OBSERVED_KEY = "observed";
     private static final String DEFAULT_RULES =
             "{\"version\":1,\"enabled\":false,\"apps\":[]}";
@@ -34,6 +36,20 @@ public final class FavoritesSettingsProvider extends ContentProvider {
 
     static FavoritesRules loadLocal(Context context) {
         return FavoritesJson.parse(prefs(context).getString(RULES_KEY, DEFAULT_RULES));
+    }
+
+    static String loadModeLocal(Context context) {
+        return NotificationShadeModePolicy.normalized(
+                prefs(context).getString(MODE_KEY, NotificationShadeModePolicy.APPS));
+    }
+
+    static void saveModeLocal(Context context, String mode) {
+        prefs(context).edit()
+                .putString(MODE_KEY, NotificationShadeModePolicy.normalized(mode))
+                .apply();
+        // Reuse the existing live SystemUI observer, including while QS is visible.
+        context.getContentResolver().notifyChange(RULES_URI, null);
+        context.getContentResolver().notifyChange(MODE_URI, null);
     }
 
     static void saveLocal(Context context, FavoritesRules favorites) {
@@ -90,6 +106,8 @@ public final class FavoritesSettingsProvider extends ContentProvider {
             value = prefs(context).getString(RULES_KEY, DEFAULT_RULES);
         } else if (CONVERSATIONS_URI.equals(uri)) {
             value = prefs(context).getString(OBSERVED_KEY, "[]");
+        } else if (MODE_URI.equals(uri)) {
+            value = loadModeLocal(context);
         } else {
             throw new IllegalArgumentException("Unknown Favorites URI");
         }

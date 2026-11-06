@@ -20,6 +20,8 @@ import android.widget.EditText;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ListView;
+import android.widget.RadioButton;
+import android.widget.RadioGroup;
 import android.widget.ScrollView;
 import android.widget.Switch;
 import android.widget.TextView;
@@ -35,15 +37,17 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
-/** Native Android settings for the Favorites notification category. */
+/** Native BB UI settings: shade organization and Favorites filtering. */
 public final class FavoritesSettingsActivity extends Activity {
     private FavoritesRules settings;
+    private String organizationMode = NotificationShadeModePolicy.APPS;
     private LinearLayout content;
 
     @Override protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        setTitle("BB UI Favorites");
+        setTitle("BB UI Settings");
         settings = FavoritesSettingsProvider.loadLocal(this);
+        organizationMode = FavoritesSettingsProvider.loadModeLocal(this);
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(true);
         content = new LinearLayout(this);
@@ -59,6 +63,7 @@ public final class FavoritesSettingsActivity extends Activity {
         super.onResume();
         if (content != null) {
             settings = FavoritesSettingsProvider.loadLocal(this);
+            organizationMode = FavoritesSettingsProvider.loadModeLocal(this);
             render();
         }
     }
@@ -90,7 +95,38 @@ public final class FavoritesSettingsActivity extends Activity {
 
     private void render() {
         content.removeAllViews();
-        content.addView(text("Favorite notifications", 22, true));
+        content.addView(text("Notification shade", 22, true));
+        content.addView(text(
+                "Choose how notifications are organized in the left column.", 13, false));
+
+        RadioGroup organization = new RadioGroup(this);
+        organization.setOrientation(LinearLayout.VERTICAL);
+        RadioButton byApplication = new RadioButton(this);
+        byApplication.setId(View.generateViewId());
+        byApplication.setText("By application");
+        RadioButton byType = new RadioButton(this);
+        byType.setId(View.generateViewId());
+        byType.setText("By notification type (Hub)");
+        organization.addView(byApplication);
+        organization.addView(byType);
+        organization.check(NotificationShadeModePolicy.TYPES.equals(organizationMode)
+                ? byType.getId() : byApplication.getId());
+        organization.setOnCheckedChangeListener((group, checkedId) -> {
+            String next = checkedId == byType.getId()
+                    ? NotificationShadeModePolicy.TYPES : NotificationShadeModePolicy.APPS;
+            if (next.equals(organizationMode)) return;
+            organizationMode = next;
+            FavoritesSettingsProvider.saveModeLocal(this, next);
+        });
+        content.addView(organization);
+        content.addView(text(
+                "Hub mode shows persistent Messages, Email, Calls, Calendar, Reminders, "
+                        + "Alarms and Other icons. Empty categories stay visible.",
+                12, false));
+
+        TextView favoritesHeader = text("Favorite notifications", 20, true);
+        favoritesHeader.setPadding(0, dp(26), 0, dp(5));
+        content.addView(favoritesHeader);
         content.addView(text(
                 "Pin apps or specific conversations to a dedicated Favorites icon in the BB UI shade.",
                 13, false));
