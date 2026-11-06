@@ -10,6 +10,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.service.notification.StatusBarNotification;
 import android.util.Log;
+import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -354,7 +355,9 @@ final class NativeStatusBarHubIcons {
         if (row == null) return;
         row.removeAllViews();
         Context context = row.getContext();
-        int spacing = dp(context, 4);
+        int spacing = dp(context, 5);
+        // Match the native clock's text appearance on the Q25.
+        TextView clock = findClock();
         for (Map.Entry<String, Integer> entry : counts.entrySet()) {
             String category = entry.getKey();
             int count = entry.getValue();
@@ -368,11 +371,14 @@ final class NativeStatusBarHubIcons {
 
             TextView number = new TextView(context);
             number.setText(Integer.toString(count));
-            number.setTextSize(11);
+            number.setTextSize(14); // LineageOS status_bar_clock_size fallback
+            if (clock != null) {
+                number.setTextSize(TypedValue.COMPLEX_UNIT_PX, clock.getTextSize());
+                number.setTypeface(clock.getTypeface());
+            }
             number.setSingleLine(true);
             number.setIncludeFontPadding(false);
             number.setGravity(Gravity.CENTER);
-            number.setTypeface(null, android.graphics.Typeface.BOLD);
             number.setFocusable(false);
             number.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
             pair.addView(number, new LinearLayout.LayoutParams(
@@ -382,12 +388,13 @@ final class NativeStatusBarHubIcons {
             ImageView image = new ImageView(context);
             image.setImageDrawable(new NotificationTypeIconDrawable(category));
             image.setScaleType(ImageView.ScaleType.FIT_CENTER);
-            image.setPadding(dp(context, 2), dp(context, 2),
-                    dp(context, 1), dp(context, 2));
+            // The vector includes intrinsic margins; avoid shrinking it
+            // further with internal image-view padding.
+            image.setPadding(0, 0, 0, 0);
             image.setFocusable(false);
             image.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-            pair.addView(image, new LinearLayout.LayoutParams(dp(context, 21),
-                    dp(context, 23)));
+            pair.addView(image, new LinearLayout.LayoutParams(dp(context, 26),
+                    ViewGroup.LayoutParams.MATCH_PARENT));
             LinearLayout.LayoutParams placement = new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.WRAP_CONTENT,
                     ViewGroup.LayoutParams.MATCH_PARENT);
@@ -396,15 +403,23 @@ final class NativeStatusBarHubIcons {
         }
     }
 
+    /** Android's own clock provides the correct text scale and typeface. */
+    private static TextView findClock() {
+        FrameLayout root = centeredHost;
+        if (root == null) return null;
+        Context context = root.getContext();
+        int id = context.getResources().getIdentifier(
+                "clock", "id", "com.android.systemui");
+        if (id == 0) return null;
+        View candidate = root.findViewById(id);
+        return candidate instanceof TextView ? (TextView) candidate : null;
+    }
+
     private static void refreshTint() {
         if (strip == null || host == null || strip.getVisibility() != View.VISIBLE) return;
         int color = Color.WHITE;
-        Context ctx = host.getContext();
-        int clockId = ctx.getResources().getIdentifier("clock", "id", "com.android.systemui");
-        if (clockId != 0) {
-            View clock = host.getRootView().findViewById(clockId);
-            if (clock instanceof TextView) color = ((TextView) clock).getCurrentTextColor();
-        }
+        TextView clock = findClock();
+        if (clock != null) color = clock.getCurrentTextColor();
         for (int i = 0; i < strip.getChildCount(); i++) {
             View child = strip.getChildAt(i);
             if (!(child instanceof LinearLayout)) continue;

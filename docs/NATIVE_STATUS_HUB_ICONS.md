@@ -12,6 +12,10 @@ without adding a second status bar or altering notification delivery.
   as in BlackBerry OS. Categories with no eligible notifications are omitted.
   Supported categories are Messages, Email, Calls (including missed calls and
   voicemail), Calendar, Reminders, Alarms, Other.
+- Counts use the same text size and typeface as the native status-bar clock
+  (LineageOS fallback 14sp). Category icons use a 26dp-wide, full-height
+  image box without additional padding; the drawable provides its margins.
+  The group remains horizontally centered as a unit.
 - Switching modes in **BB UI Settings** takes effect through the existing
   app-owned ContentProvider and its live mode-change observer.
 
@@ -79,7 +83,8 @@ group summaries, unclassified entries, mode switching while
 the shade is open and closed, SystemUI restart, screen lock/unlock, and
 status bar appearance on light/dark wallpaper. Confirm that the category
 group is centered against the full screen, not against the left icon slot,
-with one or multiple categories. Verify native icon overflow and correct
+with one or multiple categories. Compare the number size against the clock
+and glyph dimensions against signal indicators, verifying no clipping. Verify native icon overflow and correct
 width allocation on the Q25 hardware, including center-clock or center-traffic
 configurations if enabled; do not cover system status indicators.
 
