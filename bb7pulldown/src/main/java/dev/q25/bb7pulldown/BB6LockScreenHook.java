@@ -15,8 +15,6 @@ import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowInsets;
-import android.view.ViewTreeObserver;
-import android.view.ViewParent;
 import android.widget.FrameLayout;
 import android.window.OnBackInvokedCallback;
 import android.window.OnBackInvokedDispatcher;
@@ -52,8 +50,6 @@ public final class BB6LockScreenHook implements IXposedHookLoadPackage {
     // Verified in the Q25 SystemUI APK: setState(int, boolean), getState().
     private static final String STATUS_BAR_STATE =
             "com.android.systemui.statusbar.StatusBarStateControllerImpl";
-    private static final String NATIVE_STACK_ID = "shared_notification_container";
-    private static final String NATIVE_SCROLL_ID = "notification_stack_scroller";
     private static final String ENABLE_PROP = "debug.bb6lockscreen.enabled";
 
     private static WeakReference<FrameLayout> rootRef = new WeakReference<>(null);
@@ -65,11 +61,6 @@ public final class BB6LockScreenHook implements IXposedHookLoadPackage {
     private static Map<String, Integer> lastCounts = Collections.emptyMap();
     private static BroadcastReceiver screenReceiver;
     private static WeakReference<Object> stateControllerRef = new WeakReference<>(null);
-    private static ViewTreeObserver.OnPreDrawListener nativeRendererPreDraw;
-    private static WeakReference<FrameLayout> observerRootRef = new WeakReference<>(null);
-    private static boolean missingNativeScrollerLogged;
-    private static boolean missingNativeStackLogged;
-    private static boolean nativeRendererEradicationLogged;
     private static boolean missingKeyguardStatusBarLogged;
 
     // This is one compact SystemUI child, not a second overlay window.
@@ -92,6 +83,8 @@ public final class BB6LockScreenHook implements IXposedHookLoadPackage {
         // Idempotent; the pull-down component uses this same live listener.
         SystemUiNotificationObserver.install(lp.classLoader);
         NativeLockscreenHeadsUpSuppressor.install(lp.classLoader);
+        // Keep the native notification hierarchy and its touch handlers.
+        NativeNotificationRenderBridge.install(lp.classLoader);
         NativeQuickSettingsTiles.install(lp.classLoader);
         installLockQuickBackKeyHandler(lp.classLoader);
         // Leave native clock/date/carrier and AOD-managed views intact.
@@ -107,10 +100,6 @@ public final class BB6LockScreenHook implements IXposedHookLoadPackage {
                 @Override protected void afterHookedMethod(MethodHookParam param) {
                     if (param.thisObject instanceof FrameLayout) {
                         FrameLayout root = (FrameLayout) param.thisObject;
-                        // Register BEFORE the first draw. Never allow native
-                        // notification cards to reach the display even for
-                        // one frame during bouncer/shade transitions.
-                        registerNativeStackWatcher(root);
                         root.post(() -> attach(root));
                     }
                 }
@@ -207,10 +196,6 @@ public final class BB6LockScreenHook implements IXposedHookLoadPackage {
             return;
         }
         closeLockscreenQuickSettings(false);
-        // Do not restore a previous root's stock notification renderer.
-        // The SystemUI notification backend remains active without it.
-        if (observerRootRef.get() != root) registerNativeStackWatcher(root);
-        eradicateNativeNotificationViews(root);
         // The previous header may still own the native status-bar highlight
         // if SystemUI replaced its window root during a transition.
         if (previous != null) {
@@ -239,9 +224,6 @@ public final class BB6LockScreenHook implements IXposedHookLoadPackage {
         rootRef = new WeakReference<>(root);
         headerRef = new WeakReference<>(header);
         BB6BlueprintHook.onRootAttached(root);
-        // Renderer removal is window-lifetime ownership, not a transient
-        // consequence of which keyguard page happens to be visible.
-        eradicateNativeNotificationViews(root);
         lastCounts = Collections.emptyMap();
         lastVisible = false;
         registerScreenEvents(context);
@@ -278,9 +260,6 @@ public final class BB6LockScreenHook implements IXposedHookLoadPackage {
         boolean shown = isInteractiveBb6LockscreenActive();
         // The native blueprint owns stock clock/date construction.
         // Our single status/date-time focus target leaves icons passive.
-        eradicateNativeNotificationViews(root);
-
-
         if (shown != lastVisible) {
             lastVisible = shown;
             Log.i(TAG, "BBOS6 notification strip " + (shown ? "eligible" : "inactive"));
@@ -534,60 +513,14 @@ public final class BB6LockScreenHook implements IXposedHookLoadPackage {
     }
 
     /**
-     * The replacement notification renderer is BB UI for the entire SystemUI
-     * window lifetime, not only for the keyguard's interactive clock page.
-     *
-     * Stock notification cards exist in two SystemUI layout hosts:
-     *   - shared_notification_container (super_notification_shade.xml)
-     *   - notification_stack_scroller (status_bar_expanded.xml)
-     *
-     * Unconditionally REMOVE both hosts from their parents. Never reattach
-     * them when Space opens Android's password bouncer, during AOD, or when
-     * the native shade switches state. All notification records, callbacks,
-     * user/permission controls and PendingIntent dispatch remain native.
-     *
-     * For the final ROM, replace the source-level rendering composition to
-     * avoid constructing these native hosts in the first place.
+     * The native notification containers must remain attached to SystemUI:
+     * their touch dispatch and notification controllers are shared with SHADE.
+     * Duplicate stock cards are suppressed at dispatchDraw only while the
+     * active BB presentation owns this window.
      */
-    private static boolean eradicateNativeNotificationViews(FrameLayout root) {
-        if (!enabled() || root == null) return false;
-        boolean changed = detachNativeRenderer(root, NATIVE_SCROLL_ID, false);
-        changed |= detachNativeRenderer(root, NATIVE_STACK_ID, true);
-        if (changed && !nativeRendererEradicationLogged) {
-            nativeRendererEradicationLogged = true;
-            Log.i(TAG, "Eradicated native notification card hosts from SystemUI window");
-        }
-        return changed;
-    }
-
-    private static boolean detachNativeRenderer(FrameLayout root, String resourceName,
-            boolean shared) {
-        int id = root.getResources().getIdentifier(resourceName, "id", PACKAGE);
-        View renderer = id == 0 ? null : root.findViewById(id);
-        if (renderer == null) {
-            // Native views can be absent after successful detachment. Only
-            // report missing IDs before their first successful detection.
-            if (shared && !nativeRendererEradicationLogged && !missingNativeStackLogged) {
-                missingNativeStackLogged = true;
-                Log.w(TAG, "Native shared notification host not found");
-            } else if (!shared && !nativeRendererEradicationLogged
-                    && !missingNativeScrollerLogged) {
-                missingNativeScrollerLogged = true;
-                Log.w(TAG, "Native notification_stack_scroller not found");
-            }
-            return false;
-        }
-        ViewParent parent = renderer.getParent();
-        if (!(parent instanceof ViewGroup)) return false;
-        ViewGroup group = (ViewGroup) parent;
-        try {
-            group.removeView(renderer);
-            Log.i(TAG, "Removed stock notification renderer: " + resourceName);
-            return true;
-        } catch (RuntimeException error) {
-            Log.e(TAG, "Cannot eradicate stock renderer " + resourceName, error);
-            return false;
-        }
+    static FrameLayout interactiveWindow() {
+        FrameLayout root = rootRef.get();
+        return root != null && isInteractiveBb6LockscreenActive() ? root : null;
     }
 
     /**
@@ -622,37 +555,6 @@ public final class BB6LockScreenHook implements IXposedHookLoadPackage {
             Log.w(TAG, "Cannot read native shade state: " + brief(error));
             return LockscreenNativeStackPolicy.UNKNOWN;
         }
-    }
-
-    /**
-     * Prevent a single-frame stock notification flash when Android moves
-     * between KEYGUARD, PRIMARY_BOUNCER, SHADE_LOCKED, and SHADE. A pre-draw
-     * callback removes newly (re)attached native card hosts and cancels that
-     * drawing pass so a clean layout is calculated before rendering.
-     *
-     * This does not substitute visibility toggles for presentation removal.
-     */
-    private static void registerNativeStackWatcher(FrameLayout root) {
-        if (observerRootRef.get() == root && nativeRendererPreDraw != null) return;
-        removeNativeStackWatcher();
-        nativeRendererPreDraw = () -> {
-            if (!enabled() || !root.isAttachedToWindow()) return true;
-            boolean changed = eradicateNativeNotificationViews(root);
-            if (changed) root.requestLayout();
-            return !changed;
-        };
-        observerRootRef = new WeakReference<>(root);
-        root.getViewTreeObserver().addOnPreDrawListener(nativeRendererPreDraw);
-    }
-
-    private static void removeNativeStackWatcher() {
-        FrameLayout previous = observerRootRef.get();
-        if (previous != null && nativeRendererPreDraw != null
-                && previous.getViewTreeObserver().isAlive()) {
-            previous.getViewTreeObserver().removeOnPreDrawListener(nativeRendererPreDraw);
-        }
-        nativeRendererPreDraw = null;
-        observerRootRef = new WeakReference<>(null);
     }
 
     static void onBlueprintChanged() {
