@@ -26,6 +26,32 @@ screen-off, with its receiver unregistered after dismissal.
 When the shade is already open, pressing BB focuses that shade's
 existing navigation header; it does not create a second selector.
 
+## Fixed-header transition on selection
+
+When Enter/trackpad click or a deliberate tap chooses a page, BB UI does
+**not** create another navigation header. The `ShadeDateHeader` View from
+the compact selector is detached from its input window and mounted as the
+header of `UnifiedShadeHost`. The now-empty selector window is removed
+only after the new shade is attached. Header size, screen position,
+labels and selected highlight stay consistent through the transition.
+
+The normal touch pull-down continues animating the full native shade
+window. For **selector-confirmed** opening, that full-window translation
+is skipped: the native `NotificationShadeWindowView` stays stationary
+and its **bottom clip edge** animates downward beginning immediately
+below the existing header. Clipping the entire native window (rather
+than only the BB foreground child) also prevents stock QS and notification
+views from flashing through while the BB page is being revealed. The
+native status-bar upper clipping boundary remains unchanged.
+
+After the reveal, the window is registered as fully open with the existing
+native slide controller so drag-to-close and normal close animations remain
+available. The legacy non-native shade path reveals its content viewport
+beneath the same transferred header instead. Any interrupted reveal
+restores the prior native clipping during cleanup. If native attachment
+fails before the compact selector is removed, the original header is
+returned to that selector instead of leaving a blank bar.
+
 - **Notification** occupies the **left half** of the header.
 - **Quick Settings** occupies the **right half**.
 - On the compact selector, Down retains the existing native Recents
@@ -80,8 +106,10 @@ adb -s 202512003630 shell am crash com.android.systemui
 Verify: press BB once and confirm that **only the labeled header**
 appears directly below the native status bar with Notification
 highlighted; no notification or QS content should appear yet. Move
-Left/Right and press the trackpad: the corresponding real shade opens,
-without any duplicate status bar or blank intermediary. Press BB twice
+Left/Right and press the trackpad: the same header must remain stationary,
+at the same size and screen position, while the selected page slides
+DOWN from its lower edge. There must be no second/duplicated header and
+no stock Android QS controls visible behind the reveal. Press BB twice
 to open then dismiss the selector; repeat with Back, touch selection,
 and screen off/on. Check that invoking BB with the shade already open
 focuses the existing header. Once in Notifications/QS, Up, Left/Right,
