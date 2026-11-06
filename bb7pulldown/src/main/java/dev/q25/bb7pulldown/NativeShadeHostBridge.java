@@ -1,7 +1,11 @@
 package dev.q25.bb7pulldown;
 
+import android.animation.Animator;
+import android.animation.AnimatorListenerAdapter;
+import android.animation.ValueAnimator;
 import android.util.Log;
 import android.graphics.Rect;
+import android.view.animation.DecelerateInterpolator;
 import android.widget.EditText;
 import android.widget.SeekBar;
 import android.view.ViewConfiguration;
@@ -53,6 +57,11 @@ final class NativeShadeHostBridge {
     private static FrameLayout clippedWindow;
     private static Rect originalWindowClip;
     private static int reservedStatusBandHeight;
+    // A selector-confirmed open reveals the entire native window gradually
+    // from just below the *same* mounted header. Clipping the native window
+    // (not only its BB child) prevents stock QS/notifications showing behind.
+    private static int selectorRevealBottom = -1;
+    private static ValueAnimator selectorRevealAnimator;
     private static final View.OnLayoutChangeListener WINDOW_CLIP_LAYOUT =
             (view, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom) -> {
                 if (view == clippedWindow) updateWindowClip();
@@ -378,6 +387,7 @@ final class NativeShadeHostBridge {
                 + reservedStatusBandHeight + "px");
     }
 
+    /** Clamp bottom while revealing without changing the status-bar top clip. */
     private static void updateWindowClip() {
         FrameLayout window = clippedWindow;
         if (window == null) return;
@@ -386,10 +396,62 @@ final class NativeShadeHostBridge {
         if (width <= 0 || height <= 0) return;
         int[] bounds = NativeShadeStatusBandPolicy.clipBounds(
                 width, height, reservedStatusBandHeight);
+        if (selectorRevealBottom >= 0) {
+            bounds[3] = Math.min(bounds[3],
+                    Math.max(bounds[1], selectorRevealBottom));
+        }
         window.setClipBounds(new Rect(bounds[0], bounds[1], bounds[2], bounds[3]));
     }
 
+    /**
+     * Place the reveal boundary immediately BELOW the transferred 49dp
+     * header. Only the native shade WINDOW is clipped; its entire existing
+     * rendering tree remains attached and nothing stock bleeds through.
+     */
+    static boolean prepareSelectorReveal(int headerHeightPx) {
+        if (!ownsNativeShadeWindow() || clippedWindow == null) return false;
+        cancelSelectorReveal();
+        selectorRevealBottom = reservedStatusBandHeight + Math.max(0, headerHeightPx);
+        updateWindowClip();
+        return true;
+    }
+
+    static boolean animateSelectorReveal(Runnable completed) {
+        FrameLayout window = clippedWindow;
+        if (!ownsNativeShadeWindow() || window == null || selectorRevealBottom < 0
+                || window.getHeight() <= 0) return false;
+        int start = Math.min(window.getHeight(), selectorRevealBottom);
+        ValueAnimator animator = ValueAnimator.ofInt(start, window.getHeight());
+        selectorRevealAnimator = animator;
+        animator.setDuration(220);
+        animator.setInterpolator(new DecelerateInterpolator(1.4f));
+        animator.addUpdateListener(frame -> {
+            if (selectorRevealAnimator != frame || clippedWindow != window) return;
+            selectorRevealBottom = (Integer) frame.getAnimatedValue();
+            updateWindowClip();
+        });
+        animator.addListener(new AnimatorListenerAdapter() {
+            @Override public void onAnimationEnd(Animator ended) {
+                if (selectorRevealAnimator != ended) return;
+                cancelSelectorReveal();
+                completed.run();
+            }
+        });
+        animator.start();
+        Log.i(TAG, "Native content reveal starts below unchanged navigation header");
+        return true;
+    }
+
+    static void cancelSelectorReveal() {
+        ValueAnimator animator = selectorRevealAnimator;
+        selectorRevealAnimator = null;
+        selectorRevealBottom = -1;
+        if (animator != null) animator.cancel();
+        updateWindowClip();
+    }
+
     private static void endWindowClip() {
+        cancelSelectorReveal();
         FrameLayout window = clippedWindow;
         if (window == null) return;
         window.removeOnLayoutChangeListener(WINDOW_CLIP_LAYOUT);
