@@ -24,6 +24,9 @@ independent rollback settings.
   implementation, Q25 evidence, limitations and ROM migration steps.
 - [Shade and trackpad navigation](SHADE_NAVIGATION.md).
 - [Native Quick Settings](docs/NATIVE_QS_UI.md).
+- [Notification shade organization (App / Hub)](docs/NOTIFICATION_HUB_MODE.md) —
+  configurable grouping, persistent categories, and hardware test procedure.
+- [Notification count display](docs/NOTIFICATION_SHADE_COUNTS.md).
 - [Native Back integration](docs/NATIVE_SHADE_BACK_ROUTING.md).
 - [BB6 lock-screen touchscreen investigation](docs/LOCKSCREEN_TOUCH_ROUTING.md) —
   what changed, what is still unverified, and the tested recovery procedure.

@@ -498,6 +498,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
         if (next == UnifiedShadeHost.NOTIFICATIONS) {
             SystemUiNotificationObserver.refreshBeforeOpen();
             if (panel != null) {
+                panel.setOrganizationMode(NotificationShadeModeClient.read(context));
                 panel.setFavorites(activeFavorites);
                 panel.setNotifications(SystemUiNotificationObserver.itemsSnapshot());
             }
@@ -1062,8 +1063,11 @@ public final class PullDownHook implements IXposedHookLoadPackage {
                 // is visible, so returning to notifications uses fresh rules.
                 if (panel != root || shadeHost == null) return;
                 activeFavorites = FavoritesClient.read(context);
-                root.setOrganizationMode(NotificationShadeModeClient.read(context));
-                root.setFavorites(activeFavorites);
+                if (notificationPageActive()) {
+                    // Do not steal focus while the retained QS page is visible.
+                    root.setOrganizationMode(NotificationShadeModeClient.read(context));
+                    root.setFavorites(activeFavorites);
+                }
                 FavoritesClient.reportObserved(context, activeFavorites,
                         SystemUiNotificationObserver.itemsSnapshot());
             }
