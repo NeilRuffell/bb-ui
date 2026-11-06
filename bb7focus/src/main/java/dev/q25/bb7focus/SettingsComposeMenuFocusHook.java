@@ -202,10 +202,15 @@ final class SettingsComposeMenuFocusHook {
         if (!Float.isFinite(width) || !Float.isFinite(height)
                 || width <= 0f || height <= 0f) return;
 
+        // The Compose DrawScope has no Android Context; resolve the actual
+        // Settings process theme, not an unrelated hardcoded blue palette.
+        android.app.Application app =
+                de.robv.android.xposed.AndroidAppHelper.currentApplication();
+        if (app == null) return;
         float inset = 1f;
         Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
         fill.setShader(new LinearGradient(0f, 0f, 0f, height,
-                BB7Theme.gradientColors(), null, Shader.TileMode.CLAMP));
+                BB7Theme.gradientColors(app), null, Shader.TileMode.CLAMP));
         canvas.drawRoundRect(inset, inset, width - inset, height - inset,
                 3f, 3f, fill);
         Paint border = new Paint(Paint.ANTI_ALIAS_FLAG);
