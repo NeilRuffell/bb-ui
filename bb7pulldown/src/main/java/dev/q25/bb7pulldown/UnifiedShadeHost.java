@@ -33,6 +33,7 @@ final class UnifiedShadeHost extends FrameLayout {
     private final FrameLayout contentViewport;
     private ValueAnimator contentReveal;
     private boolean selectorRevealPrepared;
+    private boolean selectorHandoffActive;
     private final LinearLayout mediaModeHeader;
     private final TextView mediaShuffle;
     private final TextView mediaRepeat;
@@ -174,6 +175,18 @@ final class UnifiedShadeHost extends FrameLayout {
      * Reveal just the area below it, leaving its position fixed throughout.
      * Ordinary status-bar touch swipes continue using the native window slide.
      */
+    void beginSelectorHandoff(int selectedPage) {
+        selectorHandoffActive = true;
+        dateHeader.setFocusedZone(selectedPage);
+        updateHeaderVisibility();
+    }
+
+    void completeSelectorHandoff() {
+        selectorHandoffActive = false;
+        dateHeader.setFocusedZone(navigation.focusedZone());
+        updateHeaderVisibility();
+    }
+
     void prepareSelectorReveal() {
         selectorRevealPrepared = true;
         contentViewport.setClipBounds(new Rect(0, 0, 0, 0));
@@ -245,7 +258,7 @@ final class UnifiedShadeHost extends FrameLayout {
     }
 
     void updateHeaderFocus(int zone) {
-        dateHeader.setFocusedZone(zone);
+        if (!selectorHandoffActive) dateHeader.setFocusedZone(zone);
         updateHeaderVisibility();
     }
 
@@ -309,7 +322,8 @@ final class UnifiedShadeHost extends FrameLayout {
         // Show navigation segments when selected even if the compact media
         // header normally replaces them. Restore it on focus return.
         boolean showMedia = mediaExpanded && displayedPage == NOTIFICATIONS
-                && !navigation.isStatusBarFocused() && !selectorRevealPrepared;
+                && !navigation.isStatusBarFocused()
+                && !selectorRevealPrepared && !selectorHandoffActive;
         dateHeader.setVisibility(showMedia ? View.GONE : View.VISIBLE);
         mediaModeHeader.setVisibility(showMedia ? View.VISIBLE : View.GONE);
     }
