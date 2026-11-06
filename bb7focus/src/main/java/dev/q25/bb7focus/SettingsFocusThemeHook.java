@@ -35,9 +35,6 @@ import de.robv.android.xposed.callbacks.XC_LoadPackage;
 public final class SettingsFocusThemeHook implements IXposedHookLoadPackage {
     private static final String TARGET = "com.android.settings";
     private static final String TAG = "BB7-Focus";
-    private static final int BLUE_TOP = BB7Theme.BLUE_TOP;
-    private static final int BLUE_MIDDLE = BB7Theme.BLUE_MIDDLE;
-    private static final int BLUE_BOTTOM = BB7Theme.BLUE_BOTTOM;
     private static final int TITLE_COLOR = BB7Theme.TITLE;
     private static final int SUMMARY_COLOR = BB7Theme.SUMMARY;
 
@@ -155,14 +152,6 @@ public final class SettingsFocusThemeHook implements IXposedHookLoadPackage {
         return null;
     }
 
-    private static GradientDrawable blueBackground() {
-        GradientDrawable gradient = new GradientDrawable(
-                GradientDrawable.Orientation.TOP_BOTTOM,
-                new int[] { BLUE_TOP, BLUE_MIDDLE, BLUE_BOTTOM });
-        gradient.setCornerRadius(0);
-        return gradient;
-    }
-
     private static boolean isSummaryText(TextView textView) {
         int id = textView.getId();
         if (id == View.NO_ID) return false;
@@ -230,7 +219,7 @@ public final class SettingsFocusThemeHook implements IXposedHookLoadPackage {
                 paddingTop = newRow.getPaddingTop();
                 paddingEnd = newRow.getPaddingEnd();
                 paddingBottom = newRow.getPaddingBottom();
-                newRow.setBackground(blueBackground());
+                newRow.setBackground(BB7Theme.selected(newRow.getContext(), 0f, 0));
                 newRow.setPaddingRelative(paddingStart, paddingTop, paddingEnd, paddingBottom);
                 recolorText(newRow, originalText);
             } catch (Throwable error) {
