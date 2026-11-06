@@ -57,6 +57,10 @@ final class NativeShadeHostBridge {
     private static FrameLayout clippedWindow;
     private static Rect originalWindowClip;
     private static int reservedStatusBandHeight;
+    // Preserve a clear strip for the selector's ORIGINAL separate window
+    // for the ENTIRE opened shade, not only its 220ms reveal animation.
+    private static int externalHeaderHeight;
+    private static boolean externalHeaderVisible;
     // A selector-confirmed open reveals the entire native window gradually
     // from just below the *same* mounted header. Clipping the native window
     // (not only its BB child) prevents stock QS/notifications showing behind.
@@ -317,6 +321,9 @@ final class NativeShadeHostBridge {
             root.bringToFront();
             mountedRef = new WeakReference<>(root);
             beginWindowClip(window, topInset);
+            externalHeaderHeight = root.externalHeaderHeight();
+            externalHeaderVisible = externalHeaderHeight > 0;
+            updateWindowClip();
             NativeShadeStatusBarVisibility.onBbShadeMountChanged(true);
             Log.i(TAG, "Native status-bar region left transparent; original icons retained");
             // Do not reset nativeGestureInProgress: a heads-up or native
@@ -396,6 +403,9 @@ final class NativeShadeHostBridge {
         if (width <= 0 || height <= 0) return;
         int[] bounds = NativeShadeStatusBandPolicy.clipBounds(
                 width, height, reservedStatusBandHeight);
+        if (externalHeaderVisible) {
+            bounds[1] = Math.min(bounds[3], bounds[1] + externalHeaderHeight);
+        }
         if (selectorRevealBottom >= 0) {
             bounds[3] = Math.min(bounds[3],
                     Math.max(bounds[1], selectorRevealBottom));
@@ -408,6 +418,13 @@ final class NativeShadeHostBridge {
      * header. Only the native shade WINDOW is clipped; its entire existing
      * rendering tree remains attached and nothing stock bleeds through.
      */
+    /** When expanded media replaces navigation, expose the media header. */
+    static void setExternalHeaderVisible(boolean visible) {
+        if (externalHeaderHeight == 0 || externalHeaderVisible == visible) return;
+        externalHeaderVisible = visible;
+        updateWindowClip();
+    }
+
     static boolean prepareSelectorReveal(int headerHeightPx) {
         if (!ownsNativeShadeWindow() || clippedWindow == null) return false;
         cancelSelectorReveal();
@@ -459,6 +476,8 @@ final class NativeShadeHostBridge {
         clippedWindow = null;
         originalWindowClip = null;
         reservedStatusBandHeight = 0;
+        externalHeaderHeight = 0;
+        externalHeaderVisible = false;
         Log.i(TAG, "Native shade window drawing bounds restored");
     }
 
