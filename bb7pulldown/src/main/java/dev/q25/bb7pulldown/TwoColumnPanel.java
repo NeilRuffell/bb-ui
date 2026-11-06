@@ -917,18 +917,53 @@ final class TwoColumnPanel extends FrameLayout {
         return layers;
     }
 
-    /** Silver by default; selected pill alone uses the existing BB UI blue. */
-    private GradientDrawable mediaSeekThumb(boolean selected) {
-        GradientDrawable pill = new GradientDrawable(
+    /**
+     * Expanded BBOS6 seek thumb. Keep the existing highlighted blue style,
+     * while the normal thumb uses a shaded, round-ended silver-blue capsule.
+     * Both drawables have transparent pixels outside their rounded ends.
+     */
+    private Drawable mediaSeekThumb(boolean selected) {
+        if (selected) {
+            GradientDrawable pill = new GradientDrawable(
+                    GradientDrawable.Orientation.TOP_BOTTOM,
+                    BB7SelectionGradientColors.colors(false));
+            pill.setShape(GradientDrawable.RECTANGLE);
+            pill.setCornerRadius(dp(10));
+            pill.setSize(dp(56), dp(18));
+            pill.setStroke(dp(2), BB7Theme.BLUE_BORDER);
+            return pill;
+        }
+
+        // The outside shell provides the dark rounded edge and bottom rim.
+        GradientDrawable shell = new GradientDrawable(
                 GradientDrawable.Orientation.TOP_BOTTOM,
-                selected ? BB7SelectionGradientColors.colors(false)
-                        : new int[] {0xffe5e9ef, 0xffaeb6c0});
-        pill.setShape(GradientDrawable.RECTANGLE);
-        pill.setCornerRadius(dp(10));
-        pill.setSize(dp(selected ? 56 : 54), dp(selected ? 18 : 16));
-        pill.setStroke(dp(selected ? 2 : 1),
-                selected ? BB7Theme.BLUE_BORDER : 0xff87919c);
-        return pill;
+                new int[] {0xff636563, 0xff929396, 0xff525253});
+        shell.setShape(GradientDrawable.RECTANGLE);
+        shell.setCornerRadius(dp(8));
+        shell.setSize(dp(54), dp(16));
+
+        // Vertical light-and-shadow bands sampled conceptually from the
+        // reference pill, with no bitmap assets or theme-derived colors.
+        GradientDrawable body = new GradientDrawable(
+                GradientDrawable.Orientation.TOP_BOTTOM,
+                new int[] {
+                        0xfff7f7f7, // bright top edge
+                        0xff8ca6c6, // blue-grey upper body
+                        0xff9caece,
+                        0xffa5bace,
+                        0xffbdcbde,
+                        0xffced7e7,
+                        0xffdee3ef,
+                        0xffefeff7, // lower silver highlight
+                        0xffadaaad  // shaded bottom edge
+                });
+        body.setShape(GradientDrawable.RECTANGLE);
+        body.setCornerRadius(dp(7));
+        body.setSize(dp(52), dp(14));
+
+        LayerDrawable capsule = new LayerDrawable(new Drawable[] {shell, body});
+        capsule.setLayerInset(1, dp(1), dp(1), dp(1), dp(1));
+        return capsule;
     }
 
     /** Fixed BBOS6 focus styling for expanded media; other surfaces stay themed. */
