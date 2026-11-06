@@ -42,9 +42,6 @@ public final class SystemUiFocusThemeHook implements IXposedHookLoadPackage {
     private static final String NOTIFICATION_BACKGROUND =
             "com.android.systemui.statusbar.notification.row.NotificationBackgroundView";
 
-    private static final int BLUE_TOP = BB7Theme.BLUE_TOP;
-    private static final int BLUE_MIDDLE = BB7Theme.BLUE_MIDDLE;
-    private static final int BLUE_BOTTOM = BB7Theme.BLUE_BOTTOM;
     private static final int TITLE_COLOR = BB7Theme.TITLE;
     private static final int SUMMARY_COLOR = BB7Theme.SUMMARY;
 
@@ -178,7 +175,7 @@ public final class SystemUiFocusThemeHook implements IXposedHookLoadPackage {
         float radius = background.getResources().getDisplayMetrics().density * 8f;
         Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
         paint.setShader(new LinearGradient(0, 0, 0, height,
-                new int[] {BLUE_TOP, BLUE_MIDDLE, BLUE_BOTTOM},
+                BB7Theme.gradientColors(background.getContext()),
                 null, Shader.TileMode.CLAMP));
 
         canvas.save();
