@@ -2,7 +2,7 @@
 
 The former 49dp BBOS6 date bar is now a two-segment navigation header
 above Notifications and Quick Settings. The left half is labeled
-**Notifications** and the right half **Quick Settings**. Labels are
+**Notification** and the right half **Quick Settings**. Labels are
 centered, and the gradient and header height remain unchanged.
 
 ## New keyboard behavior
@@ -60,7 +60,7 @@ adb -s 202512003630 shell am crash com.android.systemui
 ```
 
 Verify: BlackBerry key opens the real shade directly; the header has
-**Notifications** and **Quick Settings** labels (and no date or native
+**Notification** and **Quick Settings** labels (and no date or native
 status-bar blue halves); from top of
 Notifications/QS, Up, Left/Right, Enter, Down and Back retain their
 navigation semantics; touch either half changes page; swipe up still

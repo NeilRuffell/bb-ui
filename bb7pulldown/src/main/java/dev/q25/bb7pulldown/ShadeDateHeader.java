@@ -40,7 +40,7 @@ final class ShadeDateHeader extends LinearLayout {
         setContentDescription("BB UI shade navigation");
         setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_YES);
 
-        notificationsSegment = segment(context, "Notifications");
+        notificationsSegment = segment(context, "Notification");
         quickSettingsSegment = segment(context, "Quick Settings");
         addView(notificationsSegment, new LinearLayout.LayoutParams(
                 0, LayoutParams.MATCH_PARENT, 1f));
