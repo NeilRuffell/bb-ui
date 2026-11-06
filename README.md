@@ -24,7 +24,7 @@ independent rollback settings.
   implementation, Q25 evidence, limitations and ROM migration steps.
 - [Shade and trackpad navigation](SHADE_NAVIGATION.md).
 - [Native Quick Settings](docs/NATIVE_QS_UI.md).
-- [Shared shade navigation header](docs/SHADE_HEADER_NAVIGATION.md) — direct BB-key opening and two labeled focus segments.
+- [Shared shade navigation header](docs/SHADE_HEADER_NAVIGATION.md) — BB-key selector before shade opening and two labeled focus segments.
 - [Notification shade organization (App / Hub)](docs/NOTIFICATION_HUB_MODE.md) —
   configurable grouping, persistent categories, and hardware test procedure.
 - [Notification count display](docs/NOTIFICATION_SHADE_COUNTS.md).

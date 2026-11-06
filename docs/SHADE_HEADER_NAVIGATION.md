@@ -8,12 +8,28 @@ centered, and the gradient and header height remain unchanged.
 ## New keyboard behavior
 
 The BlackBerry hardware key invokes SystemUI's normal
-`CommandQueue.toggleRecentApps` entry point. BB UI now intercepts that
-command to open the existing notification shade directly, rather than
-creating a separate keyboard focus window over the native status bar.
+`CommandQueue.toggleRecentApps` entry point. BB UI intercepts that
+command to reveal only a **49dp Notification / Quick Settings selector**.
+The real notification shade is **not** expanded until the selected page
+is confirmed. The selector uses the same `ShadeDateHeader` view displayed
+inside the full shade and the same `ShadeUiController` keyboard state. It
+is positioned directly below the native status bar in a compact
+SystemUI-owned `TYPE_STATUS_BAR_SUB_PANEL` input window.
 
-- Notifications occupies the **left half** of the header.
-- Quick Settings occupies the **right half**.
+On first BB press, **Notification** is focused by default. Left/Right
+moves the blue focus to either of the two labeled header segments;
+Enter/trackpad click opens only the selected shade page. Back (or a second
+BB press) closes the selector without opening a shade. Tapping either
+segment opens its corresponding page. The selector also closes on
+screen-off, with its receiver unregistered after dismissal.
+
+When the shade is already open, pressing BB focuses that shade's
+existing navigation header; it does not create a second selector.
+
+- **Notification** occupies the **left half** of the header.
+- **Quick Settings** occupies the **right half**.
+- On the compact selector, Down retains the existing native Recents
+  shortcut. The selected shade remains closed until confirmed.
 - **Up** from the first notification icon, media row or first QS row enters
   the corresponding header selection.
 - **Left / Right** changes the selected header half.
@@ -35,7 +51,9 @@ between notification cards are unrelated and remain unchanged.
 
 The navigation still uses one `ShadeUiController` and its
 `ShadeStatusNavigation` state machine. The existing native status bar
-is no longer painted with two blue zone highlights. Its real notification
+is no longer painted with two blue zone highlights. The compact selector
+never mounts native shade content: only a deliberate selection invokes
+the existing `showShade(context, page)` lifecycle. Its real notification
 icons, clock, QS status, battery, privacy indicators and blur/backdrop
 ownership remain untouched. The native notification shade window
 and its animation/drag-to-open paths are unchanged.
@@ -59,14 +77,18 @@ adb -s 202512003630 install -r app/build/outputs/apk/debug/app-debug.apk &&
 adb -s 202512003630 shell am crash com.android.systemui
 ```
 
-Verify: BlackBerry key opens the real shade directly; the header has
-**Notification** and **Quick Settings** labels (and no date or native
-status-bar blue halves); from top of
-Notifications/QS, Up, Left/Right, Enter, Down and Back retain their
-navigation semantics; touch either half changes page; swipe up still
-closes; media expansion correctly swaps header; the lock screen and
-ordinary native status-bar icons remain unaffected. Confirm the
-intermittent keyguard touch issue does not reappear.
+Verify: press BB once and confirm that **only the labeled header**
+appears directly below the native status bar with Notification
+highlighted; no notification or QS content should appear yet. Move
+Left/Right and press the trackpad: the corresponding real shade opens,
+without any duplicate status bar or blank intermediary. Press BB twice
+to open then dismiss the selector; repeat with Back, touch selection,
+and screen off/on. Check that invoking BB with the shade already open
+focuses the existing header. Once in Notifications/QS, Up, Left/Right,
+Enter, Down, and Back retain their previous navigation semantics.
+Check swipe-up dismissal in the expanded shade, media-header switching,
+lockscreen exclusion, and that the existing intermittent keyguard
+touch problem does not reappear.
 
 The existing emergency rollback remains
 `debug.bb7pulldown.enabled=false` plus SystemUI restart.
