@@ -220,6 +220,7 @@ final class UnifiedShadeHost extends FrameLayout {
         contentViewport.setClipBounds(null);
         contentViewport.setImportantForAccessibility(
                 View.IMPORTANT_FOR_ACCESSIBILITY_AUTO);
+        updateHeaderVisibility();
     }
 
     /** Used only to recover the same header if native mounting fails. */
@@ -308,7 +309,7 @@ final class UnifiedShadeHost extends FrameLayout {
         // Show navigation segments when selected even if the compact media
         // header normally replaces them. Restore it on focus return.
         boolean showMedia = mediaExpanded && displayedPage == NOTIFICATIONS
-                && !navigation.isStatusBarFocused();
+                && !navigation.isStatusBarFocused() && !selectorRevealPrepared;
         dateHeader.setVisibility(showMedia ? View.GONE : View.VISIBLE);
         mediaModeHeader.setVisibility(showMedia ? View.VISIBLE : View.GONE);
     }
