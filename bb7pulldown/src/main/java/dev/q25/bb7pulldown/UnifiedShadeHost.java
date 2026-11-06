@@ -2,14 +2,20 @@ package dev.q25.bb7pulldown;
 
 import dev.q25.trackpad.theme.BB7Theme;
 
+import android.animation.Animator;
+import android.animation.AnimatorListenerAdapter;
+import android.animation.ValueAnimator;
 import android.content.Context;
 import android.graphics.Color;
+import android.graphics.Rect;
 import android.graphics.drawable.GradientDrawable;
 import android.view.Gravity;
 import android.widget.TextView;
 import android.view.View;
 import android.view.MotionEvent;
 import android.view.KeyEvent;
+import android.view.animation.DecelerateInterpolator;
+import java.util.function.IntConsumer;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 
@@ -23,6 +29,13 @@ final class UnifiedShadeHost extends FrameLayout {
     static final int QUICK_SETTINGS = ShadeStatusNavigation.QUICK_SETTINGS;
 
     private final ShadeDateHeader dateHeader;
+    private final View headerPlaceholder;
+    private final boolean externalHeader;
+    private final java.util.function.Consumer<Boolean> onExternalHeaderVisibility;
+    private final FrameLayout contentViewport;
+    private ValueAnimator contentReveal;
+    private boolean selectorRevealPrepared;
+    private boolean selectorHandoffActive;
     private final LinearLayout mediaModeHeader;
     private final TextView mediaShuffle;
     private final TextView mediaRepeat;
@@ -32,33 +45,56 @@ final class UnifiedShadeHost extends FrameLayout {
     private final BB6NativeQsPanel connections;
     private final ShadeUiController navigation;
     private final Runnable closeShade;
+    private final IntConsumer onHeaderPageSelected;
     private float headerTouchDownY;
+    private float headerTouchDownX;
+    private boolean headerTouchMoved;
     private boolean headerSwipeClosed;
 
     UnifiedShadeHost(Context context, TwoColumnPanel notifications,
             BB6NativeQsPanel connections, ShadeUiController navigation,
-            int initialPage, Runnable closeShade) {
+            int initialPage, Runnable closeShade, IntConsumer onHeaderPageSelected,
+            ShadeDateHeader existingSelectorHeader,
+            java.util.function.Consumer<Boolean> onExternalHeaderVisibility) {
         super(context);
         this.notifications = notifications;
         this.connections = connections;
         this.navigation = navigation;
         this.closeShade = closeShade;
+        this.onHeaderPageSelected = onHeaderPageSelected;
+        this.externalHeader = existingSelectorHeader != null;
+        // Enter already selected this exact visible header. The constructor
+        // must NOT clear its highlight while building the shade's content.
+        selectorHandoffActive = externalHeader;
+        this.onExternalHeaderVisibility = onExternalHeaderVisibility;
 
         LinearLayout layout = new LinearLayout(context);
         layout.setOrientation(LinearLayout.VERTICAL);
         addView(layout, new FrameLayout.LayoutParams(
                 LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
 
-        dateHeader = new ShadeDateHeader(context);
-        // Previously the header lived inside each page and inherited its
-        // swipe-up dismissal. Preserve that gesture at the shared host level.
-        dateHeader.setOnTouchListener((view, event) -> {
+        // The compact selector keeps the ORIGINAL header in its ORIGINAL
+        // WindowManager window throughout the expanded shade lifetime.
+        // The full shade reserves matching geometry rather than reparenting,
+        // removing, recreating or redrawing that visible view.
+        dateHeader = existingSelectorHeader != null
+                ? existingSelectorHeader : new ShadeDateHeader(context);
+        headerPlaceholder = externalHeader ? new View(context) : null;
+        // Normal gesture-open shade owns its own header touch routing. The
+        // already-mounted selector retains its existing touch handler.
+        if (!externalHeader) dateHeader.setOnTouchListener((view, event) -> {
             switch (event.getActionMasked()) {
                 case MotionEvent.ACTION_DOWN:
                     headerTouchDownY = event.getRawY();
+                    headerTouchDownX = event.getRawX();
                     headerSwipeClosed = false;
+                    headerTouchMoved = false;
                     return true;
                 case MotionEvent.ACTION_MOVE:
+                    if (Math.abs(event.getRawY() - headerTouchDownY) >= dp(12)
+                            || Math.abs(event.getRawX() - headerTouchDownX) >= dp(12)) {
+                        headerTouchMoved = true;
+                    }
                     if (!headerSwipeClosed
                             && headerTouchDownY - event.getRawY() >= dp(65)) {
                         headerSwipeClosed = true;
@@ -66,14 +102,23 @@ final class UnifiedShadeHost extends FrameLayout {
                     }
                     return true;
                 case MotionEvent.ACTION_UP:
+                    if (!headerSwipeClosed && !headerTouchMoved) {
+                        int zone = ShadeHeaderSegmentPolicy.zoneAt(event.getX(), view.getWidth());
+                        if (zone != ShadeStatusNavigation.NONE) onHeaderPageSelected.accept(zone);
+                    }
+                    headerSwipeClosed = false;
+                    headerTouchMoved = false;
+                    return true;
                 case MotionEvent.ACTION_CANCEL:
                     headerSwipeClosed = false;
+                    headerTouchMoved = false;
                     return true;
                 default:
                     return true;
             }
         });
-        layout.addView(dateHeader, ShadeDateHeader.layoutParams(context));
+        layout.addView(externalHeader ? headerPlaceholder : dateHeader,
+                ShadeDateHeader.layoutParams(context));
 
         // BBOS6 media header replaces the taller date bar only while expanded.
         // This host owns both headers; no stock SystemUI view is modified.
@@ -112,9 +157,16 @@ final class UnifiedShadeHost extends FrameLayout {
         mediaModeHeader.addView(mediaRepeat, new LinearLayout.LayoutParams(
                 LayoutParams.WRAP_CONTENT, dp(28)));
 
-        FrameLayout pages = new FrameLayout(context);
-        layout.addView(pages, new LinearLayout.LayoutParams(
+        // Only the content viewport moves/reveals on selector confirmation.
+        // The header sits above it as an unaffected sibling.
+        contentViewport = new FrameLayout(context);
+        contentViewport.setClipChildren(true);
+        contentViewport.setClipToPadding(true);
+        layout.addView(contentViewport, new LinearLayout.LayoutParams(
                 LayoutParams.MATCH_PARENT, 0, 1f));
+        FrameLayout pages = new FrameLayout(context);
+        contentViewport.addView(pages, new FrameLayout.LayoutParams(
+                LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
         pages.addView(notifications, new FrameLayout.LayoutParams(
                 LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
         pages.addView(connections, new FrameLayout.LayoutParams(
@@ -127,6 +179,72 @@ final class UnifiedShadeHost extends FrameLayout {
         setPage(initialPage);
     }
 
+    /**
+     * Selection from the compact header uses the same header instance.
+     * Reveal just the area below it, leaving its position fixed throughout.
+     * Ordinary status-bar touch swipes continue using the native window slide.
+     */
+    void beginSelectorHandoff(int selectedPage) {
+        selectorHandoffActive = true;
+        dateHeader.setFocusedZone(selectedPage);
+        updateHeaderVisibility();
+    }
+
+    void completeSelectorHandoff() {
+        selectorHandoffActive = false;
+        dateHeader.setFocusedZone(navigation.focusedZone());
+        updateHeaderVisibility();
+    }
+
+    void prepareSelectorReveal() {
+        selectorRevealPrepared = true;
+        contentViewport.setClipBounds(new Rect(0, 0, 0, 0));
+        contentViewport.setImportantForAccessibility(
+                View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
+    }
+
+    void animateSelectorReveal(Runnable completed) {
+        if (!selectorRevealPrepared) {
+            completed.run();
+            return;
+        }
+        contentViewport.post(() -> {
+            if (!selectorRevealPrepared || !isAttachedToWindow()) return;
+            int width = contentViewport.getWidth();
+            int height = contentViewport.getHeight();
+            if (width <= 0 || height <= 0) {
+                finishSelectorReveal();
+                completed.run();
+                return;
+            }
+            ValueAnimator animation = ValueAnimator.ofInt(0, height);
+            contentReveal = animation;
+            animation.setDuration(220);
+            animation.setInterpolator(new DecelerateInterpolator(1.4f));
+            animation.addUpdateListener(frame -> contentViewport.setClipBounds(
+                    new Rect(0, 0, width, (Integer) frame.getAnimatedValue())));
+            animation.addListener(new AnimatorListenerAdapter() {
+                @Override public void onAnimationEnd(Animator finished) {
+                    if (contentReveal != finished) return;
+                    finishSelectorReveal();
+                    completed.run();
+                }
+            });
+            animation.start();
+        });
+    }
+
+    void finishSelectorReveal() {
+        selectorRevealPrepared = false;
+        ValueAnimator animation = contentReveal;
+        contentReveal = null;
+        if (animation != null) animation.cancel();
+        contentViewport.setClipBounds(null);
+        contentViewport.setImportantForAccessibility(
+                View.IMPORTANT_FOR_ACCESSIBILITY_AUTO);
+        updateHeaderVisibility();
+    }
+
     void setPage(int next) {
         if (next != NOTIFICATIONS && next != QUICK_SETTINGS) {
             throw new IllegalArgumentException("Unknown shade page");
@@ -135,6 +253,12 @@ final class UnifiedShadeHost extends FrameLayout {
         notifications.setVisibility(next == NOTIFICATIONS ? View.VISIBLE : View.GONE);
         connections.setVisibility(next == QUICK_SETTINGS ? View.VISIBLE : View.GONE);
         connections.setActive(next == QUICK_SETTINGS);
+        updateHeaderVisibility();
+        updateHeaderFocus(navigation.focusedZone());
+    }
+
+    void updateHeaderFocus(int zone) {
+        if (!selectorHandoffActive) dateHeader.setFocusedZone(zone);
         updateHeaderVisibility();
     }
 
@@ -195,9 +319,26 @@ final class UnifiedShadeHost extends FrameLayout {
     }
 
     private void updateHeaderVisibility() {
-        boolean showMedia = mediaExpanded && displayedPage == NOTIFICATIONS;
-        dateHeader.setVisibility(showMedia ? View.GONE : View.VISIBLE);
+        // Show navigation segments when selected even if the compact media
+        // header normally replaces them. Restore it on focus return.
+        boolean showMedia = mediaExpanded && displayedPage == NOTIFICATIONS
+                && !navigation.isStatusBarFocused()
+                && !selectorRevealPrepared && !selectorHandoffActive;
+        if (externalHeader) {
+            headerPlaceholder.setVisibility(showMedia ? View.GONE : View.VISIBLE);
+            dateHeader.setVisibility(showMedia ? View.GONE : View.VISIBLE);
+            if (onExternalHeaderVisibility != null) {
+                onExternalHeaderVisibility.accept(!showMedia);
+            }
+        } else {
+            dateHeader.setVisibility(showMedia ? View.GONE : View.VISIBLE);
+        }
         mediaModeHeader.setVisibility(showMedia ? View.VISIBLE : View.GONE);
+    }
+
+    int externalHeaderHeight() {
+        return externalHeader
+                ? ShadeDateHeader.layoutParams(getContext()).height : 0;
     }
 
     int page() {

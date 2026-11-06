@@ -3,10 +3,10 @@ package dev.q25.bb7pulldown;
 import android.view.KeyEvent;
 
 /**
- * Shared status-bar focus and keyboard routing for both BB UI shades.
+ * Shared shade-header focus and keyboard routing for both BB UI shades.
  *
- * The native Android status bar remains the visual target. Each panel keeps
- * its own content focus, while this controller owns the two focus zones and
+ * The blank navigation header is the visual focus target. Each panel keeps
+ * its own content focus, while this controller owns the two header zones and
  * identical Up / Down / Left / Right / Enter / Back behavior.
  *
  * Down and Back are separate callbacks. The owning ShadeUiController decides

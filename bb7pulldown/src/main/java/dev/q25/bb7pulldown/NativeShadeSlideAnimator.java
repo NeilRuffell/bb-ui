@@ -48,6 +48,26 @@ final class NativeShadeSlideAnimator {
         return true;
     }
 
+    /**
+     * Selector-confirmed opening animates ONLY BB content under its header.
+     * Adopt the already-expanded native window as OPEN so ordinary drag-to-
+     * close and native close animations still work from that point forward.
+     * This deliberately does not move the native window on entry.
+     */
+    static boolean adoptExpandedWindow(FrameLayout window) {
+        if (!enabled() || window == null || !window.isAttachedToWindow()
+                || !NativeShadeHostBridge.ownsNativeShadeWindow()) return false;
+        restore();
+        int screenHeight = window.getResources().getDisplayMetrics().heightPixels;
+        int distance = NativeShadeSlidePolicy.travelDistance(window.getHeight(), screenHeight);
+        originalY = window.getTranslationY();
+        hiddenY = NativeShadeSlidePolicy.hiddenTranslation(originalY, distance);
+        animatedWindow = window;
+        phase = Phase.OPEN;
+        Log.i(TAG, "Native shade window adopted as open after fixed-header reveal");
+        return true;
+    }
+
     static boolean animateOpen(Runnable completed) {
         final View target = animatedWindow;
         if (target == null || phase != Phase.OPENING) return false;

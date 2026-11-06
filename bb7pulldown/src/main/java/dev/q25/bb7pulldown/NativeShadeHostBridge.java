@@ -1,7 +1,11 @@
 package dev.q25.bb7pulldown;
 
+import android.animation.Animator;
+import android.animation.AnimatorListenerAdapter;
+import android.animation.ValueAnimator;
 import android.util.Log;
 import android.graphics.Rect;
+import android.view.animation.DecelerateInterpolator;
 import android.widget.EditText;
 import android.widget.SeekBar;
 import android.view.ViewConfiguration;
@@ -53,6 +57,15 @@ final class NativeShadeHostBridge {
     private static FrameLayout clippedWindow;
     private static Rect originalWindowClip;
     private static int reservedStatusBandHeight;
+    // Preserve a clear strip for the selector's ORIGINAL separate window
+    // for the ENTIRE opened shade, not only its 220ms reveal animation.
+    private static int externalHeaderHeight;
+    private static boolean externalHeaderVisible;
+    // A selector-confirmed open reveals the entire native window gradually
+    // from just below the *same* mounted header. Clipping the native window
+    // (not only its BB child) prevents stock QS/notifications showing behind.
+    private static int selectorRevealBottom = -1;
+    private static ValueAnimator selectorRevealAnimator;
     private static final View.OnLayoutChangeListener WINDOW_CLIP_LAYOUT =
             (view, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom) -> {
                 if (view == clippedWindow) updateWindowClip();
@@ -308,6 +321,9 @@ final class NativeShadeHostBridge {
             root.bringToFront();
             mountedRef = new WeakReference<>(root);
             beginWindowClip(window, topInset);
+            externalHeaderHeight = root.externalHeaderHeight();
+            externalHeaderVisible = externalHeaderHeight > 0;
+            updateWindowClip();
             NativeShadeStatusBarVisibility.onBbShadeMountChanged(true);
             Log.i(TAG, "Native status-bar region left transparent; original icons retained");
             // Do not reset nativeGestureInProgress: a heads-up or native
@@ -378,6 +394,7 @@ final class NativeShadeHostBridge {
                 + reservedStatusBandHeight + "px");
     }
 
+    /** Clamp bottom while revealing without changing the status-bar top clip. */
     private static void updateWindowClip() {
         FrameLayout window = clippedWindow;
         if (window == null) return;
@@ -386,10 +403,72 @@ final class NativeShadeHostBridge {
         if (width <= 0 || height <= 0) return;
         int[] bounds = NativeShadeStatusBandPolicy.clipBounds(
                 width, height, reservedStatusBandHeight);
+        if (externalHeaderVisible) {
+            bounds[1] = Math.min(bounds[3], bounds[1] + externalHeaderHeight);
+        }
+        if (selectorRevealBottom >= 0) {
+            bounds[3] = Math.min(bounds[3],
+                    Math.max(bounds[1], selectorRevealBottom));
+        }
         window.setClipBounds(new Rect(bounds[0], bounds[1], bounds[2], bounds[3]));
     }
 
+    /**
+     * Place the reveal boundary immediately BELOW the transferred 49dp
+     * header. Only the native shade WINDOW is clipped; its entire existing
+     * rendering tree remains attached and nothing stock bleeds through.
+     */
+    /** When expanded media replaces navigation, expose the media header. */
+    static void setExternalHeaderVisible(boolean visible) {
+        if (externalHeaderHeight == 0 || externalHeaderVisible == visible) return;
+        externalHeaderVisible = visible;
+        updateWindowClip();
+    }
+
+    static boolean prepareSelectorReveal(int headerHeightPx) {
+        if (!ownsNativeShadeWindow() || clippedWindow == null) return false;
+        cancelSelectorReveal();
+        selectorRevealBottom = reservedStatusBandHeight + Math.max(0, headerHeightPx);
+        updateWindowClip();
+        return true;
+    }
+
+    static boolean animateSelectorReveal(Runnable completed) {
+        FrameLayout window = clippedWindow;
+        if (!ownsNativeShadeWindow() || window == null || selectorRevealBottom < 0
+                || window.getHeight() <= 0) return false;
+        int start = Math.min(window.getHeight(), selectorRevealBottom);
+        ValueAnimator animator = ValueAnimator.ofInt(start, window.getHeight());
+        selectorRevealAnimator = animator;
+        animator.setDuration(220);
+        animator.setInterpolator(new DecelerateInterpolator(1.4f));
+        animator.addUpdateListener(frame -> {
+            if (selectorRevealAnimator != frame || clippedWindow != window) return;
+            selectorRevealBottom = (Integer) frame.getAnimatedValue();
+            updateWindowClip();
+        });
+        animator.addListener(new AnimatorListenerAdapter() {
+            @Override public void onAnimationEnd(Animator ended) {
+                if (selectorRevealAnimator != ended) return;
+                cancelSelectorReveal();
+                completed.run();
+            }
+        });
+        animator.start();
+        Log.i(TAG, "Native content reveal starts below unchanged navigation header");
+        return true;
+    }
+
+    static void cancelSelectorReveal() {
+        ValueAnimator animator = selectorRevealAnimator;
+        selectorRevealAnimator = null;
+        selectorRevealBottom = -1;
+        if (animator != null) animator.cancel();
+        updateWindowClip();
+    }
+
     private static void endWindowClip() {
+        cancelSelectorReveal();
         FrameLayout window = clippedWindow;
         if (window == null) return;
         window.removeOnLayoutChangeListener(WINDOW_CLIP_LAYOUT);
@@ -397,6 +476,8 @@ final class NativeShadeHostBridge {
         clippedWindow = null;
         originalWindowClip = null;
         reservedStatusBandHeight = 0;
+        externalHeaderHeight = 0;
+        externalHeaderVisible = false;
         Log.i(TAG, "Native shade window drawing bounds restored");
     }
 
@@ -454,6 +535,11 @@ final class NativeShadeHostBridge {
         UnifiedShadeHost bb = mountedRef.get();
         boolean mounted = bb != null && bb.getParent() == window;
         int action = source.getActionMasked();
+
+        // The selector's original subpanel stays mounted for the entire BB
+        // shade. When the native shade window is above it for touch dispatch,
+        // route only touches on the reserved header band to the SAME View.
+        if (mounted && PullDownHook.routeExternalHeaderTouch(source)) return true;
 
         if (action == MotionEvent.ACTION_DOWN) {
             nativeGestureInProgress = !mounted;

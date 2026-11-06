@@ -29,6 +29,7 @@ import android.util.Log;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
+import android.view.ViewGroup;
 import android.view.WindowManager;
 
 import java.util.Collections;
@@ -94,7 +95,12 @@ public final class PullDownHook implements IXposedHookLoadPackage {
     private static View decoratedStatusBar;
     private static WindowManager focusManager;
     private static View focusWindow;
+    // Same presentation class used by the fully opened shade; no page content
+    // is attached until the user activates a header selection.
+    private static ShadeDateHeader standaloneHeader;
+    private static boolean selectorTouchInProgress;
     private static BroadcastReceiver focusReceiver;
+    private static Context focusReceiverContext;
 
     /**
      * One navigation/session owner for the native status bar and both shade
@@ -106,6 +112,15 @@ public final class PullDownHook implements IXposedHookLoadPackage {
                 @Override public void onStatusFocusChanged(int zone) {
                     TwoColumnPanel activePanel = panel;
                     if (activePanel != null) activePanel.refreshAppIconFocus();
+                    UnifiedShadeHost current = shadeHost;
+                    if (current != null) current.updateHeaderFocus(zone);
+                    ShadeDateHeader selector = standaloneHeader;
+                    // Enter causes zone NONE before calling onShowPage. Keep
+                    // the original selected highlight throughout the handoff.
+                    if (selector != null && (zone != ShadeStatusNavigation.NONE
+                            || shadeHost != null && !openingOrClosing)) {
+                        selector.setFocusedZone(zone);
+                    }
                     updateStatusAppearance();
                 }
 
@@ -119,7 +134,8 @@ public final class PullDownHook implements IXposedHookLoadPackage {
                     if (anchor == null) anchor = nativeStatusBar.get();
                     if (anchor == null) return;
                     Context context = anchor.getContext();
-                    if (focusWindow != null) dismissStatusFocus();
+                    // showShade performs a one-time header handoff after the
+                    // selected shade has passed its native readiness checks.
                     showShade(context, page);
                 }
 
@@ -234,10 +250,17 @@ public final class PullDownHook implements IXposedHookLoadPackage {
                     // must run on SystemUI's main thread; consume the command now.
                     param.setResult(null); // void command: prevent Overview transition
                     new Handler(Looper.getMainLooper()).post(() -> {
-                        if (focusWindow != null) dismissStatusFocus();
-                        else showStatusFocus(bar.getContext());
+                        if (shadeHost != null) {
+                            // The header is already part of the open shade.
+                            // Focus it without rebuilding or switching pages.
+                            NAVIGATION.focusStatusBarFromPage(shadeHost.page());
+                        } else if (focusWindow != null) {
+                            dismissStatusFocus(); // Second BB press closes selector.
+                        } else {
+                            showStatusFocus(bar.getContext());
+                        }
                     });
-                    Log.i(TAG, "Native Recents command consumed; foreground app preserved");
+                    Log.i(TAG, "BlackBerry key requested shade page selector");
                 }
             });
             Log.i(TAG, "Native Recents command interception registered");
@@ -262,11 +285,14 @@ public final class PullDownHook implements IXposedHookLoadPackage {
     }
 
     private static void dismissStatusFocus() {
+        selectorTouchInProgress = false;
         NAVIGATION.leaveStandaloneStatusBar();
+        unregisterSelectorScreenOffReceiver();
         View root = focusWindow;
         WindowManager wm = focusManager;
         focusWindow = null;
         focusManager = null;
+        standaloneHeader = null;
         updateStatusAppearance();
         if (root != null && wm != null) {
             try { wm.removeViewImmediate(root); }
@@ -274,13 +300,106 @@ public final class PullDownHook implements IXposedHookLoadPackage {
         }
     }
 
+    private static void registerSelectorScreenOffReceiver(Context context) {
+        if (focusReceiver != null) return;
+        BroadcastReceiver receiver = new BroadcastReceiver() {
+            @Override public void onReceive(Context c, Intent intent) {
+                if (Intent.ACTION_SCREEN_OFF.equals(intent.getAction())) {
+                    if (shadeHost != null) dismissShadeImmediately();
+                    else dismissStatusFocus();
+                }
+            }
+        };
+        try {
+            context.registerReceiver(receiver, new IntentFilter(Intent.ACTION_SCREEN_OFF),
+                    Context.RECEIVER_NOT_EXPORTED);
+            focusReceiver = receiver;
+            focusReceiverContext = context;
+        } catch (RuntimeException error) {
+            // Retain the keyboard selector if a ROM restricts registration.
+            Log.w(TAG, "Selector screen-off cleanup receiver unavailable", error);
+        }
+    }
+
+    private static void unregisterSelectorScreenOffReceiver() {
+        BroadcastReceiver receiver = focusReceiver;
+        Context context = focusReceiverContext;
+        focusReceiver = null;
+        focusReceiverContext = null;
+        if (receiver != null && context != null) {
+            try { context.unregisterReceiver(receiver); }
+            catch (IllegalArgumentException ignored) { }
+        }
+    }
+
+    /** Keep the selector's exact View/window while keyboard focus moves to
+     * the expanded native shade. Only window input flags are changed. */
+    private static void updateSelectorWindowInput(boolean headerVisible) {
+        View selector = focusWindow;
+        WindowManager manager = focusManager;
+        if (selector == null || manager == null || shadeHost == null) return;
+        if (!(selector.getLayoutParams() instanceof WindowManager.LayoutParams)) return;
+        WindowManager.LayoutParams attrs =
+                (WindowManager.LayoutParams) selector.getLayoutParams();
+        int flags = attrs.flags | WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE;
+        if (headerVisible) flags &= ~WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
+        else flags |= WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
+        if (attrs.flags == flags) return;
+        attrs.flags = flags;
+        try {
+            manager.updateViewLayout(selector, attrs);
+        } catch (RuntimeException error) {
+            Log.e(TAG, "Unable to move keyboard focus from selector to shade", error);
+        }
+    }
+
+    /** Header touch forwarding for a native shade window layered over the
+     * selector's unchanged Surface. Never synthesize a second View. */
+    static boolean routeExternalHeaderTouch(MotionEvent event) {
+        ShadeDateHeader header = standaloneHeader;
+        if (header == null || shadeHost == null || !header.isShown()) {
+            selectorTouchInProgress = false;
+            return false;
+        }
+        int action = event.getActionMasked();
+        int[] origin = new int[2];
+        header.getLocationOnScreen(origin);
+        if (action == MotionEvent.ACTION_DOWN) {
+            float x = event.getRawX();
+            float y = event.getRawY();
+            selectorTouchInProgress = x >= origin[0] && x < origin[0] + header.getWidth()
+                    && y >= origin[1] && y < origin[1] + header.getHeight();
+        }
+        if (!selectorTouchInProgress) return false;
+        MotionEvent translated = MotionEvent.obtain(event);
+        try {
+            translated.setLocation(event.getRawX() - origin[0],
+                    event.getRawY() - origin[1]);
+            header.dispatchTouchEvent(translated);
+        } finally {
+            translated.recycle();
+        }
+        if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL
+                || action == MotionEvent.ACTION_POINTER_DOWN) {
+            selectorTouchInProgress = false;
+        }
+        return true;
+    }
+
+    private static void onSelectorHeaderVisibilityChanged(boolean visible) {
+        if (shadeHost == null) return;
+        NativeShadeHostBridge.setExternalHeaderVisible(visible);
+        updateSelectorWindowInput(visible);
+    }
+
     private static void showStatusFocus(Context context) {
         if (shadeHost != null || openingOrClosing
                 || focusWindow != null || locked(context)) return;
         WindowManager wm = (WindowManager) context.getSystemService(Context.WINDOW_SERVICE);
         if (wm == null) return;
-        // Standalone focus is only an input surface. It uses the exact same
-        // navigation state as the fully opened shade; it owns no controller.
+        // A small SystemUI-owned selector directly BELOW the actual status bar.
+        // No notification/QS page is mounted until confirmation. Reuse exactly
+        // the same header view and the same navigation controller as the shade.
         FrameLayout root = new FrameLayout(context) {
             @Override public boolean dispatchKeyEvent(KeyEvent event) {
                 if (NAVIGATION.handleKey(event)) return true;
@@ -290,24 +409,80 @@ public final class PullDownHook implements IXposedHookLoadPackage {
         root.setFocusable(true);
         root.setFocusableInTouchMode(true);
         root.setBackgroundColor(Color.TRANSPARENT);
+        ShadeDateHeader header = new ShadeDateHeader(context);
+        int headerHeight = ShadeDateHeader.layoutParams(context).height;
+        root.addView(header, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, headerHeight));
+        final float[] selectorTouchDown = new float[2];
+        final boolean[] selectorGestureMoved = new boolean[1];
+        final boolean[] selectorSwipeClosed = new boolean[1];
+        header.setOnTouchListener((view, event) -> {
+            int action = event.getActionMasked();
+            if (action == MotionEvent.ACTION_DOWN) {
+                selectorTouchDown[0] = event.getRawX();
+                selectorTouchDown[1] = event.getRawY();
+                selectorGestureMoved[0] = false;
+                selectorSwipeClosed[0] = false;
+                return true;
+            }
+            if (action == MotionEvent.ACTION_MOVE) {
+                if (Math.abs(event.getRawX() - selectorTouchDown[0]) >= dp(context, 12)
+                        || Math.abs(event.getRawY() - selectorTouchDown[1]) >= dp(context, 12)) {
+                    selectorGestureMoved[0] = true;
+                }
+                if (shadeHost != null && !selectorSwipeClosed[0]
+                        && selectorTouchDown[1] - event.getRawY() >= dp(context, 65)) {
+                    selectorSwipeClosed[0] = true;
+                    dismissShade();
+                }
+                return true;
+            }
+            if (action == MotionEvent.ACTION_UP && focusWindow == root
+                    && !locked(context) && !selectorGestureMoved[0]
+                    && !selectorSwipeClosed[0]) {
+                int zone = ShadeHeaderSegmentPolicy.zoneAt(event.getX(), view.getWidth());
+                if (zone != ShadeStatusNavigation.NONE) {
+                    if (shadeHost != null) switchShadePage(zone);
+                    else {
+                        NAVIGATION.selectStandaloneHeaderZone(zone);
+                        NAVIGATION.handleKey(KeyEvent.KEYCODE_ENTER, KeyEvent.ACTION_UP);
+                    }
+                }
+            }
+            return true;
+        });
         WindowManager.LayoutParams params = new WindowManager.LayoutParams(
-                WindowManager.LayoutParams.MATCH_PARENT, nativeStatusBarHeight(context),
+                WindowManager.LayoutParams.MATCH_PARENT, headerHeight,
                 STATUS_BAR_SUB_PANEL_WINDOW_TYPE,
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
                         | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
                 PixelFormat.TRANSLUCENT);
-        params.setTitle("BB7 status bar keyboard focus");
+        params.setTitle("BB UI shade page selector");
         params.gravity = Gravity.TOP | Gravity.START;
+        params.y = nativeStatusBarHeight(context);
         params.setFitInsetsTypes(0);
         try {
             wm.addView(root, params);
             focusManager = wm;
             focusWindow = root;
-            root.requestFocus();
+            standaloneHeader = header;
+            registerSelectorScreenOffReceiver(context);
             NAVIGATION.enterStandaloneStatusBar();
-            Log.i(TAG, "BlackBerry key entered native status-bar navigation");
+            root.requestFocus();
+            Log.i(TAG, "BlackBerry key displayed Notification / Quick Settings selector");
         } catch (Throwable error) {
-            Log.e(TAG, "Unable to acquire status-bar focus; native input retained", error);
+            unregisterSelectorScreenOffReceiver();
+            if (root.isAttachedToWindow()) {
+                try { wm.removeViewImmediate(root); }
+                catch (Throwable cleanupError) {
+                    Log.w(TAG, "Unable to remove failed page selector", cleanupError);
+                }
+            }
+            focusManager = null;
+            focusWindow = null;
+            standaloneHeader = null;
+            NAVIGATION.leaveStandaloneStatusBar();
+            Log.e(TAG, "Unable to present header selector; native input retained", error);
         }
     }
 
@@ -559,8 +734,9 @@ public final class PullDownHook implements IXposedHookLoadPackage {
                 decoratedStatusBar = null;
                 originalStatusBackground = null;
             }
-            boolean focused = NAVIGATION.isStatusBarFocused();
-            boolean decorated = focused || shadeHost != null || openingOrClosing
+            // Selector focus now renders in its own header immediately below
+            // the native status bar; it never paints the status bar itself.
+            boolean decorated = shadeHost != null || openingOrClosing
                     || recentsVisible || nativeShadeExpanded;
             if (!decorated) {
                 if (decoratedStatusBar == target) {
@@ -575,18 +751,9 @@ public final class PullDownHook implements IXposedHookLoadPackage {
                 decoratedStatusBar = target;
             }
             Drawable base = graphiteBackground(target.getContext());
-            int selectedZone = NAVIGATION.focusedZone();
-            if (selectedZone < 0 || target.getWidth() <= 0) {
-                target.setBackground(base);
-                return;
-            }
-            GradientDrawable selection = BB7Theme.selected(target.getContext(),
-                    dp(target.getContext(), 3), dp(target.getContext(), 1));
-            LayerDrawable background = new LayerDrawable(new Drawable[]{base, selection});
-            int mid = target.getWidth() / 2;
-            background.setLayerInset(1, selectedZone == 0 ? 0 : mid, 0,
-                    selectedZone == 0 ? target.getWidth() - mid : 0, 0);
-            target.setBackground(background);
+            // Focus selection belongs to the shared in-shade header only.
+            // The real status bar retains its base backdrop, not blue halves.
+            target.setBackground(base);
         });
     }
 
@@ -758,7 +925,6 @@ public final class PullDownHook implements IXposedHookLoadPackage {
      * window. Legacy mode is retained solely as an independent rollback.
      */
     private static void showShade(Context context, int initialPage) {
-        if (focusWindow != null) dismissStatusFocus();
         if (shadeHost != null || openingOrClosing || !enabled() || locked(context)) return;
         final boolean nativeMode = NativeShadeHostBridge.requested();
         if (nativeMode && !NativeShadeModePolicy.mayMount(
@@ -774,6 +940,14 @@ public final class PullDownHook implements IXposedHookLoadPackage {
             Log.w(TAG, "Shade WindowManager unavailable");
             return;
         }
+
+        // The visible header stays mounted in its original selector window
+        // for the whole shade session. There is NO View/window handoff.
+        final ShadeDateHeader existingHeader = standaloneHeader;
+        final boolean fromSelector = existingHeader != null
+                && focusWindow instanceof FrameLayout
+                && existingHeader.getParent() == focusWindow;
+        if (!fromSelector && focusWindow != null) dismissStatusFocus();
 
         try {
         SystemUiNotificationObserver.refreshBeforeOpen();
@@ -825,7 +999,13 @@ public final class PullDownHook implements IXposedHookLoadPackage {
 
         UnifiedShadeHost root = new UnifiedShadeHost(
                 context, notifications, connections, NAVIGATION, initialPage,
-                PullDownHook::dismissShade);
+                PullDownHook::dismissShade, PullDownHook::switchShadePage,
+                fromSelector ? existingHeader : null,
+                fromSelector ? PullDownHook::onSelectorHeaderVisibilityChanged : null);
+        if (fromSelector) {
+            root.beginSelectorHandoff(initialPage);
+            if (!nativeMode) root.prepareSelectorReveal();
+        }
         // Construct legacy window parameters only in rollback mode.
         // Native mode must not allocate a second shade window at all.
         WindowManager.LayoutParams params = null;
@@ -837,7 +1017,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
                             - nativeStatusBarHeight(context)),
                     STATUS_BAR_SUB_PANEL_WINDOW_TYPE,
                     WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
-                    PixelFormat.OPAQUE);
+                    fromSelector ? PixelFormat.TRANSLUCENT : PixelFormat.OPAQUE);
             params.setTitle("BB UI Unified Shade");
             params.gravity = Gravity.TOP | Gravity.START;
             params.y = nativeStatusBarHeight(context);
@@ -846,7 +1026,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
                     WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS;
             height = params.height;
         }
-        root.setTranslationY(nativeMode ? 0f : -height);
+        root.setTranslationY(nativeMode || fromSelector ? 0f : -height);
         boolean attached = false;
         boolean nativeSlidePrepared = false;
         try {
@@ -854,10 +1034,20 @@ public final class PullDownHook implements IXposedHookLoadPackage {
                 if (!NativeShadeHostBridge.attach(root, nativeStatusBarHeight(context))) {
                     throw new IllegalStateException("Cannot mount BB UI in Q25 native shade");
                 }
-                // Move the EXISTING native shade window, not a second BB overlay
-                // and not just its foreground child (which would expose stock QS).
-                nativeSlidePrepared = NativeShadeSlideAnimator.prepareOpen(
-                        NativeShadeHostBridge.shadeWindow(), pendingNativeTouchOpen != null);
+                // Native gesture opening still slides its whole window.
+                // Selector confirmation leaves its original View AND window
+                // stationary, with shade content clipped beneath that band.
+                if (fromSelector) {
+                    // Clip the entire native window below the original selector
+                    // to prevent stock SystemUI siblings showing through.
+                    if (!NativeShadeHostBridge.prepareSelectorReveal(
+                            ShadeDateHeader.layoutParams(context).height)) {
+                        Log.w(TAG, "Cannot prepare native selector reveal; using static shade");
+                    }
+                } else {
+                    nativeSlidePrepared = NativeShadeSlideAnimator.prepareOpen(
+                            NativeShadeHostBridge.shadeWindow(), pendingNativeTouchOpen != null);
+                }
             } else {
                 manager.addView(root, params);
             }
@@ -866,6 +1056,12 @@ public final class PullDownHook implements IXposedHookLoadPackage {
             windowManager = manager; // deliberately null for native shade mode
             panel = notifications;
             quickPanel = connections;
+            if (fromSelector) {
+                // Switch only keyboard ownership; do not remove or redraw
+                // either the selector window or its original header.
+                updateSelectorWindowInput(true);
+                Log.i(TAG, "Original selector header/window stay mounted throughout shade");
+            }
             NAVIGATION.onShadeOpened(initialPage);
             registerScreenOffReceiver(context);
             mediaSessions = nativeMedia;
@@ -880,7 +1076,25 @@ public final class PullDownHook implements IXposedHookLoadPackage {
                     dismissShadeImmediately();
                     return;
                 }
-                if (nativeSlidePrepared) {
+                if (fromSelector) {
+                    // Real shade window stays anchored. Only its clip boundary
+                    // travels DOWN from the existing selected header.
+                    Runnable completed = () -> {
+                        if (shadeHost != root) return;
+                        // Rejoin the original native drag-to-close lifecycle
+                        // once the one-off content reveal is finished.
+                        NativeShadeSlideAnimator.adoptExpandedWindow(
+                                NativeShadeHostBridge.shadeWindow());
+                        openingOrClosing = false;
+                        root.completeSelectorHandoff();
+                        root.focusContent();
+                    };
+                    if (!NativeShadeHostBridge.animateSelectorReveal(completed)) {
+                        NativeShadeHostBridge.cancelSelectorReveal();
+                        Log.w(TAG, "Native clip animation unavailable; showing full shade");
+                        root.post(completed);
+                    }
+                } else if (nativeSlidePrepared) {
                     if (NativeShadeSlideAnimator.isTouchOpening()) {
                         // Status-bar MOVE/UP owns the window translation until
                         // release. No competing timed entrance animation.
@@ -908,15 +1122,24 @@ public final class PullDownHook implements IXposedHookLoadPackage {
             } else {
                 Log.i(TAG, "Unified shade window attached: initialPage=" + initialPage
                         + " heightPx=" + height);
-                root.post(() -> {
-                    if (shadeHost != root) return;
-                    root.animate().translationY(0f).setDuration(220).withEndAction(() -> {
-                        if (shadeHost == root) {
-                            openingOrClosing = false;
-                            root.focusContent();
-                        }
-                    }).start();
-                });
+                if (fromSelector) {
+                    root.animateSelectorReveal(() -> {
+                        if (shadeHost != root) return;
+                        openingOrClosing = false;
+                        root.completeSelectorHandoff();
+                        root.focusContent();
+                    });
+                } else {
+                    root.post(() -> {
+                        if (shadeHost != root) return;
+                        root.animate().translationY(0f).setDuration(220).withEndAction(() -> {
+                            if (shadeHost == root) {
+                                openingOrClosing = false;
+                                root.focusContent();
+                            }
+                        }).start();
+                    });
+                }
             }
         } catch (Throwable error) {
             Log.e(TAG, "Unable to attach unified shade; rolling back", error);
@@ -933,11 +1156,22 @@ public final class PullDownHook implements IXposedHookLoadPackage {
             } else {
                 openingOrClosing = false;
             }
+            restoreSelectorAfterFailedMount(fromSelector, initialPage);
         }
         } catch (Throwable initializationError) {
             openingOrClosing = false;
+            restoreSelectorAfterFailedMount(fromSelector, initialPage);
             Log.e(TAG, "Unable to initialize unified shade pages", initializationError);
         }
+    }
+
+    /** Failed attach never removed the header: only restore the keyboard
+     * selector's selection state and focus on the existing window. */
+    private static void restoreSelectorAfterFailedMount(boolean fromSelector, int zone) {
+        if (!fromSelector || focusWindow == null || shadeHost != null) return;
+        NAVIGATION.enterStandaloneStatusBar();
+        NAVIGATION.selectStandaloneHeaderZone(zone);
+        focusWindow.requestFocus();
     }
 
     private static void dismissPanel() {
@@ -1031,6 +1265,8 @@ public final class PullDownHook implements IXposedHookLoadPackage {
         try {
             current.clearStatusBarFocus();
             current.animate().cancel();
+            current.finishSelectorReveal();
+            current.completeSelectorHandoff();
             if (nativeMount) {
                 // Collapse BEFORE resetting the native window translation, so
                 // no full shade flashes back onscreen during animated dismissal.
@@ -1052,6 +1288,8 @@ public final class PullDownHook implements IXposedHookLoadPackage {
             quickPanel = null;
             windowManager = null;
             openingOrClosing = false;
+            // Original selector stays attached until AFTER full shade close.
+            if (focusWindow != null) dismissStatusFocus();
             updateStatusAppearance();
             Log.i(TAG, "Unified shade window removed");
         }

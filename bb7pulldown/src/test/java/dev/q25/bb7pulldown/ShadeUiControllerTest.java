@@ -55,6 +55,42 @@ public final class ShadeUiControllerTest {
         assertTrue(fake.navigation.handleKey(code, KeyEvent.ACTION_UP));
     }
 
+    @Test public void bbButtonShowsHeaderBeforeAnyShadeOpens() {
+        FakeHost host = new FakeHost();
+        host.navigation.enterStandaloneStatusBar();
+        assertEquals(0, host.opened);
+        assertEquals(ShadeStatusNavigation.NONE, host.navigation.activePage());
+        assertEquals(ShadeStatusNavigation.NOTIFICATIONS, host.focusZone);
+        key(host, KeyEvent.KEYCODE_DPAD_RIGHT);
+        assertEquals(ShadeStatusNavigation.QUICK_SETTINGS, host.focusZone);
+        assertEquals(0, host.opened);
+        key(host, KeyEvent.KEYCODE_DPAD_CENTER);
+        assertEquals(1, host.opened);
+        assertEquals(ShadeStatusNavigation.QUICK_SETTINGS, host.navigation.activePage());
+        assertEquals(ShadeStatusNavigation.NONE, host.navigation.focusedZone());
+    }
+
+    @Test public void touchSelectionReusesHeaderFocusAndActivation() {
+        FakeHost host = new FakeHost();
+        host.navigation.enterStandaloneStatusBar();
+        host.navigation.selectStandaloneHeaderZone(ShadeStatusNavigation.QUICK_SETTINGS);
+        assertEquals(ShadeStatusNavigation.QUICK_SETTINGS, host.focusZone);
+        assertEquals(0, host.opened);
+        key(host, KeyEvent.KEYCODE_ENTER);
+        assertEquals(1, host.opened);
+        assertEquals(ShadeStatusNavigation.QUICK_SETTINGS, host.navigation.activePage());
+    }
+
+    @Test public void standaloneTouchCannotStealFocusFromOpenShadeOrIdle() {
+        FakeHost host = new FakeHost();
+        host.navigation.selectStandaloneHeaderZone(ShadeStatusNavigation.QUICK_SETTINGS);
+        assertFalse(host.navigation.isStatusBarFocused());
+        host.navigation.onShadeOpened(ShadeStatusNavigation.NOTIFICATIONS);
+        host.navigation.selectStandaloneHeaderZone(ShadeStatusNavigation.QUICK_SETTINGS);
+        assertFalse(host.navigation.isStatusBarFocused());
+        assertEquals(ShadeStatusNavigation.NOTIFICATIONS, host.navigation.activePage());
+    }
+
     @Test public void backFromStandaloneStatusBarExitsWithoutOpeningShade() {
         FakeHost host = new FakeHost();
         host.navigation.enterStandaloneStatusBar();

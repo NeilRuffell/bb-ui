@@ -7,10 +7,12 @@ import android.view.KeyEvent;
  *
  * The SystemUI integration (currently PullDownHook, later native SystemUI)
  * implements Listener. Both shade pages and the standalone status-bar focus
- * surface receive this same controller, not separate navigation instances.
+ * header selector receive this same controller, not separate navigation instances.
  *
- * Back from the status bar always exits the current surface; Down returns to
- * shade content, or opens native Recents when the shade has not been opened.
+ * The BB button first enters standalone selector focus without opening a
+ * page. The user chooses Notifications or Quick Settings; only the selected
+ * page is attached. Back exits the selector, Down preserves native Recents
+ * behavior, and keyboard navigation is shared with the opened shade.
  */
 final class ShadeUiController {
     interface Listener {
@@ -52,10 +54,17 @@ final class ShadeUiController {
         });
     }
 
-    /** Status bar focused without any shade open (native Recents shortcut). */
+    /** Compact page selector focused without opening either shade. */
     void enterStandaloneStatusBar() {
         openPage = ShadeStatusNavigation.NONE;
         status.enter(ShadeStatusNavigation.NOTIFICATIONS);
+    }
+
+    /** Touch-select one page in the same shared keyboard/navigation state. */
+    void selectStandaloneHeaderZone(int zone) {
+        if (openPage == ShadeStatusNavigation.NONE && status.isFocused()) {
+            status.enter(zone);
+        }
     }
 
     void leaveStandaloneStatusBar() {
