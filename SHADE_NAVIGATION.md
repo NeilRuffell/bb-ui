@@ -5,6 +5,8 @@
 > For the authoritative current ownership model see
 > [Design philosophy](docs/DESIGN_PHILOSOPHY.md) and
 > [Native shade migration](docs/NATIVE_SHADE_MIGRATION.md).
+> For the current blank navigation-header and BlackBerry-key behavior, see
+> [Shared shade navigation header](docs/SHADE_HEADER_NAVIGATION.md).
 > Current unlocked QS presentation uses `BB6NativeQsPanel`, not
 > `BB6ConnectionsPanel`.
 
