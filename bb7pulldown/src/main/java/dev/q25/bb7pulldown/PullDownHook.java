@@ -386,6 +386,12 @@ public final class PullDownHook implements IXposedHookLoadPackage {
         return true;
     }
 
+    private static void onSelectorHeaderVisibilityChanged(boolean visible) {
+        if (shadeHost == null) return;
+        NativeShadeHostBridge.setExternalHeaderVisible(visible);
+        updateSelectorWindowInput(visible);
+    }
+
     private static void showStatusFocus(Context context) {
         if (shadeHost != null || openingOrClosing
                 || focusWindow != null || locked(context)) return;
@@ -935,20 +941,13 @@ public final class PullDownHook implements IXposedHookLoadPackage {
             return;
         }
 
-        // A selector-confirmed shade MUST reuse this exact header object.
-        // Keep the empty compact window until the new shade has attached,
-        // then release it before enabling content/keyboard input.
-        final ShadeDateHeader transferredHeader = standaloneHeader;
-        final boolean fromSelector = transferredHeader != null
-                && focusWindow instanceof FrameLayout;
-        if (fromSelector) {
-            android.view.ViewParent parent = transferredHeader.getParent();
-            if (parent instanceof ViewGroup) {
-                ((ViewGroup) parent).removeView(transferredHeader);
-            }
-        } else if (focusWindow != null) {
-            dismissStatusFocus();
-        }
+        // The visible header stays mounted in its original selector window
+        // for the whole shade session. There is NO View/window handoff.
+        final ShadeDateHeader existingHeader = standaloneHeader;
+        final boolean fromSelector = existingHeader != null
+                && focusWindow instanceof FrameLayout
+                && existingHeader.getParent() == focusWindow;
+        if (!fromSelector && focusWindow != null) dismissStatusFocus();
 
         try {
         SystemUiNotificationObserver.refreshBeforeOpen();
@@ -1001,7 +1000,8 @@ public final class PullDownHook implements IXposedHookLoadPackage {
         UnifiedShadeHost root = new UnifiedShadeHost(
                 context, notifications, connections, NAVIGATION, initialPage,
                 PullDownHook::dismissShade, PullDownHook::switchShadePage,
-                fromSelector ? transferredHeader : null);
+                fromSelector ? existingHeader : null,
+                fromSelector ? PullDownHook::onSelectorHeaderVisibilityChanged : null);
         if (fromSelector) {
             root.beginSelectorHandoff(initialPage);
             if (!nativeMode) root.prepareSelectorReveal();
@@ -1017,7 +1017,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
                             - nativeStatusBarHeight(context)),
                     STATUS_BAR_SUB_PANEL_WINDOW_TYPE,
                     WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
-                    PixelFormat.OPAQUE);
+                    fromSelector ? PixelFormat.TRANSLUCENT : PixelFormat.OPAQUE);
             params.setTitle("BB UI Unified Shade");
             params.gravity = Gravity.TOP | Gravity.START;
             params.y = nativeStatusBarHeight(context);
@@ -1034,12 +1034,12 @@ public final class PullDownHook implements IXposedHookLoadPackage {
                 if (!NativeShadeHostBridge.attach(root, nativeStatusBarHeight(context))) {
                     throw new IllegalStateException("Cannot mount BB UI in Q25 native shade");
                 }
-                // Native gesture opening still slides its whole window as
-                // before. Selector confirmation leaves the window stationary;
-                // its already-transferred header never moves during reveal.
+                // Native gesture opening still slides its whole window.
+                // Selector confirmation leaves its original View AND window
+                // stationary, with shade content clipped beneath that band.
                 if (fromSelector) {
-                    // Clip the entire native window just below the transferred
-                    // header, so stock SystemUI siblings cannot show through.
+                    // Clip the entire native window below the original selector
+                    // to prevent stock SystemUI siblings showing through.
                     if (!NativeShadeHostBridge.prepareSelectorReveal(
                             ShadeDateHeader.layoutParams(context).height)) {
                         Log.w(TAG, "Cannot prepare native selector reveal; using static shade");
@@ -1057,10 +1057,10 @@ public final class PullDownHook implements IXposedHookLoadPackage {
             panel = notifications;
             quickPanel = connections;
             if (fromSelector) {
-                // The full shade now owns the EXACT SAME View instance.
-                // Release only the old empty input window, not its header.
-                dismissStatusFocus();
-                Log.i(TAG, "Original header transferred into shade without recreation");
+                // Switch only keyboard ownership; do not remove or redraw
+                // either the selector window or its original header.
+                updateSelectorWindowInput(true);
+                Log.i(TAG, "Original selector header/window stay mounted throughout shade");
             }
             NAVIGATION.onShadeOpened(initialPage);
             registerScreenOffReceiver(context);
@@ -1156,30 +1156,22 @@ public final class PullDownHook implements IXposedHookLoadPackage {
             } else {
                 openingOrClosing = false;
             }
-            restoreUnattachedSelectorHeader(fromSelector ? transferredHeader : null);
+            restoreSelectorAfterFailedMount(fromSelector, initialPage);
         }
         } catch (Throwable initializationError) {
             openingOrClosing = false;
-            restoreUnattachedSelectorHeader(fromSelector ? transferredHeader : null);
+            restoreSelectorAfterFailedMount(fromSelector, initialPage);
             Log.e(TAG, "Unable to initialize unified shade pages", initializationError);
         }
     }
 
-    /**
-     * If construction/native mount fails before removing the compact window,
-     * put its original header View back instead of leaving a blank selector.
-     */
-    private static void restoreUnattachedSelectorHeader(ShadeDateHeader header) {
-        if (header == null || !(focusWindow instanceof FrameLayout)) return;
-        FrameLayout selector = (FrameLayout) focusWindow;
-        if (header.getParent() != selector) {
-            android.view.ViewParent parent = header.getParent();
-            if (parent instanceof ViewGroup) ((ViewGroup) parent).removeView(header);
-            selector.addView(header, new FrameLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ShadeDateHeader.layoutParams(selector.getContext()).height));
-        }
+    /** Failed attach never removed the header: only restore the keyboard
+     * selector's selection state and focus on the existing window. */
+    private static void restoreSelectorAfterFailedMount(boolean fromSelector, int zone) {
+        if (!fromSelector || focusWindow == null || shadeHost != null) return;
         NAVIGATION.enterStandaloneStatusBar();
+        NAVIGATION.selectStandaloneHeaderZone(zone);
+        focusWindow.requestFocus();
     }
 
     private static void dismissPanel() {
@@ -1296,6 +1288,8 @@ public final class PullDownHook implements IXposedHookLoadPackage {
             quickPanel = null;
             windowManager = null;
             openingOrClosing = false;
+            // Original selector stays attached until AFTER full shade close.
+            if (focusWindow != null) dismissStatusFocus();
             updateStatusAppearance();
             Log.i(TAG, "Unified shade window removed");
         }
