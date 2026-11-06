@@ -15,7 +15,9 @@ without adding a second status bar or altering notification delivery.
 - Counts use the same text size and typeface as the native status-bar clock
   (LineageOS fallback 14sp). Category icons use a 26dp-wide, full-height
   image box without additional padding; the drawable provides its margins.
-  The group remains horizontally centered as a unit.
+  A 5dp count-to-icon gap and 10dp gap between active category groups prevent
+  crowding. No trailing margin is added after the last category, so the
+  group remains horizontally centered as a unit.
 - Switching modes in **BB UI Settings** takes effect through the existing
   app-owned ContentProvider and its live mode-change observer.
 

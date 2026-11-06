@@ -355,7 +355,11 @@ final class NativeStatusBarHubIcons {
         if (row == null) return;
         row.removeAllViews();
         Context context = row.getContext();
-        int spacing = dp(context, 5);
+        // Keep the larger icon and native clock-sized text, but give each
+        // count/icon pair a separate gap and each category room to breathe.
+        final int numberIconGap = dp(context, 5);
+        final int categoryGap = dp(context, 10);
+        int categoriesRemaining = counts.size();
         // Match the native clock's text appearance on the Q25.
         TextView clock = findClock();
         for (Map.Entry<String, Integer> entry : counts.entrySet()) {
@@ -381,9 +385,11 @@ final class NativeStatusBarHubIcons {
             number.setGravity(Gravity.CENTER);
             number.setFocusable(false);
             number.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-            pair.addView(number, new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams numberPlacement = new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.WRAP_CONTENT,
-                    ViewGroup.LayoutParams.MATCH_PARENT));
+                    ViewGroup.LayoutParams.MATCH_PARENT);
+            numberPlacement.setMarginEnd(numberIconGap);
+            pair.addView(number, numberPlacement);
 
             ImageView image = new ImageView(context);
             image.setImageDrawable(new NotificationTypeIconDrawable(category));
@@ -398,7 +404,9 @@ final class NativeStatusBarHubIcons {
             LinearLayout.LayoutParams placement = new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.WRAP_CONTENT,
                     ViewGroup.LayoutParams.MATCH_PARENT);
-            placement.setMarginEnd(spacing);
+            // Do not leave trailing margin after the final category; that
+            // would offset the centered group relative to the screen.
+            placement.setMarginEnd(--categoriesRemaining > 0 ? categoryGap : 0);
             row.addView(pair, placement);
         }
     }
