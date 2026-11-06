@@ -284,7 +284,7 @@ final class TwoColumnPanel extends FrameLayout {
         mediaContainer.addView(mediaRow, new LinearLayout.LayoutParams(
                 LayoutParams.MATCH_PARENT, dp(46)));
 
-        // Expands downward without changing the existing transport/control row.
+        // Expanded-only seek row sits immediately above the transport controls.
         mediaSeekRow = new LinearLayout(context);
         mediaSeekRow.setOrientation(LinearLayout.HORIZONTAL);
         mediaSeekRow.setGravity(Gravity.CENTER_VERTICAL);
@@ -355,7 +355,9 @@ final class TwoColumnPanel extends FrameLayout {
         mediaDuration.setGravity(Gravity.CENTER_VERTICAL | Gravity.RIGHT);
         mediaSeekRow.addView(mediaDuration, new LinearLayout.LayoutParams(
                 dp(52), LayoutParams.MATCH_PARENT));
-        mediaContainer.addView(mediaSeekRow, new LinearLayout.LayoutParams(
+        // Insert ahead of the transport row; artwork is prepended afterwards.
+        // Final expanded order: artwork, seekbar, transport controls.
+        mediaContainer.addView(mediaSeekRow, 0, new LinearLayout.LayoutParams(
                 LayoutParams.MATCH_PARENT, dp(48)));
 
         // Expanded-only artwork and metadata: artwork on the left, track info
@@ -415,8 +417,8 @@ final class TwoColumnPanel extends FrameLayout {
         metadataArea.addView(expandedMediaArtist, new LinearLayout.LayoutParams(
                 LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
 
-        // Artwork/info consumes the remaining height above the dedicated
-        // full-width transport row and the existing seek bar.
+        // Artwork/info consumes the remaining height above the seek bar
+        // and the dedicated full-width transport controls.
         mediaContainer.addView(mediaArtworkFrame, 0, new LinearLayout.LayoutParams(
                 LayoutParams.MATCH_PARENT, 0, 1f));
 
@@ -892,32 +894,36 @@ final class TwoColumnPanel extends FrameLayout {
             case KeyEvent.KEYCODE_DPAD_DOWN:
                 if (event.getAction() == KeyEvent.ACTION_DOWN) {
                     if (mediaControlsOpen) {
+                        // Visual order from top: mode header, artwork, seekbar,
+                        // transport controls. Keep hardware navigation aligned.
                         if (mediaModeSelected) {
                             if (code == KeyEvent.KEYCODE_DPAD_DOWN) {
                                 mediaModeSelected = false;
+                                mediaSeekSelected = true;
                                 updateMediaHighlight();
                                 notifyMediaHeader();
                             }
                         } else if (mediaSeekSelected) {
-                            if (code == KeyEvent.KEYCODE_DPAD_UP) {
+                            if (code == KeyEvent.KEYCODE_DPAD_DOWN) {
                                 mediaSeekSelected = false;
                                 updateMediaHighlight();
-                            }
-                        } else if (code == KeyEvent.KEYCODE_DPAD_DOWN) {
-                            mediaSeekSelected = true;
-                            updateMediaHighlight();
-                        } else {
-                            NativeMediaSessions.Entry entry = currentMediaSession();
-                            if (entry != null) {
-                                int first = MediaModePolicy.firstAvailable(
-                                        entry.canShuffle, entry.canRepeat);
-                                if (first >= 0) {
-                                    selectedMediaMode = first;
-                                    mediaModeSelected = true;
-                                    updateMediaHighlight();
-                                    notifyMediaHeader();
+                            } else {
+                                NativeMediaSessions.Entry entry = currentMediaSession();
+                                if (entry != null) {
+                                    int first = MediaModePolicy.firstAvailable(
+                                            entry.canShuffle, entry.canRepeat);
+                                    if (first >= 0) {
+                                        selectedMediaMode = first;
+                                        mediaModeSelected = true;
+                                        mediaSeekSelected = false;
+                                        updateMediaHighlight();
+                                        notifyMediaHeader();
+                                    }
                                 }
                             }
+                        } else if (code == KeyEvent.KEYCODE_DPAD_UP) {
+                            mediaSeekSelected = true;
+                            updateMediaHighlight();
                         }
                     } else if (code == KeyEvent.KEYCODE_DPAD_UP) {
                         enterStatusZone();
