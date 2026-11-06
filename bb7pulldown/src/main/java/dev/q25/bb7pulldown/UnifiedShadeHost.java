@@ -130,16 +130,14 @@ final class UnifiedShadeHost extends FrameLayout {
         // individually selected shuffle/repeat control, not the whole header.
         mediaModeHeader.setBackground(new GradientDrawable(
                 GradientDrawable.Orientation.TOP_BOTTOM,
-                BB7Theme.palette(context) == BB7Theme.Palette.DARK
-                        ? new int[] {0xff2f4053, 0xff1e2c3b}
-                        : new int[] {0xffecf1f7, 0xffd8e2ec}));
+                new int[] {0xff2f4053, 0xff1e2c3b}));
         mediaModeHeader.setVisibility(View.GONE);
         layout.addView(mediaModeHeader, new LinearLayout.LayoutParams(
                 LayoutParams.MATCH_PARENT, dp(32)));
 
         TextView heading = new TextView(context);
         heading.setText("Media");
-        heading.setTextColor(BB7Theme.palette(context).headingText);
+        heading.setTextColor(BB7Theme.Palette.DARK.headingText);
         heading.setTextSize(12);
         heading.setGravity(Gravity.CENTER_VERTICAL);
         mediaModeHeader.addView(heading, new LinearLayout.LayoutParams(
@@ -265,7 +263,7 @@ final class UnifiedShadeHost extends FrameLayout {
     private static TextView modeButton(Context context) {
         TextView button = new TextView(context);
         button.setTextSize(12);
-        button.setTextColor(BB7Theme.palette(context).headingText);
+        button.setTextColor(BB7Theme.Palette.DARK.headingText);
         button.setGravity(Gravity.CENTER);
         button.setPadding(12, 0, 12, 0);
         button.setFocusable(false);
