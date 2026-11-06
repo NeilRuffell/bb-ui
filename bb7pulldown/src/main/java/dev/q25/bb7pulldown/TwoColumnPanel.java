@@ -17,6 +17,7 @@ import android.graphics.Paint;
 import android.graphics.PixelFormat;
 import android.graphics.Rect;
 import android.os.Bundle;
+import android.graphics.drawable.ClipDrawable;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
@@ -76,7 +77,7 @@ final class TwoColumnPanel extends FrameLayout {
     }
 
     private static final String TAG = "BB7-PullDown";
-    // Solid upper/lower halves of the BBOS6 seek rail; no gradient or played tint.
+    // Solid unplayed upper/lower halves of the BBOS6 seek rail; no gradient.
     private static final int MEDIA_SEEK_TRACK_TOP = 0xff101010;
     private static final int MEDIA_SEEK_TRACK_BOTTOM = 0xff393839;
     private final BB7Theme.Palette palette;
@@ -319,8 +320,8 @@ final class TwoColumnPanel extends FrameLayout {
         // not clip it against the separate elapsed/total-time views.
         // This also keeps the touch-to-seek range aligned with the visible track.
         mediaSeekBar.setPadding(dp(32), 0, dp(32), 0);
-        // The whole rail is two flat horizontal halves. Do not distinguish
-        // played/unplayed portions until that BBOS6 detail is designed.
+        // Flat white played portion over the existing two-tone unplayed rail.
+        // Use native progress levels so the played segment tracks the thumb.
         mediaSeekBar.setProgressTintList(null);
         mediaSeekBar.setProgressBackgroundTintList(null);
         mediaSeekBar.setSecondaryProgressTintList(null);
@@ -853,10 +854,10 @@ final class TwoColumnPanel extends FrameLayout {
         return layers;
     }
 
-    /** Thin 4dp seek rail centered vertically: two flat colors with a hard split. */
+    /** Centered 4dp rail: hard two-tone unplayed track, solid white played track. */
     private Drawable mediaSeekTrackDrawable() {
         final int railHeight = dp(4);
-        return new Drawable() {
+        Drawable unplayed = new Drawable() {
             private final Paint topPaint = new Paint();
             private final Paint bottomPaint = new Paint();
 
@@ -867,8 +868,8 @@ final class TwoColumnPanel extends FrameLayout {
 
             @Override public void draw(Canvas canvas) {
                 Rect bounds = getBounds();
-                // ProgressBar may give the drawable the entire 48dp row.
-                // Its intrinsic height alone does not limit the painted height.
+                // ProgressBar may size the drawable to the entire seek row.
+                // Paint only the centered 4dp rail, not the drawable's full height.
                 int railTop = bounds.centerY() - railHeight / 2;
                 int halfway = railTop + railHeight / 2;
                 int railBottom = railTop + railHeight;
@@ -896,6 +897,17 @@ final class TwoColumnPanel extends FrameLayout {
                 return PixelFormat.TRANSLUCENT;
             }
         };
+
+        // Android updates R.id.progress with a 0..10000 drawable level.
+        // Clip only the white overlay from the left; do not clip the base track.
+        ClipDrawable played = new ClipDrawable(
+                new ColorDrawable(Color.WHITE), Gravity.LEFT, ClipDrawable.HORIZONTAL);
+        LayerDrawable layers = new LayerDrawable(new Drawable[] {unplayed, played});
+        layers.setId(0, android.R.id.background);
+        layers.setId(1, android.R.id.progress);
+        layers.setLayerHeight(1, railHeight);
+        layers.setLayerGravity(1, Gravity.CENTER_VERTICAL | Gravity.FILL_HORIZONTAL);
+        return layers;
     }
 
     /** Silver by default; selected pill alone uses the existing BB UI blue. */
