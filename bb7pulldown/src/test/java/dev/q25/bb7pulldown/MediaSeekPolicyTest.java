@@ -3,8 +3,28 @@ package dev.q25.bb7pulldown;
 import org.junit.Test;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
 public class MediaSeekPolicyTest {
+    @Test public void trackpadSeekRequiresExplicitFirstClickAndSecondClickExits() {
+        boolean editing = false;
+        assertFalse(MediaSeekPolicy.canTrackpadSeek(true, editing, true));
+        editing = MediaSeekPolicy.toggleTrackpadEditing(true, editing, true);
+        assertTrue(editing);
+        assertTrue(MediaSeekPolicy.canTrackpadSeek(true, editing, true));
+        editing = MediaSeekPolicy.toggleTrackpadEditing(true, editing, true);
+        assertFalse(editing);
+        assertFalse(MediaSeekPolicy.canTrackpadSeek(true, editing, true));
+    }
+
+    @Test public void unhighlightedOrUnavailableSeekCannotStartEditing() {
+        assertFalse(MediaSeekPolicy.toggleTrackpadEditing(false, false, true));
+        assertFalse(MediaSeekPolicy.toggleTrackpadEditing(true, false, false));
+        assertFalse(MediaSeekPolicy.canTrackpadSeek(false, true, true));
+        assertFalse(MediaSeekPolicy.canTrackpadSeek(true, true, false));
+    }
+
     @Test public void reportsPausedPositionWithoutExtrapolation() {
         assertEquals(20000L, MediaSeekPolicy.positionAt(
                 20000L, 180000L, 1000L, 1f, false, 10000L));
