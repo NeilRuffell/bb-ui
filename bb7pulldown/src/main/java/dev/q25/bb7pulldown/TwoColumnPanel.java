@@ -791,7 +791,7 @@ final class TwoColumnPanel extends FrameLayout {
     private GradientDrawable mediaSeekThumb(boolean selected) {
         GradientDrawable pill = new GradientDrawable(
                 GradientDrawable.Orientation.TOP_BOTTOM,
-                selected ? BB7Theme.gradientColors()
+                selected ? BB7Theme.gradientColors(getContext())
                         : new int[] {0xffe5e9ef, 0xffaeb6c0});
         pill.setShape(GradientDrawable.RECTANGLE);
         pill.setCornerRadius(dp(10));
@@ -804,7 +804,7 @@ final class TwoColumnPanel extends FrameLayout {
     private void updateMediaHighlight() {
         boolean focused = mediaRow.isFocused();
         mediaRow.setBackground(focused && !mediaControlsOpen
-                ? BB7Theme.selected(dp(2), dp(1))
+                ? BB7Theme.selected(getContext(), dp(2), dp(1))
                 : new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
                         palette == BB7Theme.Palette.DARK
                                 ? new int[] {0xff2f4053, 0xff1e2c3b}
@@ -837,7 +837,7 @@ final class TwoColumnPanel extends FrameLayout {
                     && !mediaSeekSelected && !mediaModeSelected
                     && selectedMediaButton == i;
             ImageView button = mediaButtons[i];
-            button.setBackground(selected ? BB7Theme.selected(dp(3), dp(1)) : null);
+            button.setBackground(selected ? BB7Theme.selected(getContext(), dp(3), dp(1)) : null);
             button.setColorFilter(selected || focused && !mediaControlsOpen
                     ? Color.WHITE : palette.headingText);
             button.setAlpha(enabled ? 1f : 0.35f);
@@ -1627,7 +1627,7 @@ final class TwoColumnPanel extends FrameLayout {
             GradientDrawable background;
             if (selected) {
                 // Keep the existing blue gradient, but make the list row square.
-                background = BB7Theme.selected(0, dp(1));
+                background = BB7Theme.selected(getContext(), 0, dp(1));
             } else {
                 background = new GradientDrawable();
                 background.setColor(palette.card);
@@ -1654,7 +1654,7 @@ final class TwoColumnPanel extends FrameLayout {
     }
 
     private GradientDrawable selectedBlueBackground() {
-        return BB7Theme.selected(dp(5), dp(1));
+        return BB7Theme.selected(getContext(), dp(5), dp(1));
     }
 
     private void enterStatusZone() {
@@ -1753,7 +1753,7 @@ final class TwoColumnPanel extends FrameLayout {
                     navigation.isStatusBarFocused());
             row.setSelected(selected);
             if (selected) {
-                row.setBackground(BB7Theme.selected(dp(3), dp(1)));
+                row.setBackground(BB7Theme.selected(getContext(), dp(3), dp(1)));
             } else {
                 row.setBackground(null);
             }
