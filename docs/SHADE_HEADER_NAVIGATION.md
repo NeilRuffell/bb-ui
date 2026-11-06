@@ -1,8 +1,9 @@
 # Shared BB UI navigation header
 
-The former 49dp BBOS6 date bar is now a blank, two-segment navigation
-header above Notifications and Quick Settings. Its gradient and height
-remain unchanged; visible labels will be added separately.
+The former 49dp BBOS6 date bar is now a two-segment navigation header
+above Notifications and Quick Settings. The left half is labeled
+**Notifications** and the right half **Quick Settings**. Labels are
+centered, and the gradient and header height remain unchanged.
 
 ## New keyboard behavior
 
@@ -41,7 +42,7 @@ and its animation/drag-to-open paths are unchanged.
 
 `ShadeDateHeader` retains the historical class/file name for internal
 compatibility. It no longer extends `TextClock`; it now contains two
-equal-width, unlabeled focus regions. `UnifiedShadeHost` owns its
+equal-width, labeled focus regions. `UnifiedShadeHost` owns its
 presentation and swipe/tap routing. `ShadeHeaderSegmentPolicy` is a
 pure, unit-tested touch hit-test.
 
@@ -58,8 +59,9 @@ adb -s 202512003630 install -r app/build/outputs/apk/debug/app-debug.apk &&
 adb -s 202512003630 shell am crash com.android.systemui
 ```
 
-Verify: BlackBerry key opens the real shade directly; the header has no
-date, text labels or native status bar blue halves; from top of
+Verify: BlackBerry key opens the real shade directly; the header has
+**Notifications** and **Quick Settings** labels (and no date or native
+status-bar blue halves); from top of
 Notifications/QS, Up, Left/Right, Enter, Down and Back retain their
 navigation semantics; touch either half changes page; swipe up still
 closes; media expansion correctly swaps header; the lock screen and

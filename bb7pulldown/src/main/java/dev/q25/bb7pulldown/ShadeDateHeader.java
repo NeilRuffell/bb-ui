@@ -3,23 +3,25 @@ package dev.q25.bb7pulldown;
 import dev.q25.trackpad.theme.BB7Theme;
 
 import android.content.Context;
+import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
 import android.view.Gravity;
 import android.view.View;
-import android.widget.FrameLayout;
+import android.widget.TextView;
 import android.widget.LinearLayout;
 
 /**
- * Unlabeled BBOS6-style header for Notifications and Quick Settings.
+ * BBOS6-style header for Notifications and Quick Settings.
  *
- * The 49dp gradient bar formerly displayed the date. It now presents two
- * equal-width focus regions while the shared navigation owner keeps all
- * keyboard state and action routing.
+ * The 49dp gradient bar formerly displayed the date. It presents two
+ * equally sized, centered text labels with focus highlighting while the
+ * shared navigation owner retains keyboard state and action routing.
  */
 final class ShadeDateHeader extends LinearLayout {
     private static final int HEIGHT_DP = 49;
-    private final FrameLayout notificationsSegment;
-    private final FrameLayout quickSettingsSegment;
+    private final TextView notificationsSegment;
+    private final TextView quickSettingsSegment;
+    private final int normalTextColor;
     private int focusedZone = ShadeStatusNavigation.NONE;
 
     ShadeDateHeader(Context context) {
@@ -27,6 +29,7 @@ final class ShadeDateHeader extends LinearLayout {
         setOrientation(HORIZONTAL);
         setGravity(Gravity.CENTER_VERTICAL);
         final BB7Theme.Palette palette = BB7Theme.palette(context);
+        normalTextColor = palette.headingText;
         final int[] colors = palette == BB7Theme.Palette.DARK
                 ? new int[]{0xff526477, 0xff3b4e60, 0xff263747}
                 : new int[]{0xfff9fbfe, 0xffe5ecf4, 0xffc8d4e1};
@@ -45,11 +48,15 @@ final class ShadeDateHeader extends LinearLayout {
                 0, LayoutParams.MATCH_PARENT, 1f));
     }
 
-    private static FrameLayout segment(Context context, String description) {
-        FrameLayout view = new FrameLayout(context);
+    private TextView segment(Context context, String label) {
+        TextView view = new TextView(context);
+        view.setText(label);
+        view.setTextSize(18);
+        view.setTextColor(normalTextColor);
+        view.setGravity(Gravity.CENTER);
+        view.setSingleLine(true);
         view.setFocusable(false);
         view.setClickable(false);
-        view.setContentDescription(description);
         view.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_YES);
         return view;
     }
@@ -61,6 +68,10 @@ final class ShadeDateHeader extends LinearLayout {
                 ? BB7Theme.selected(getContext(), dp(3), dp(1)) : null);
         quickSettingsSegment.setBackground(zone == ShadeStatusNavigation.QUICK_SETTINGS
                 ? BB7Theme.selected(getContext(), dp(3), dp(1)) : null);
+        notificationsSegment.setTextColor(
+                zone == ShadeStatusNavigation.NOTIFICATIONS ? Color.WHITE : normalTextColor);
+        quickSettingsSegment.setTextColor(
+                zone == ShadeStatusNavigation.QUICK_SETTINGS ? Color.WHITE : normalTextColor);
     }
 
     static LinearLayout.LayoutParams layoutParams(Context context) {
