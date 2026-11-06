@@ -98,6 +98,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
     // is attached until the user activates a header selection.
     private static ShadeDateHeader standaloneHeader;
     private static BroadcastReceiver focusReceiver;
+    private static Context focusReceiverContext;
 
     /**
      * One navigation/session owner for the native status bar and both shade
@@ -277,6 +278,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
 
     private static void dismissStatusFocus() {
         NAVIGATION.leaveStandaloneStatusBar();
+        unregisterSelectorScreenOffReceiver();
         View root = focusWindow;
         WindowManager wm = focusManager;
         focusWindow = null;
@@ -286,6 +288,37 @@ public final class PullDownHook implements IXposedHookLoadPackage {
         if (root != null && wm != null) {
             try { wm.removeViewImmediate(root); }
             catch (Throwable error) { Log.w(TAG, "Status focus removal failed", error); }
+        }
+    }
+
+    private static void registerSelectorScreenOffReceiver(Context context) {
+        if (focusReceiver != null) return;
+        BroadcastReceiver receiver = new BroadcastReceiver() {
+            @Override public void onReceive(Context c, Intent intent) {
+                if (Intent.ACTION_SCREEN_OFF.equals(intent.getAction())) {
+                    dismissStatusFocus();
+                }
+            }
+        };
+        try {
+            context.registerReceiver(receiver, new IntentFilter(Intent.ACTION_SCREEN_OFF),
+                    Context.RECEIVER_NOT_EXPORTED);
+            focusReceiver = receiver;
+            focusReceiverContext = context;
+        } catch (RuntimeException error) {
+            // Retain the keyboard selector if a ROM restricts registration.
+            Log.w(TAG, "Selector screen-off cleanup receiver unavailable", error);
+        }
+    }
+
+    private static void unregisterSelectorScreenOffReceiver() {
+        BroadcastReceiver receiver = focusReceiver;
+        Context context = focusReceiverContext;
+        focusReceiver = null;
+        focusReceiverContext = null;
+        if (receiver != null && context != null) {
+            try { context.unregisterReceiver(receiver); }
+            catch (IllegalArgumentException ignored) { }
         }
     }
 
@@ -338,10 +371,12 @@ public final class PullDownHook implements IXposedHookLoadPackage {
             focusManager = wm;
             focusWindow = root;
             standaloneHeader = header;
+            registerSelectorScreenOffReceiver(context);
             NAVIGATION.enterStandaloneStatusBar();
             root.requestFocus();
             Log.i(TAG, "BlackBerry key displayed Notification / Quick Settings selector");
         } catch (Throwable error) {
+            unregisterSelectorScreenOffReceiver();
             if (root.isAttachedToWindow()) {
                 try { wm.removeViewImmediate(root); }
                 catch (Throwable cleanupError) {
