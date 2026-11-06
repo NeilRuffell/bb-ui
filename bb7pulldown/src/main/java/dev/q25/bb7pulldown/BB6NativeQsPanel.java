@@ -474,7 +474,7 @@ final class BB6NativeQsPanel extends FrameLayout {
         views.lastFocused = focused;
         views.lastEnabled = enabled;
         views.lastActive = active;
-        if (focused) views.root.setBackground(BB7Theme.selected(dp(3), dp(1)));
+        if (focused) views.root.setBackground(BB7Theme.selected(getContext(), dp(3), dp(1)));
         else views.root.setBackgroundColor(palette.card);
         views.label.setTextColor(focused ? Color.WHITE : enabled ? palette.title : palette.muted);
         // BBOS6 uses green status text for an enabled connection, and a
