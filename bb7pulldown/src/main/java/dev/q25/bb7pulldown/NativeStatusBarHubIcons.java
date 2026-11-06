@@ -61,6 +61,9 @@ final class NativeStatusBarHubIcons {
     // Mutated only on the main thread; the observer and native hooks schedule here.
     private static ViewGroup nativeContainer;
     private static FrameLayout host;
+    // The full-width native status-bar root is the positioning anchor.
+    // The notification-only host remains the source of native icon eligibility.
+    private static FrameLayout centeredHost;
     private static LinearLayout strip;
     private static ContentObserver modeObserver;
     private static String currentMode = NotificationShadeModePolicy.APPS;
@@ -159,8 +162,11 @@ final class NativeStatusBarHubIcons {
     private static void onAttached(ViewGroup candidate) {
         if (!candidate.isAttachedToWindow()) return;
         FrameLayout resolved = findNotificationIconArea(candidate);
-        if (resolved == null) return; // Shelf, AOD or keyguard icon container.
-        if (nativeContainer == candidate && host == resolved && strip != null) {
+        FrameLayout centerRoot = findStatusBarRoot(candidate);
+        if (resolved == null || centerRoot == null) return;
+        // Shelf, AOD and keyguard containers have no matching status-bar path.
+        if (nativeContainer == candidate && host == resolved
+                && centeredHost == centerRoot && strip != null) {
             schedule();
             return;
         }
@@ -168,6 +174,7 @@ final class NativeStatusBarHubIcons {
         release();
         nativeContainer = candidate;
         host = resolved;
+        centeredHost = centerRoot;
         strip = new LinearLayout(candidate.getContext());
         strip.setOrientation(LinearLayout.HORIZONTAL);
         strip.setGravity(Gravity.CENTER_VERTICAL);
@@ -175,9 +182,11 @@ final class NativeStatusBarHubIcons {
         strip.setClickable(false);
         strip.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
         strip.setVisibility(View.GONE);
-        resolved.addView(strip, new FrameLayout.LayoutParams(
+        // Center the group against the *entire* actual status bar, not the
+        // left-side wrap-content notification slot. No new window/overlay.
+        centerRoot.addView(strip, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT,
-                Gravity.START | Gravity.CENTER_VERTICAL));
+                Gravity.CENTER_HORIZONTAL | Gravity.CENTER_VERTICAL));
         installVisibilityGuard();
 
         modeObserver = new ContentObserver(MAIN) {
@@ -215,6 +224,23 @@ final class NativeStatusBarHubIcons {
         return null;
     }
 
+    /** Only the actual PhoneStatusBarView, never an AOD or shelf parent. */
+    private static FrameLayout findStatusBarRoot(ViewGroup candidate) {
+        Context ctx = candidate.getContext();
+        int expected = ctx.getResources().getIdentifier(
+                "status_bar", "id", "com.android.systemui");
+        if (expected == 0) return null;
+        ViewParent ancestor = candidate.getParent();
+        while (ancestor instanceof View) {
+            View view = (View) ancestor;
+            if (view.getId() == expected && view instanceof FrameLayout) {
+                return (FrameLayout) view;
+            }
+            ancestor = view.getParent();
+        }
+        return null;
+    }
+
     private static void onDetached(ViewGroup candidate) {
         if (nativeContainer == candidate && !candidate.isAttachedToWindow()) release();
     }
@@ -234,8 +260,9 @@ final class NativeStatusBarHubIcons {
 
     private static void update() {
         if (nativeContainer == null || strip == null
-                || host == null || !nativeContainer.isAttachedToWindow()
-                || strip.getParent() != host) return;
+                || host == null || centeredHost == null
+                || !nativeContainer.isAttachedToWindow()
+                || strip.getParent() != centeredHost) return;
         if (!NotificationShadeModePolicy.TYPES.equals(currentMode)) {
             restoreNative();
             strip.setVisibility(View.GONE);
@@ -395,7 +422,8 @@ final class NativeStatusBarHubIcons {
     /** Keep only Hub indicators visible without detaching any native icons. */
     private static void suppressNativeChildren() {
         FrameLayout area = host;
-        if (area == null || strip == null || strip.getParent() != area) return;
+        if (area == null || strip == null || centeredHost == null
+                || strip.getParent() != centeredHost) return;
         for (int i = 0; i < area.getChildCount(); i++) {
             View nativeChild = area.getChildAt(i);
             if (nativeChild == strip) continue;
@@ -406,9 +434,8 @@ final class NativeStatusBarHubIcons {
                 nativeChild.setVisibility(View.GONE);
             }
         }
-        if (area.indexOfChild(strip) != area.getChildCount() - 1) {
-            strip.bringToFront();
-        }
+        // Centered strip lives outside the original notification-only host.
+        // Native group suppression must never remove or move it.
     }
 
     /**
@@ -468,6 +495,7 @@ final class NativeStatusBarHubIcons {
         nativeContainer = null;
         strip = null;
         host = null;
+        centeredHost = null;
         modeObserver = null;
         currentMode = NotificationShadeModePolicy.APPS;
     }
