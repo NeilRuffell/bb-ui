@@ -90,7 +90,7 @@ final class SettingsDialogSurfaceHook {
         final ListView nativeList = list;
         int border = Math.max(1, Math.round(
                 nativeList.getResources().getDisplayMetrics().density));
-        Drawable selector = BB7Theme.selected(0f, border);
+        Drawable selector = BB7Theme.selected(nativeList.getContext(), 0f, border);
         nativeList.setSelector(selector);
         nativeList.setDrawSelectorOnTop(false);
         Log.i(TAG, "Native alert choice selector installed: "
