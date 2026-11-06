@@ -923,7 +923,10 @@ public final class PullDownHook implements IXposedHookLoadPackage {
                 context, notifications, connections, NAVIGATION, initialPage,
                 PullDownHook::dismissShade, PullDownHook::switchShadePage,
                 fromSelector ? transferredHeader : null);
-        if (fromSelector && !nativeMode) root.prepareSelectorReveal();
+        if (fromSelector) {
+            root.beginSelectorHandoff(initialPage);
+            if (!nativeMode) root.prepareSelectorReveal();
+        }
         // Construct legacy window parameters only in rollback mode.
         // Native mode must not allocate a second shade window at all.
         WindowManager.LayoutParams params = null;
@@ -1004,6 +1007,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
                         NativeShadeSlideAnimator.adoptExpandedWindow(
                                 NativeShadeHostBridge.shadeWindow());
                         openingOrClosing = false;
+                        root.completeSelectorHandoff();
                         root.focusContent();
                     };
                     if (!NativeShadeHostBridge.animateSelectorReveal(completed)) {
@@ -1043,6 +1047,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
                     root.animateSelectorReveal(() -> {
                         if (shadeHost != root) return;
                         openingOrClosing = false;
+                        root.completeSelectorHandoff();
                         root.focusContent();
                     });
                 } else {
@@ -1190,6 +1195,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
             current.clearStatusBarFocus();
             current.animate().cancel();
             current.finishSelectorReveal();
+            current.completeSelectorHandoff();
             if (nativeMount) {
                 // Collapse BEFORE resetting the native window translation, so
                 // no full shade flashes back onscreen during animated dismissal.
