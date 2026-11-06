@@ -10,6 +10,7 @@ import android.widget.TextView;
 import android.view.View;
 import android.view.MotionEvent;
 import android.view.KeyEvent;
+import java.util.function.IntConsumer;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 
@@ -32,17 +33,21 @@ final class UnifiedShadeHost extends FrameLayout {
     private final BB6NativeQsPanel connections;
     private final ShadeUiController navigation;
     private final Runnable closeShade;
+    private final IntConsumer onHeaderPageSelected;
     private float headerTouchDownY;
+    private float headerTouchDownX;
+    private boolean headerTouchMoved;
     private boolean headerSwipeClosed;
 
     UnifiedShadeHost(Context context, TwoColumnPanel notifications,
             BB6NativeQsPanel connections, ShadeUiController navigation,
-            int initialPage, Runnable closeShade) {
+            int initialPage, Runnable closeShade, IntConsumer onHeaderPageSelected) {
         super(context);
         this.notifications = notifications;
         this.connections = connections;
         this.navigation = navigation;
         this.closeShade = closeShade;
+        this.onHeaderPageSelected = onHeaderPageSelected;
 
         LinearLayout layout = new LinearLayout(context);
         layout.setOrientation(LinearLayout.VERTICAL);
@@ -56,9 +61,15 @@ final class UnifiedShadeHost extends FrameLayout {
             switch (event.getActionMasked()) {
                 case MotionEvent.ACTION_DOWN:
                     headerTouchDownY = event.getRawY();
+                    headerTouchDownX = event.getRawX();
                     headerSwipeClosed = false;
+                    headerTouchMoved = false;
                     return true;
                 case MotionEvent.ACTION_MOVE:
+                    if (Math.abs(event.getRawY() - headerTouchDownY) >= dp(12)
+                            || Math.abs(event.getRawX() - headerTouchDownX) >= dp(12)) {
+                        headerTouchMoved = true;
+                    }
                     if (!headerSwipeClosed
                             && headerTouchDownY - event.getRawY() >= dp(65)) {
                         headerSwipeClosed = true;
@@ -66,8 +77,16 @@ final class UnifiedShadeHost extends FrameLayout {
                     }
                     return true;
                 case MotionEvent.ACTION_UP:
+                    if (!headerSwipeClosed && !headerTouchMoved) {
+                        int zone = ShadeHeaderSegmentPolicy.zoneAt(event.getX(), view.getWidth());
+                        if (zone != ShadeStatusNavigation.NONE) onHeaderPageSelected.accept(zone);
+                    }
+                    headerSwipeClosed = false;
+                    headerTouchMoved = false;
+                    return true;
                 case MotionEvent.ACTION_CANCEL:
                     headerSwipeClosed = false;
+                    headerTouchMoved = false;
                     return true;
                 default:
                     return true;
@@ -136,6 +155,12 @@ final class UnifiedShadeHost extends FrameLayout {
         connections.setVisibility(next == QUICK_SETTINGS ? View.VISIBLE : View.GONE);
         connections.setActive(next == QUICK_SETTINGS);
         updateHeaderVisibility();
+        updateHeaderFocus(navigation.focusedZone());
+    }
+
+    void updateHeaderFocus(int zone) {
+        dateHeader.setFocusedZone(zone);
+        updateHeaderVisibility();
     }
 
     private static TextView modeButton(Context context) {
@@ -195,7 +220,10 @@ final class UnifiedShadeHost extends FrameLayout {
     }
 
     private void updateHeaderVisibility() {
-        boolean showMedia = mediaExpanded && displayedPage == NOTIFICATIONS;
+        // Show navigation segments when selected even if the compact media
+        // header normally replaces them. Restore it on focus return.
+        boolean showMedia = mediaExpanded && displayedPage == NOTIFICATIONS
+                && !navigation.isStatusBarFocused();
         dateHeader.setVisibility(showMedia ? View.GONE : View.VISIBLE);
         mediaModeHeader.setVisibility(showMedia ? View.VISIBLE : View.GONE);
     }
