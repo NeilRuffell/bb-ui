@@ -1,6 +1,7 @@
 package dev.q25.bb7pulldown;
 
 import dev.q25.trackpad.theme.BB7Theme;
+import dev.q25.trackpad.input.TrackpadPressHandler;
 
 import android.content.Context;
 import android.content.res.ColorStateList;
@@ -26,7 +27,10 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewConfiguration;
 import android.view.accessibility.AccessibilityNodeInfo;
+import android.widget.ArrayAdapter;
 import android.widget.FrameLayout;
+import android.widget.ListPopupWindow;
+import android.widget.PopupWindow;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -121,16 +125,16 @@ final class TwoColumnPanel extends FrameLayout {
         }
     };
     private final List<LinearLayout> notificationRows = new ArrayList<>();
-    // Focus sequence includes each notification followed by its native actions.
+    // Only notification cards are trackpad stops; actions live in a stock popup.
     private final List<View> notificationTargets = new ArrayList<>();
     private final List<String> notificationTargetKeys = new ArrayList<>();
     private final List<Integer> notificationTargetActions = new ArrayList<>();
-    private final List<TextView> actionButtons = new ArrayList<>();
+    private ListPopupWindow notificationActionPopup;
     private static final int FOCUS_CARD = -1;
     private String selectedNotificationKey;
     private int selectedActionIndex = FOCUS_CARD;
     private EditText activeReplyInput;
-    private View activeReplyButton;
+    private View activeReplyAnchor;
     private boolean notificationPaneActive;
     private final LinearLayout iconList;
     private final LinearLayout notificationList;
@@ -776,6 +780,7 @@ final class TwoColumnPanel extends FrameLayout {
     }
 
     @Override protected void onDetachedFromWindow() {
+        dismissNotificationActionPopup();
         removeCallbacks(mediaProgressTick);
         mediaArtworkLoader.close();
         mediaArtworkImage.setImageDrawable(null);
@@ -1110,6 +1115,8 @@ final class TwoColumnPanel extends FrameLayout {
         if (Objects.equals(renderedCardPackage, selectedPackage)
                 && renderedCards.equals(selected)) return;
 
+        // Avoid leaving an open popup anchored to a detached card.
+        dismissNotificationActionPopup();
         int oldCardIndex = NotificationFocusPolicy.indexOf(
                 renderedCards, selectedNotificationKey);
         String previousKey = selectedNotificationKey;
@@ -1121,7 +1128,7 @@ final class TwoColumnPanel extends FrameLayout {
             selectedActionIndex = FOCUS_CARD;
         }
         activeReplyInput = null;
-        activeReplyButton = null;
+        activeReplyAnchor = null;
         renderedCardPackage = selectedPackage;
         renderedCards = selected;
         notificationList.removeAllViews();
@@ -1129,7 +1136,6 @@ final class TwoColumnPanel extends FrameLayout {
         notificationTargets.clear();
         notificationTargetKeys.clear();
         notificationTargetActions.clear();
-        actionButtons.clear();
 
         if (selectedPackage == null) {
             selectedAppHeading.setText("Notifications");
@@ -1220,10 +1226,20 @@ final class TwoColumnPanel extends FrameLayout {
         card.setFocusable(true);
         card.setFocusableInTouchMode(true);
         card.setClickable(true);
+        TrackpadPressHandler press = new TrackpadPressHandler(
+                card::performClick, card::performLongClick);
         card.setOnFocusChangeListener((view, focused) -> {
             if (focused) {
                 notificationPaneActive = true;
                 selectNotification(item.key, FOCUS_CARD);
+            } else {
+                press.cancel();
+            }
+        });
+        card.addOnAttachStateChangeListener(new View.OnAttachStateChangeListener() {
+            @Override public void onViewAttachedToWindow(View view) { }
+            @Override public void onViewDetachedFromWindow(View view) {
+                press.cancel();
             }
         });
         card.setOnClickListener(view -> {
@@ -1232,8 +1248,12 @@ final class TwoColumnPanel extends FrameLayout {
             view.requestFocus();
             onOpenNotification.onOpen(item.key);
         });
-        card.setOnKeyListener((view, keyCode, event) -> onNotificationKey(
-                view, keyCode, event));
+        card.setOnKeyListener((view, keyCode, event) -> {
+            if (TrackpadPressHandler.isConfirmKey(keyCode)) return press.handle(event);
+            if (event.getAction() == KeyEvent.ACTION_DOWN) press.cancel();
+            return onNotificationKey(view, keyCode, event);
+        });
+        card.setOnLongClickListener(view -> showNotificationActionPopup(card, item));
         notificationTargets.add(card);
         notificationTargetKeys.add(item.key);
         notificationTargetActions.add(FOCUS_CARD);
@@ -1293,10 +1313,6 @@ final class TwoColumnPanel extends FrameLayout {
             card.addView(body, bodyParams);
         }
 
-        for (NotificationItem.ActionItem action : item.actions) {
-            addNotificationAction(card, item.key, action.index, action.title,
-                    action.freeFormReply);
-        }
         card.setContentDescription(
                 (NotificationCategoryPolicy.isFavorites(selectedPackage)
                         ? item.packageName + ", " : "")
@@ -1446,59 +1462,73 @@ final class TwoColumnPanel extends FrameLayout {
         }
     }
 
-    /** Compact OS 7-style action rows: no secondary menu or long-press. */
-    private void addNotificationAction(LinearLayout card, String key, int actionIndex,
-            String title, boolean reply) {
-        TextView button = text(title.isEmpty() ? "Action" : title,
-                12, palette.actionText);
-        button.setFocusable(true);
-        button.setFocusableInTouchMode(true);
-        button.setClickable(true);
-        button.setSingleLine(true);
-        button.setEllipsize(TextUtils.TruncateAt.END);
-        button.setGravity(Gravity.CENTER_VERTICAL);
-        button.setPadding(dp(12), dp(7), dp(10), dp(7));
-        button.setContentDescription(title);
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
-                LayoutParams.MATCH_PARENT, dp(35));
-        params.topMargin = dp(5);
-        card.addView(button, params);
-        notificationTargets.add(button);
-        notificationTargetKeys.add(key);
-        notificationTargetActions.add(actionIndex);
-        actionButtons.add(button);
-        button.setOnFocusChangeListener((view, focused) -> {
-            if (focused) {
-                notificationPaneActive = true;
-                selectNotification(key, actionIndex);
-            }
+    /**
+     * Stock Android ListPopupWindow owns keyboard navigation, selection,
+     * theme and Back dismissal. Deliberately no per-popup BBUI styling.
+     */
+    private boolean showNotificationActionPopup(LinearLayout card, NotificationItem item) {
+        if (item.actions.isEmpty() || !card.isAttachedToWindow()) return false;
+        dismissNotificationActionPopup();
+        String[] titles = new String[item.actions.size()];
+        for (int i = 0; i < item.actions.size(); i++) {
+            String title = item.actions.get(i).title;
+            titles[i] = title.isEmpty() ? "Action" : title;
+        }
+
+        ListPopupWindow popup = new ListPopupWindow(getContext());
+        popup.setAnchorView(card);
+        popup.setAdapter(new ArrayAdapter<>(getContext(),
+                android.R.layout.simple_list_item_1, titles));
+        popup.setModal(true);
+        popup.setInputMethodMode(PopupWindow.INPUT_METHOD_NOT_NEEDED);
+        popup.setOnDismissListener(() -> {
+            if (notificationActionPopup == popup) notificationActionPopup = null;
         });
-        button.setOnKeyListener((view, keyCode, event) ->
-                onNotificationKey(view, keyCode, event));
-        button.setOnClickListener(view -> {
-            notificationPaneActive = true;
-            selectNotification(key, actionIndex);
-            view.requestFocus();
-            if (reply) {
-                openInlineReply(card, button, key, actionIndex);
+        popup.setOnItemClickListener((parent, view, position, id) -> {
+            NotificationItem.ActionItem action = item.actions.get(position);
+            popup.dismiss();
+            // A notification could disappear while its menu is open.
+            if (!renderedCards.contains(item) || !card.isAttachedToWindow()) return;
+            if (action.freeFormReply) {
+                // Wait for the popup window to release focus before editing.
+                card.post(() -> {
+                    if (card.isAttachedToWindow()) {
+                        openInlineReply(card, item.key, action.index);
+                    }
+                });
             } else {
-                onActions.onAction(key, actionIndex);
+                onActions.onAction(item.key, action.index);
             }
         });
+        notificationActionPopup = popup;
+        popup.show();
+        if (popup.getListView() != null) {
+            popup.getListView().setSelection(0);
+            popup.getListView().requestFocus();
+        }
+        return true;
+    }
+
+    private void dismissNotificationActionPopup() {
+        ListPopupWindow popup = notificationActionPopup;
+        notificationActionPopup = null;
+        if (popup != null && popup.isShowing()) popup.dismiss();
     }
 
     private void closeInlineReply() {
         EditText input = activeReplyInput;
-        View button = activeReplyButton;
+        View button = activeReplyAnchor;
         activeReplyInput = null;
-        activeReplyButton = null;
+        activeReplyAnchor = null;
         if (input != null && input.getParent() instanceof LinearLayout) {
             ((LinearLayout) input.getParent()).removeView(input);
         }
-        if (button != null) button.requestFocus();
+        if (activeReplyAnchor != null && activeReplyAnchor.isAttachedToWindow()) {
+            activeReplyAnchor.requestFocus();
+        }
     }
 
-    private void openInlineReply(LinearLayout card, View button, String key, int index) {
+    private void openInlineReply(LinearLayout card, String key, int index) {
         if (activeReplyInput != null) closeInlineReply();
         EditText input = new EditText(getContext());
         input.setSingleLine(true);
@@ -1512,9 +1542,9 @@ final class TwoColumnPanel extends FrameLayout {
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
                 LayoutParams.MATCH_PARENT, dp(42));
         params.topMargin = dp(4);
-        card.addView(input, card.indexOfChild(button) + 1, params);
+        card.addView(input, params);
         activeReplyInput = input;
-        activeReplyButton = button;
+        activeReplyAnchor = card;
         input.setOnEditorActionListener((view, actionId, event) -> {
             if (actionId != EditorInfo.IME_ACTION_SEND
                     && (event == null || event.getKeyCode() != KeyEvent.KEYCODE_ENTER)) {
@@ -1550,6 +1580,7 @@ final class TwoColumnPanel extends FrameLayout {
 
     /** Back restores the previously selected app icon. */
     private void returnToAppIcons() {
+        dismissNotificationActionPopup();
         leaveStatusZone();
         notificationPaneActive = false;
         for (FrameLayout icon : iconRows) {
@@ -1608,22 +1639,7 @@ final class TwoColumnPanel extends FrameLayout {
                 updateTaggedTextColor(card.getChildAt(child), selected);
             }
         }
-        for (TextView button : actionButtons) {
-            int target = notificationTargets.indexOf(button);
-            boolean selected = target >= 0 && notificationPaneActive
-                    && Objects.equals(selectedNotificationKey, notificationTargetKeys.get(target))
-                    && selectedActionIndex == notificationTargetActions.get(target);
-            GradientDrawable background;
-            if (selected) {
-                background = selectedBlueBackground();
-            } else {
-                background = new GradientDrawable();
-                background.setColor(palette.action);
-                background.setCornerRadius(dp(4));
-            }
-            button.setBackground(background);
-            button.setTextColor(selected ? Color.WHITE : palette.actionText);
-        }
+
     }
 
     /** Preserve high-contrast text when the title and timestamp share a row. */
@@ -1813,6 +1829,10 @@ final class TwoColumnPanel extends FrameLayout {
      * or SystemUI delivered a native OnBackInvokedCallback.
      */
     void handleNativeBack() {
+        if (notificationActionPopup != null && notificationActionPopup.isShowing()) {
+            dismissNotificationActionPopup();
+            return;
+        }
         if (activeReplyInput != null) closeInlineReply();
         else if (mediaControlsOpen) {
             setMediaControlsOpen(false);
