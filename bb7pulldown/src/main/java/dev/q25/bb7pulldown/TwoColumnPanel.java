@@ -828,16 +828,21 @@ final class TwoColumnPanel extends FrameLayout {
         super.onDetachedFromWindow();
     }
 
-    /** BBOS6 seek area: fixed dark vertical gradient with a top-only 1dp border. */
+    /** BBOS6 seek area: dark vertical fill, thin top rule and silver bottom rule. */
     private Drawable mediaSeekBackground() {
         GradientDrawable fill = new GradientDrawable(
                 GradientDrawable.Orientation.TOP_BOTTOM,
                 new int[] {0xff222422, 0xff181818});
+        GradientDrawable bottomBorder = new GradientDrawable(
+                GradientDrawable.Orientation.LEFT_RIGHT,
+                new int[] {0xffb5b6b5, 0xffffffff, 0xffb5b6b5});
         LayerDrawable layers = new LayerDrawable(new Drawable[] {
-                fill, new ColorDrawable(0xff393c3c)
+                fill, new ColorDrawable(0xff393c3c), bottomBorder
         });
         layers.setLayerHeight(1, dp(1));
         layers.setLayerGravity(1, Gravity.TOP | Gravity.FILL_HORIZONTAL);
+        layers.setLayerHeight(2, dp(2));
+        layers.setLayerGravity(2, Gravity.BOTTOM | Gravity.FILL_HORIZONTAL);
         return layers;
     }
 
