@@ -14,6 +14,7 @@ import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewParent;
+import android.view.ViewTreeObserver;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
@@ -22,6 +23,7 @@ import android.widget.TextView;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -62,8 +64,12 @@ final class NativeStatusBarHubIcons {
     private static LinearLayout strip;
     private static ContentObserver modeObserver;
     private static String currentMode = NotificationShadeModePolicy.APPS;
-    private static boolean nativeHiddenByHub;
-    private static int originalVisibility = View.VISIBLE;
+    // SystemUI can reapply visibility during icon-container/view-model updates.
+    // Guard the complete *notification-only* host immediately before drawing,
+    // rather than hiding one container only on the first Hub render.
+    private static final Map<View, Integer> hiddenNativeChildren = new IdentityHashMap<>();
+    private static ViewTreeObserver trackedTree;
+    private static ViewTreeObserver.OnPreDrawListener visibilityGuard;
     private static Map<String, Integer> renderedCounts = Collections.emptyMap();
     private static boolean attachmentLogged;
     private static boolean eligibilityWarningLogged;
@@ -162,8 +168,6 @@ final class NativeStatusBarHubIcons {
         release();
         nativeContainer = candidate;
         host = resolved;
-        originalVisibility = candidate.getVisibility();
-        nativeHiddenByHub = false;
         strip = new LinearLayout(candidate.getContext());
         strip.setOrientation(LinearLayout.HORIZONTAL);
         strip.setGravity(Gravity.CENTER_VERTICAL);
@@ -174,6 +178,7 @@ final class NativeStatusBarHubIcons {
         resolved.addView(strip, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT,
                 Gravity.START | Gravity.CENTER_VERTICAL));
+        installVisibilityGuard();
 
         modeObserver = new ContentObserver(MAIN) {
             @Override public void onChange(boolean selfChange) {
@@ -256,12 +261,12 @@ final class NativeStatusBarHubIcons {
             render(counts);
             renderedCounts = counts;
         }
-        if (!nativeHiddenByHub) {
-            originalVisibility = nativeContainer.getVisibility();
-            nativeContainer.setVisibility(View.GONE);
-            nativeHiddenByHub = true;
-        }
+        // The icon binder can turn original app icons back on after a change.
+        // Hide every original child of notification_icon_area, not only the
+        // container seen during our initial attach; keep original visibility
+        // values for exact App-mode restoration.
         strip.setVisibility(View.VISIBLE);
+        suppressNativeChildren();
         refreshTint();
     }
 
@@ -387,16 +392,67 @@ final class NativeStatusBarHubIcons {
         }
     }
 
-    private static void restoreNative() {
-        if (nativeHiddenByHub && nativeContainer != null) {
-            nativeContainer.setVisibility(originalVisibility);
+    /** Keep only Hub indicators visible without detaching any native icons. */
+    private static void suppressNativeChildren() {
+        FrameLayout area = host;
+        if (area == null || strip == null || strip.getParent() != area) return;
+        for (int i = 0; i < area.getChildCount(); i++) {
+            View nativeChild = area.getChildAt(i);
+            if (nativeChild == strip) continue;
+            if (!hiddenNativeChildren.containsKey(nativeChild)) {
+                hiddenNativeChildren.put(nativeChild, nativeChild.getVisibility());
+            }
+            if (nativeChild.getVisibility() != View.GONE) {
+                nativeChild.setVisibility(View.GONE);
+            }
         }
-        nativeHiddenByHub = false;
+        if (area.indexOfChild(strip) != area.getChildCount() - 1) {
+            strip.bringToFront();
+        }
+    }
+
+    /**
+     * Native SystemUI can change a container's visibility after our update.
+     * Pre-draw reasserts Hub-only presentation in the same status-bar host.
+     * Does not change the native notification collection or remove its views.
+     */
+    private static void installVisibilityGuard() {
+        FrameLayout area = host;
+        if (area == null) return;
+        ViewTreeObserver tree = area.getViewTreeObserver();
+        if (!tree.isAlive()) return;
+        visibilityGuard = () -> {
+            if (NotificationShadeModePolicy.TYPES.equals(currentMode)
+                    && strip != null && strip.getVisibility() == View.VISIBLE) {
+                suppressNativeChildren();
+            }
+            return true;
+        };
+        tree.addOnPreDrawListener(visibilityGuard);
+        trackedTree = tree;
+    }
+
+    private static void restoreNative() {
+        // Never blindly make all icons visible: restore each native child's
+        // captured visibility so hidden native items stay hidden.
+        for (Map.Entry<View, Integer> entry : hiddenNativeChildren.entrySet()) {
+            View nativeChild = entry.getKey();
+            if (nativeChild.getParent() == host
+                    && nativeChild.getVisibility() == View.GONE) {
+                nativeChild.setVisibility(entry.getValue());
+            }
+        }
+        hiddenNativeChildren.clear();
         renderedCounts = Collections.emptyMap();
     }
 
     private static void release() {
         MAIN.removeCallbacks(UPDATE);
+        if (trackedTree != null && visibilityGuard != null && trackedTree.isAlive()) {
+            trackedTree.removeOnPreDrawListener(visibilityGuard);
+        }
+        trackedTree = null;
+        visibilityGuard = null;
         if (nativeContainer != null && modeObserver != null) {
             try {
                 nativeContainer.getContext().getContentResolver()

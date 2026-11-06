@@ -30,6 +30,12 @@ SystemUI already gave them a normal status-bar icon.
 - The category strip is a normal display-only child of the EXISTING status-bar
   notification host, not an overlay window, foreground service, or independent
   listener. App mode restores the original container.
+- Native SystemUI may change icon-container visibility after notification
+  changes. To avoid showing both app icons and Hub indicators, Hub mode
+  suppresses all native children of the **notification-only**
+  `notification_icon_area` host, reapplies suppression just before drawing,
+  and restores each child's captured prior visibility on mode change.
+  This never touches clock, battery, connectivity or privacy containers.
 - Native status icon view membership is the eligibility source. Only icons
   admitted by the native status-bar binder may contribute to counts. The
   existing `NotificationTypePolicy` supplies type classification.
@@ -62,7 +68,8 @@ adb -s 202512003630 shell am crash com.android.systemui
 Select **By notification type (Hub)** in **BB UI Settings**.
 
 Test one/multiple app notifications of the same category, new arrivals and
-removals, group summaries, unclassified entries, mode switching while
+removals, **absence of any original coloured app icons while Hub mode is active**,
+group summaries, unclassified entries, mode switching while
 the shade is open and closed, SystemUI restart, screen lock/unlock, and
 status bar appearance on light/dark wallpaper. Verify native icon overflow
 and correct width allocation on the Q25 hardware.
