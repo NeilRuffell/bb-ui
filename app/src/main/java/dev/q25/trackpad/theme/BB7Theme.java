@@ -13,9 +13,10 @@ import android.content.res.Configuration;
 public final class BB7Theme {
     private BB7Theme() {}
 
-    public static final int BLUE_TOP = 0xff459fd9;
-    public static final int BLUE_MIDDLE = 0xff3285c5;
-    public static final int BLUE_BOTTOM = 0xff2368aa;
+    // Original selection colors, preserved for dark mode.
+    public static final int BLUE_TOP = BB7SelectionGradientColors.DARK_TOP;
+    public static final int BLUE_MIDDLE = BB7SelectionGradientColors.DARK_MIDDLE;
+    public static final int BLUE_BOTTOM = BB7SelectionGradientColors.DARK_BOTTOM;
     public static final int BLUE_BORDER = 0xffb4e2fb;
     public static final int TITLE = 0xffffffff;
     public static final int SUMMARY = 0xffe7f2ff;
@@ -63,13 +64,18 @@ public final class BB7Theme {
         }
     }
 
-    public static int[] gradientColors() {
-        return new int[] { BLUE_TOP, BLUE_MIDDLE, BLUE_BOTTOM };
+    /**
+     * Shared theme-aware focus gradient.
+     * Light mode uses the eleven sampled BBOS6 blue shades.
+     * Dark mode preserves the existing three-stop BBUI selection gradient.
+     */
+    public static int[] gradientColors(Context context) {
+        return BB7SelectionGradientColors.colors(palette(context) == Palette.DARK);
     }
 
-    public static GradientDrawable selected(float radiusPx, int borderPx) {
+    public static GradientDrawable selected(Context context, float radiusPx, int borderPx) {
         GradientDrawable background = new GradientDrawable(
-                GradientDrawable.Orientation.TOP_BOTTOM, gradientColors());
+                GradientDrawable.Orientation.TOP_BOTTOM, gradientColors(context));
         background.setCornerRadius(radiusPx);
         if (borderPx > 0) background.setStroke(borderPx, BLUE_BORDER);
         return background;
