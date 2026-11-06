@@ -1,6 +1,7 @@
 package dev.q25.bb7pulldown;
 
 import dev.q25.trackpad.theme.BB7Theme;
+import dev.q25.trackpad.theme.BB7SelectionGradientColors;
 import dev.q25.trackpad.input.TrackpadPressHandler;
 
 import android.content.Context;
@@ -80,6 +81,9 @@ final class TwoColumnPanel extends FrameLayout {
     // Solid unplayed upper/lower halves of the BBOS6 seek rail; no gradient.
     private static final int MEDIA_SEEK_TRACK_TOP = 0xff101010;
     private static final int MEDIA_SEEK_TRACK_BOTTOM = 0xff393839;
+    // Expanded media is always rendered with the same palette, irrespective
+    // of Android UI_MODE_NIGHT. The collapsed strip retains the global theme.
+    private static final BB7Theme.Palette EXPANDED_MEDIA_PALETTE = BB7Theme.Palette.DARK;
     private final BB7Theme.Palette palette;
     private final CloseListener onClose;
     private final ShadeUiController navigation;
@@ -305,7 +309,7 @@ final class TwoColumnPanel extends FrameLayout {
         mediaSeekRow.setBackground(mediaSeekBackground());
         mediaSeekRow.setVisibility(View.GONE);
 
-        mediaElapsed = text("0:00", 14, palette.muted);
+        mediaElapsed = text("0:00", 14, EXPANDED_MEDIA_PALETTE.muted);
         mediaElapsed.setGravity(Gravity.CENTER_VERTICAL);
         mediaSeekRow.addView(mediaElapsed, new LinearLayout.LayoutParams(
                 dp(45), LayoutParams.MATCH_PARENT));
@@ -369,7 +373,7 @@ final class TwoColumnPanel extends FrameLayout {
         mediaSeekRow.addView(mediaSeekBar, new LinearLayout.LayoutParams(
                 0, dp(48), 1f));
 
-        mediaDuration = text("--:--", 14, palette.muted);
+        mediaDuration = text("--:--", 14, EXPANDED_MEDIA_PALETTE.muted);
         mediaDuration.setGravity(Gravity.CENTER_VERTICAL | Gravity.RIGHT);
         mediaSeekRow.addView(mediaDuration, new LinearLayout.LayoutParams(
                 dp(52), LayoutParams.MATCH_PARENT));
@@ -406,7 +410,7 @@ final class TwoColumnPanel extends FrameLayout {
         artworkArea.addView(mediaArtworkImage, new FrameLayout.LayoutParams(
                 LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
 
-        mediaArtworkPlaceholder = text("Artwork unavailable", 13, palette.muted);
+        mediaArtworkPlaceholder = text("Artwork unavailable", 13, EXPANDED_MEDIA_PALETTE.muted);
         mediaArtworkPlaceholder.setGravity(Gravity.CENTER);
         mediaArtworkPlaceholder.setFocusable(false);
         artworkArea.addView(mediaArtworkPlaceholder, new FrameLayout.LayoutParams(
@@ -420,14 +424,14 @@ final class TwoColumnPanel extends FrameLayout {
         artworkInfo.addView(metadataArea, new LinearLayout.LayoutParams(
                 0, LayoutParams.MATCH_PARENT, 1f));
 
-        expandedMediaTitle = text("", 18, palette.title);
+        expandedMediaTitle = text("", 18, EXPANDED_MEDIA_PALETTE.title);
         expandedMediaTitle.setMaxLines(3);
         expandedMediaTitle.setEllipsize(TextUtils.TruncateAt.END);
         expandedMediaTitle.setFocusable(false);
         metadataArea.addView(expandedMediaTitle, new LinearLayout.LayoutParams(
                 LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
 
-        expandedMediaArtist = text("", 13, palette.muted);
+        expandedMediaArtist = text("", 13, EXPANDED_MEDIA_PALETTE.muted);
         expandedMediaArtist.setMaxLines(3);
         expandedMediaArtist.setEllipsize(TextUtils.TruncateAt.END);
         expandedMediaArtist.setPadding(0, dp(8), 0, 0);
@@ -652,6 +656,9 @@ final class TwoColumnPanel extends FrameLayout {
     private void setMediaControlsOpen(boolean open) {
         if (mediaControlsOpen == open) return;
         mediaControlsOpen = open;
+        // Only full-screen media is theme-independent; restore the surrounding
+        // shade palette on collapse, without recreating either presentation.
+        setBackgroundColor(open ? EXPANDED_MEDIA_PALETTE.canvas : palette.canvas);
         mediaSeekEditing = false;
         mediaSeekSelected = false;
         mediaModeSelected = false;
@@ -914,7 +921,7 @@ final class TwoColumnPanel extends FrameLayout {
     private GradientDrawable mediaSeekThumb(boolean selected) {
         GradientDrawable pill = new GradientDrawable(
                 GradientDrawable.Orientation.TOP_BOTTOM,
-                selected ? BB7Theme.gradientColors(getContext())
+                selected ? BB7SelectionGradientColors.colors(false)
                         : new int[] {0xffe5e9ef, 0xffaeb6c0});
         pill.setShape(GradientDrawable.RECTANGLE);
         pill.setCornerRadius(dp(10));
@@ -924,12 +931,22 @@ final class TwoColumnPanel extends FrameLayout {
         return pill;
     }
 
+    /** Fixed BBOS6 focus styling for expanded media; other surfaces stay themed. */
+    private GradientDrawable expandedMediaSelection(int radius, int border) {
+        GradientDrawable selected = new GradientDrawable(
+                GradientDrawable.Orientation.TOP_BOTTOM,
+                BB7SelectionGradientColors.colors(false));
+        selected.setCornerRadius(radius);
+        selected.setStroke(border, BB7Theme.BLUE_BORDER);
+        return selected;
+    }
+
     private void updateMediaHighlight() {
         boolean focused = mediaRow.isFocused();
         mediaRow.setBackground(focused && !mediaControlsOpen
                 ? BB7Theme.selected(getContext(), dp(2), dp(1))
                 : new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
-                        palette == BB7Theme.Palette.DARK
+                        mediaControlsOpen || palette == BB7Theme.Palette.DARK
                                 ? new int[] {0xff2f4053, 0xff1e2c3b}
                                 : new int[] {0xffecf1f7, 0xffd8e2ec}));
         mediaNowPlaying.setTextColor(focused && !mediaControlsOpen
@@ -943,8 +960,8 @@ final class TwoColumnPanel extends FrameLayout {
         // Keep the fixed seek-area background; focus changes only the pill.
         // The elapsed/total timestamps stay unchanged.
         mediaSeekBar.setThumb(mediaSeekThumb(seekFocused));
-        mediaElapsed.setTextColor(palette.muted);
-        mediaDuration.setTextColor(palette.muted);
+        mediaElapsed.setTextColor(EXPANDED_MEDIA_PALETTE.muted);
+        mediaDuration.setTextColor(EXPANDED_MEDIA_PALETTE.muted);
         int index = mediaSessionIndex();
         if (index < 0) return;
         NativeMediaSessions.Entry entry = mediaSessions.get(index);
@@ -956,9 +973,8 @@ final class TwoColumnPanel extends FrameLayout {
                     && !mediaSeekSelected && !mediaModeSelected
                     && selectedMediaButton == i;
             ImageView button = mediaButtons[i];
-            button.setBackground(selected ? BB7Theme.selected(getContext(), dp(3), dp(1)) : null);
-            button.setColorFilter(selected || focused && !mediaControlsOpen
-                    ? Color.WHITE : palette.headingText);
+            button.setBackground(selected ? expandedMediaSelection(dp(3), dp(1)) : null);
+            button.setColorFilter(selected ? Color.WHITE : EXPANDED_MEDIA_PALETTE.headingText);
             button.setAlpha(enabled ? 1f : 0.35f);
         }
     }
