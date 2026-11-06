@@ -333,6 +333,11 @@ final class UnifiedShadeHost extends FrameLayout {
         mediaModeHeader.setVisibility(showMedia ? View.VISIBLE : View.GONE);
     }
 
+    int externalHeaderHeight() {
+        return externalHeader
+                ? ShadeDateHeader.layoutParams(getContext()).height : 0;
+    }
+
     int page() {
         return navigation.activePage();
     }
