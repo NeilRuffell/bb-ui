@@ -853,9 +853,9 @@ final class TwoColumnPanel extends FrameLayout {
         return layers;
     }
 
-    /** Full-width 6dp seek rail: two solid colors separated at its midpoint. */
+    /** Thin 4dp seek rail centered vertically: two flat colors with a hard split. */
     private Drawable mediaSeekTrackDrawable() {
-        final int railHeight = dp(6);
+        final int railHeight = dp(4);
         return new Drawable() {
             private final Paint topPaint = new Paint();
             private final Paint bottomPaint = new Paint();
@@ -867,9 +867,13 @@ final class TwoColumnPanel extends FrameLayout {
 
             @Override public void draw(Canvas canvas) {
                 Rect bounds = getBounds();
-                int halfway = bounds.top + bounds.height() / 2;
-                canvas.drawRect(bounds.left, bounds.top, bounds.right, halfway, topPaint);
-                canvas.drawRect(bounds.left, halfway, bounds.right, bounds.bottom, bottomPaint);
+                // ProgressBar may give the drawable the entire 48dp row.
+                // Its intrinsic height alone does not limit the painted height.
+                int railTop = bounds.centerY() - railHeight / 2;
+                int halfway = railTop + railHeight / 2;
+                int railBottom = railTop + railHeight;
+                canvas.drawRect(bounds.left, railTop, bounds.right, halfway, topPaint);
+                canvas.drawRect(bounds.left, halfway, bounds.right, railBottom, bottomPaint);
             }
 
             @Override public int getIntrinsicHeight() {
