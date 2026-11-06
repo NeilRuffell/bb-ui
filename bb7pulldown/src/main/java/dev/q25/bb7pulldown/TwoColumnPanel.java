@@ -305,7 +305,7 @@ final class TwoColumnPanel extends FrameLayout {
         mediaSeekRow.setBackground(mediaSeekBackground());
         mediaSeekRow.setVisibility(View.GONE);
 
-        mediaElapsed = text("0:00", 11, palette.muted);
+        mediaElapsed = text("0:00", 14, palette.muted);
         mediaElapsed.setGravity(Gravity.CENTER_VERTICAL);
         mediaSeekRow.addView(mediaElapsed, new LinearLayout.LayoutParams(
                 dp(45), LayoutParams.MATCH_PARENT));
@@ -369,7 +369,7 @@ final class TwoColumnPanel extends FrameLayout {
         mediaSeekRow.addView(mediaSeekBar, new LinearLayout.LayoutParams(
                 0, dp(48), 1f));
 
-        mediaDuration = text("--:--", 11, palette.muted);
+        mediaDuration = text("--:--", 14, palette.muted);
         mediaDuration.setGravity(Gravity.CENTER_VERTICAL | Gravity.RIGHT);
         mediaSeekRow.addView(mediaDuration, new LinearLayout.LayoutParams(
                 dp(52), LayoutParams.MATCH_PARENT));
