@@ -1517,15 +1517,13 @@ final class TwoColumnPanel extends FrameLayout {
 
     private void closeInlineReply() {
         EditText input = activeReplyInput;
-        View button = activeReplyAnchor;
+        View anchor = activeReplyAnchor;
         activeReplyInput = null;
         activeReplyAnchor = null;
         if (input != null && input.getParent() instanceof LinearLayout) {
             ((LinearLayout) input.getParent()).removeView(input);
         }
-        if (activeReplyAnchor != null && activeReplyAnchor.isAttachedToWindow()) {
-            activeReplyAnchor.requestFocus();
-        }
+        if (anchor != null && anchor.isAttachedToWindow()) anchor.requestFocus();
     }
 
     private void openInlineReply(LinearLayout card, String key, int index) {
