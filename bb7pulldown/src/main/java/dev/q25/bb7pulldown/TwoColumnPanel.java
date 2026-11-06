@@ -109,6 +109,8 @@ final class TwoColumnPanel extends FrameLayout {
     private boolean mediaControlsOpen;
     private int selectedMediaButton = NativeMediaSessions.PLAY_PAUSE;
     private boolean mediaSeekSelected;
+    // Separate highlighted position from active trackpad seek-edit mode.
+    private boolean mediaSeekEditing;
     private boolean mediaModeSelected;
     private int selectedMediaMode = MediaModePolicy.SHUFFLE;
     private boolean mediaSeekDragging;
@@ -200,7 +202,10 @@ final class TwoColumnPanel extends FrameLayout {
                 selectedMediaButton = NativeMediaSessions.PLAY_PAUSE;
                 mediaRow.requestFocus();
                 setMediaControlsOpen(true);
+            } else if (mediaSeekSelected) {
+                toggleMediaSeekEditing();
             } else {
+                mediaSeekEditing = false;
                 mediaSeekSelected = false;
                 mediaModeSelected = false;
                 performMediaAction();
@@ -262,6 +267,7 @@ final class TwoColumnPanel extends FrameLayout {
                 selectedMediaButton = action;
                 mediaRow.requestFocus();
                 setMediaControlsOpen(true);
+                mediaSeekEditing = false;
                 mediaSeekSelected = false;
                 mediaModeSelected = false;
                 performMediaAction();
@@ -284,7 +290,7 @@ final class TwoColumnPanel extends FrameLayout {
         mediaContainer.addView(mediaRow, new LinearLayout.LayoutParams(
                 LayoutParams.MATCH_PARENT, dp(46)));
 
-        // Expands downward without changing the existing transport/control row.
+        // Expanded-only seek row sits immediately above the transport controls.
         mediaSeekRow = new LinearLayout(context);
         mediaSeekRow.setOrientation(LinearLayout.HORIZONTAL);
         mediaSeekRow.setGravity(Gravity.CENTER_VERTICAL);
@@ -319,6 +325,8 @@ final class TwoColumnPanel extends FrameLayout {
             @Override public void onStartTrackingTouch(SeekBar seekBar) {
                 mediaSeekDragging = true;
                 mediaDragToken = selectedMediaToken;
+                // Touch dragging bypasses keyboard edit mode.
+                mediaSeekEditing = false;
                 mediaSeekSelected = true;
                 mediaModeSelected = false;
                 mediaRow.requestFocus();
@@ -355,7 +363,9 @@ final class TwoColumnPanel extends FrameLayout {
         mediaDuration.setGravity(Gravity.CENTER_VERTICAL | Gravity.RIGHT);
         mediaSeekRow.addView(mediaDuration, new LinearLayout.LayoutParams(
                 dp(52), LayoutParams.MATCH_PARENT));
-        mediaContainer.addView(mediaSeekRow, new LinearLayout.LayoutParams(
+        // Insert ahead of the transport row; artwork is prepended afterwards.
+        // Final expanded order: artwork, seekbar, transport controls.
+        mediaContainer.addView(mediaSeekRow, 0, new LinearLayout.LayoutParams(
                 LayoutParams.MATCH_PARENT, dp(48)));
 
         // Expanded-only artwork and metadata: artwork on the left, track info
@@ -415,8 +425,8 @@ final class TwoColumnPanel extends FrameLayout {
         metadataArea.addView(expandedMediaArtist, new LinearLayout.LayoutParams(
                 LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
 
-        // Artwork/info consumes the remaining height above the dedicated
-        // full-width transport row and the existing seek bar.
+        // Artwork/info consumes the remaining height above the seek bar
+        // and the dedicated full-width transport controls.
         mediaContainer.addView(mediaArtworkFrame, 0, new LinearLayout.LayoutParams(
                 LayoutParams.MATCH_PARENT, 0, 1f));
 
@@ -524,6 +534,7 @@ final class TwoColumnPanel extends FrameLayout {
         if (next == index) return;
         selectedMediaToken = mediaSessions.get(next).token;
         mediaPendingToken = null;
+        mediaSeekEditing = false;
         mediaSeekSelected = false;
         mediaModeSelected = false;
         renderMediaSession();
@@ -533,6 +544,7 @@ final class TwoColumnPanel extends FrameLayout {
         int index = mediaSessionIndex();
         if (index < 0) return;
         NativeMediaSessions.Entry entry = mediaSessions.get(index);
+        if (!entry.canSeek) mediaSeekEditing = false;
         PackageManager pm = getContext().getPackageManager();
         try {
             mediaAppIcon.setImageDrawable(pm.getApplicationIcon(entry.packageName));
@@ -630,6 +642,7 @@ final class TwoColumnPanel extends FrameLayout {
     private void setMediaControlsOpen(boolean open) {
         if (mediaControlsOpen == open) return;
         mediaControlsOpen = open;
+        mediaSeekEditing = false;
         mediaSeekSelected = false;
         mediaModeSelected = false;
         mediaSeekDragging = false;
@@ -709,6 +722,7 @@ final class TwoColumnPanel extends FrameLayout {
                 || (kind == MediaModePolicy.REPEAT && !entry.canRepeat)) return;
         selectedMediaMode = kind;
         mediaModeSelected = true;
+        mediaSeekEditing = false;
         mediaSeekSelected = false;
         mediaRow.requestFocus();
         updateMediaHighlight();
@@ -761,10 +775,31 @@ final class TwoColumnPanel extends FrameLayout {
         mediaSeekBar.setProgress(MediaSeekPolicy.toProgress(positionMs, entry.durationMs));
         mediaSeekBar.setEnabled(entry.canSeek);
         mediaSeekBar.setAlpha(entry.canSeek ? 1f : 0.4f);
-        mediaSeekBar.setContentDescription(entry.canSeek
-                ? "Playback position, " + mediaElapsed.getText() + " of "
-                        + mediaDuration.getText() + ", draggable"
-                : "Playback position, seeking unavailable");
+        if (!entry.canSeek && mediaSeekEditing) {
+            mediaSeekEditing = false;
+            updateMediaHighlight();
+        }
+        updateSeekAccessibility(entry);
+    }
+
+    private void updateSeekAccessibility(NativeMediaSessions.Entry entry) {
+        String position = "Playback position, " + mediaElapsed.getText() + " of "
+                + mediaDuration.getText();
+        mediaSeekBar.setContentDescription(!entry.canSeek
+                ? "Playback position, seeking unavailable"
+                : position + ", draggable. " + (mediaSeekEditing
+                        ? "Trackpad seek mode active; press to finish"
+                        : mediaSeekSelected
+                                ? "Press trackpad to enter seek mode"
+                                : "Highlight to use trackpad seeking"));
+    }
+
+    /** First trackpad click enters seek mode; second click exits it. */
+    private void toggleMediaSeekEditing() {
+        NativeMediaSessions.Entry entry = currentMediaSession();
+        mediaSeekEditing = MediaSeekPolicy.toggleTrackpadEditing(
+                mediaSeekSelected, mediaSeekEditing, entry != null && entry.canSeek);
+        updateMediaHighlight();
     }
 
     private void seekMedia(NativeMediaSessions.Entry entry, long positionMs) {
@@ -834,6 +869,7 @@ final class TwoColumnPanel extends FrameLayout {
         int index = mediaSessionIndex();
         if (index < 0) return;
         NativeMediaSessions.Entry entry = mediaSessions.get(index);
+        updateSeekAccessibility(entry);
         for (int i = 0; i < mediaButtons.length; i++) {
             boolean enabled = i == NativeMediaSessions.PREVIOUS ? entry.canPrevious
                     : i == NativeMediaSessions.NEXT ? entry.canNext : entry.canPlayPause;
@@ -869,8 +905,11 @@ final class TwoColumnPanel extends FrameLayout {
                         int index = mediaSessionIndex();
                         if (index >= 0) {
                             NativeMediaSessions.Entry entry = mediaSessions.get(index);
-                            if (entry.canSeek) seekMedia(entry, MediaSeekPolicy.seekStep(
-                                    displayedMediaPosition(entry), entry.durationMs, step));
+                            if (MediaSeekPolicy.canTrackpadSeek(mediaSeekSelected,
+                                    mediaSeekEditing, entry.canSeek)) {
+                                seekMedia(entry, MediaSeekPolicy.seekStep(
+                                        displayedMediaPosition(entry), entry.durationMs, step));
+                            }
                         }
                     } else if (mediaControlsOpen && mediaModeSelected) {
                         NativeMediaSessions.Entry entry = currentMediaSession();
@@ -892,32 +931,39 @@ final class TwoColumnPanel extends FrameLayout {
             case KeyEvent.KEYCODE_DPAD_DOWN:
                 if (event.getAction() == KeyEvent.ACTION_DOWN) {
                     if (mediaControlsOpen) {
+                        // Trackpad seek-edit mode is exited by a second click,
+                        // not by navigating away with an up/down swipe.
+                        if (mediaSeekEditing) return true;
+                        // Visual order from top: mode header, artwork, seekbar,
+                        // transport controls. Keep hardware navigation aligned.
                         if (mediaModeSelected) {
                             if (code == KeyEvent.KEYCODE_DPAD_DOWN) {
                                 mediaModeSelected = false;
+                                mediaSeekSelected = true;
                                 updateMediaHighlight();
                                 notifyMediaHeader();
                             }
                         } else if (mediaSeekSelected) {
-                            if (code == KeyEvent.KEYCODE_DPAD_UP) {
+                            if (code == KeyEvent.KEYCODE_DPAD_DOWN) {
                                 mediaSeekSelected = false;
                                 updateMediaHighlight();
-                            }
-                        } else if (code == KeyEvent.KEYCODE_DPAD_DOWN) {
-                            mediaSeekSelected = true;
-                            updateMediaHighlight();
-                        } else {
-                            NativeMediaSessions.Entry entry = currentMediaSession();
-                            if (entry != null) {
-                                int first = MediaModePolicy.firstAvailable(
-                                        entry.canShuffle, entry.canRepeat);
-                                if (first >= 0) {
-                                    selectedMediaMode = first;
-                                    mediaModeSelected = true;
-                                    updateMediaHighlight();
-                                    notifyMediaHeader();
+                            } else {
+                                NativeMediaSessions.Entry entry = currentMediaSession();
+                                if (entry != null) {
+                                    int first = MediaModePolicy.firstAvailable(
+                                            entry.canShuffle, entry.canRepeat);
+                                    if (first >= 0) {
+                                        selectedMediaMode = first;
+                                        mediaModeSelected = true;
+                                        mediaSeekSelected = false;
+                                        updateMediaHighlight();
+                                        notifyMediaHeader();
+                                    }
                                 }
                             }
+                        } else if (code == KeyEvent.KEYCODE_DPAD_UP) {
+                            mediaSeekSelected = true;
+                            updateMediaHighlight();
                         }
                     } else if (code == KeyEvent.KEYCODE_DPAD_UP) {
                         enterStatusZone();
@@ -936,7 +982,9 @@ final class TwoColumnPanel extends FrameLayout {
                         setMediaControlsOpen(true);
                     } else if (mediaModeSelected) {
                         performMediaModeAction();
-                    } else if (!mediaSeekSelected) {
+                    } else if (mediaSeekSelected) {
+                        toggleMediaSeekEditing();
+                    } else {
                         performMediaAction();
                     }
                 }

@@ -9,6 +9,17 @@ final class MediaSeekPolicy {
 
     private MediaSeekPolicy() {}
 
+    /** Seekbar highlighting is not equivalent to entering trackpad seek mode. */
+    static boolean toggleTrackpadEditing(boolean highlighted, boolean editing,
+            boolean canSeek) {
+        return highlighted && canSeek && !editing;
+    }
+
+    static boolean canTrackpadSeek(boolean highlighted, boolean editing,
+            boolean canSeek) {
+        return highlighted && editing && canSeek;
+    }
+
     static long clamp(long positionMs, long durationMs) {
         return Math.min(Math.max(0L, positionMs), Math.max(0L, durationMs));
     }
