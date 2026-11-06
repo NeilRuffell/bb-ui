@@ -9,8 +9,9 @@ import android.view.KeyEvent;
  * implements Listener. Both shade pages and the standalone status-bar focus
  * surface receive this same controller, not separate navigation instances.
  *
- * Back from the status bar always exits the current surface; Down returns to
- * shade content, or opens native Recents when the shade has not been opened.
+ * Back from the selected header segment exits the open shade; Down returns
+ * to shade content. The legacy standalone navigation path is retained as a
+ * compatibility fallback but is no longer entered by the BB hardware key.
  */
 final class ShadeUiController {
     interface Listener {

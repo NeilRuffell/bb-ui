@@ -1731,7 +1731,7 @@ final class TwoColumnPanel extends FrameLayout {
         if (activeReplyInput != null) return;
         requestFocus();
         navigation.focusStatusBarFromPage(ShadeStatusNavigation.NOTIFICATIONS);
-        Log.i(TAG, "Native status bar focused: notifications");
+        Log.i(TAG, "Shade navigation header focused: notifications");
     }
 
     private void leaveStatusZone() {
@@ -1749,7 +1749,7 @@ final class TwoColumnPanel extends FrameLayout {
                             notificationTargets.size());
                     // Keep Up bounded inside the notification/action list.
                     // Back explicitly returns to the app-icon column; only
-                    // that column may move Up into the native status bar.
+                    // that column may move Up into the navigation header.
                     if (next >= 0) {
                         notificationTargets.get(next).requestFocus();
                     }
