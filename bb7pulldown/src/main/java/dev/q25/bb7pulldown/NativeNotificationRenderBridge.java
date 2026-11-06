@@ -56,17 +56,20 @@ final class NativeNotificationRenderBridge {
                     new XC_MethodHook() {
                 @Override protected void beforeHookedMethod(MethodHookParam param) {
                     if (!(param.thisObject instanceof View)) return;
+                    View stack = (View) param.thisObject;
                     FrameLayout bbWindow = NativeShadeHostBridge.windowWithBbPresentation();
-                    if (bbWindow == null) return;
+                    FrameLayout lockWindow = BB6LockScreenHook.interactiveWindow();
                     if (!NativeNotificationRenderPolicy.shouldSuppress(
-                            true, isWithin((View) param.thisObject, bbWindow))) return;
-                    // Keep the Android-owned row objects, controllers, click
-                    // listeners and updates, but don't draw the covered rows.
+                            bbWindow != null, bbWindow != null && isWithin(stack, bbWindow),
+                            lockWindow != null,
+                            lockWindow != null && isWithin(stack, lockWindow))) return;
+                    // Native rows, controllers, and touch handlers stay intact:
+                    // skip only the duplicate drawing pass.
                     param.setResult(null);
                     if (!firstSuppressionLogged) {
                         firstSuppressionLogged = true;
-                        Log.i(TAG, "Stock notification card drawing skipped behind"
-                                + " mounted BB shade; native row lifecycle preserved");
+                        Log.i(TAG, "Stock notification cards skipped in BB-owned"
+                                + " shade/lockscreen; native rows retained");
                     }
                 }
             });

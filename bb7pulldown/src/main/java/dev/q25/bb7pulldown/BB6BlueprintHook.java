@@ -60,6 +60,11 @@ public final class BB6BlueprintHook implements IXposedHookLoadPackage {
     private static WeakReference<View> rootRef = new WeakReference<>(null);
     private static volatile boolean registered;
     private static volatile boolean composingBb6;
+    // The ROM's AodBurnInLayer is not guaranteed to inherit ConstraintHelper's
+    // public reference methods. Verify the actual class once before using them.
+    private static Class<?> checkedLayerClass;
+    private static AodLayerReferenceAccess referenceAccess;
+    private static boolean referenceOperationWarningLogged;
 
     @Override
     public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lp) {
@@ -308,7 +313,15 @@ public final class BB6BlueprintHook implements IXposedHookLoadPackage {
                 "burn_in_layer", "id", SYSTEMUI);
         View layer = layerId == 0 ? null : root.findViewById(layerId);
         if (layer == null || omitted.isEmpty()) return;
-        int[] refs = (int[]) XposedHelpers.callMethod(layer, "getReferencedIds");
+        AodLayerReferenceAccess access = accessFor(layer.getClass());
+        if (access == null) return;
+        int[] refs;
+        try {
+            refs = access.read(layer);
+        } catch (ReflectiveOperationException | RuntimeException error) {
+            logReferenceOperationError(error);
+            return;
+        }
         if (refs == null || refs.length == 0) return;
         int[] keep = new int[refs.length];
         int count = 0;
@@ -316,10 +329,14 @@ public final class BB6BlueprintHook implements IXposedHookLoadPackage {
             if (!omitted.contains(value)) keep[count++] = value;
         }
         if (count > 0 && count != refs.length) {
-            XposedHelpers.callMethod(layer, "setReferencedIds",
-                    (Object) Arrays.copyOf(keep, count));
-            Log.i(TAG, "AOD Layer references removed for native sections: "
-                    + (refs.length - count));
+            try {
+                if (access.replaceIfUnchanged(layer, refs, Arrays.copyOf(keep, count))) {
+                    Log.i(TAG, "AOD Layer references removed for native sections: "
+                            + (refs.length - count));
+                }
+            } catch (ReflectiveOperationException | RuntimeException error) {
+                logReferenceOperationError(error);
+            }
         }
     }
 
@@ -363,18 +380,17 @@ public final class BB6BlueprintHook implements IXposedHookLoadPackage {
     }
 
     /**
-     * LineageOS 24's AodBurnInLayer is an AndroidX Layer/ConstraintHelper.
-     * It transforms the IDs registered in getReferencedIds(). The previous
-     * prototype's crash was dereferencing a removed child ID. During native
-     * blueprint transitions we keep this reference list consistent.
+     * Some AOD layers expose AndroidX ConstraintHelper's public reference-ID
+     * API, but this must be verified against the actual loaded ROM class.
+     * Do not assume getReferencedIds() exists. Without a validated contract,
+     * leave the native AOD layer unchanged rather than guessing its fields.
      *
-     * The native burn-in anchor is retained; do not detach views or override
-     * any native transform method. This is an ID membership repair ONLY
-     * when a reference is provably absent in the original ConstraintLayout.
+     * The native burn-in anchor is retained. Only prune IDs confirmed absent
+     * from the original parent, and verify every reference-list mutation.
      */
     private static void hookAodReferenceConsistency(ClassLoader loader) {
         Class<?> layer = XposedHelpers.findClassIfExists(AOD_LAYER, loader);
-        if (layer == null) return;
+        if (layer == null || accessFor(layer) == null) return;
         XC_MethodHook safeguard = new XC_MethodHook() {
             @Override protected void beforeHookedMethod(MethodHookParam param) {
                 if (!registered) return;
@@ -390,14 +406,38 @@ public final class BB6BlueprintHook implements IXposedHookLoadPackage {
         }
     }
 
+    private static synchronized AodLayerReferenceAccess accessFor(Class<?> type) {
+        if (checkedLayerClass != type) {
+            checkedLayerClass = type;
+            referenceAccess = AodLayerReferenceAccess.inspect(type);
+            if (referenceAccess == null) {
+                Log.w(TAG, "Native AOD reference contract unavailable: "
+                        + type.getName() + " extends "
+                        + (type.getSuperclass() == null ? "none"
+                                : type.getSuperclass().getName())
+                        + "; preserving native helper references");
+            }
+        }
+        return referenceAccess;
+    }
+
+    private static void logReferenceOperationError(Throwable error) {
+        if (!referenceOperationWarningLogged) {
+            referenceOperationWarningLogged = true;
+            Log.w(TAG, "Native AOD reference operation failed; retaining stock state", error);
+        }
+    }
+
     private static void validateLayerReferences(Object layer) {
         if (!(layer instanceof View)) return;
         View helper = (View) layer;
         ViewParent parent = helper.getParent();
         if (!(parent instanceof ViewGroup)) return;
         ViewGroup group = (ViewGroup) parent;
+        AodLayerReferenceAccess access = accessFor(layer.getClass());
+        if (access == null) return;
         try {
-            int[] ids = (int[]) XposedHelpers.callMethod(layer, "getReferencedIds");
+            int[] ids = access.read(layer);
             if (ids == null || ids.length == 0) return;
             int[] valid = new int[ids.length];
             int count = 0;
@@ -413,10 +453,12 @@ public final class BB6BlueprintHook implements IXposedHookLoadPackage {
             }
             if (count == ids.length || count == 0) return;
             int[] remaining = Arrays.copyOf(valid, count);
-            XposedHelpers.callMethod(layer, "setReferencedIds", (Object) remaining);
-            Log.w(TAG, "Repaired stale AOD Layer references: " + (ids.length - count));
-        } catch (Throwable error) {
-            Log.w(TAG, "Cannot validate native AOD Layer references: " + error);
+            if (access.replaceIfUnchanged(layer, ids, remaining)) {
+                Log.w(TAG, "Repaired stale AOD Layer references: "
+                        + (ids.length - count));
+            }
+        } catch (ReflectiveOperationException | RuntimeException error) {
+            logReferenceOperationError(error);
         }
     }
 }

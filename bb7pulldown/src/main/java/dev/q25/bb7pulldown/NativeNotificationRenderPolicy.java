@@ -10,6 +10,13 @@ final class NativeNotificationRenderPolicy {
      * The integration has already checked whether the feature is enabled.
      */
     static boolean shouldSuppress(boolean bbHostMounted, boolean sameNativeWindow) {
-        return bbHostMounted && sameNativeWindow;
+        return shouldSuppress(bbHostMounted, sameNativeWindow, false, false);
+    }
+
+    /** Only suppress drawing inside a currently BB-owned shade or keyguard window. */
+    static boolean shouldSuppress(boolean bbHostMounted, boolean sameNativeWindow,
+            boolean interactiveBb6, boolean sameLockscreenWindow) {
+        return (bbHostMounted && sameNativeWindow)
+                || (interactiveBb6 && sameLockscreenWindow);
     }
 }

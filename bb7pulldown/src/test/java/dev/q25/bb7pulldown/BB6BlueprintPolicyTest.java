@@ -12,7 +12,10 @@ public class BB6BlueprintPolicyTest {
         assertTrue(BB6BlueprintPolicy.omitStockSection("KeyguardSliceViewSection"));
         assertTrue(BB6BlueprintPolicy.omitStockSection("AodNotificationIconsSection"));
         assertTrue(BB6BlueprintPolicy.omitStockSection("AodPromotedNotificationSection"));
-        assertTrue(BB6BlueprintPolicy.omitStockSection("DefaultNotificationStackScrollLayoutSection"));
+        // This section owns native notification bindings and touch machinery.
+        // Keep it attached and suppress only its duplicate drawing during BB6.
+        assertFalse(BB6BlueprintPolicy.omitStockSection(
+                "DefaultNotificationStackScrollLayoutSection"));
     }
 
     @Test public void preservesNativeCarrierStatusAndAuthentication() {
