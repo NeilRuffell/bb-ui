@@ -4,7 +4,6 @@ import dev.q25.trackpad.theme.BB7Theme;
 import dev.q25.trackpad.input.TrackpadPressHandler;
 
 import android.content.Context;
-import android.content.res.ColorStateList;
 import android.os.SystemClock;
 import android.text.InputType;
 import android.view.inputmethod.EditorInfo;
@@ -12,6 +11,11 @@ import android.widget.EditText;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.Bitmap;
+import android.graphics.Canvas;
+import android.graphics.ColorFilter;
+import android.graphics.Paint;
+import android.graphics.PixelFormat;
+import android.graphics.Rect;
 import android.os.Bundle;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
@@ -72,9 +76,9 @@ final class TwoColumnPanel extends FrameLayout {
     }
 
     private static final String TAG = "BB7-PullDown";
-    // BBOS-style silver scrubber; the focused state belongs to the thumb alone.
-    private static final int MEDIA_SEEK_SILVER = 0xffc9ced5;
-    private static final int MEDIA_SEEK_TRACK = 0xff454b53;
+    // Solid upper/lower halves of the BBOS6 seek rail; no gradient or played tint.
+    private static final int MEDIA_SEEK_TRACK_TOP = 0xff101010;
+    private static final int MEDIA_SEEK_TRACK_BOTTOM = 0xff393839;
     private final BB7Theme.Palette palette;
     private final CloseListener onClose;
     private final ShadeUiController navigation;
@@ -315,9 +319,12 @@ final class TwoColumnPanel extends FrameLayout {
         // not clip it against the separate elapsed/total-time views.
         // This also keeps the touch-to-seek range aligned with the visible track.
         mediaSeekBar.setPadding(dp(32), 0, dp(32), 0);
-        mediaSeekBar.setProgressTintList(ColorStateList.valueOf(MEDIA_SEEK_SILVER));
-        mediaSeekBar.setProgressBackgroundTintList(ColorStateList.valueOf(MEDIA_SEEK_TRACK));
-        mediaSeekBar.setSecondaryProgressTintList(ColorStateList.valueOf(MEDIA_SEEK_TRACK));
+        // The whole rail is two flat horizontal halves. Do not distinguish
+        // played/unplayed portions until that BBOS6 detail is designed.
+        mediaSeekBar.setProgressTintList(null);
+        mediaSeekBar.setProgressBackgroundTintList(null);
+        mediaSeekBar.setSecondaryProgressTintList(null);
+        mediaSeekBar.setProgressDrawable(mediaSeekTrackDrawable());
         // Preserve the silver pill's own fill and border rather than applying
         // the current Android theme's SeekBar thumb tint.
         mediaSeekBar.setThumbTintList(null);
@@ -844,6 +851,47 @@ final class TwoColumnPanel extends FrameLayout {
         layers.setLayerHeight(2, dp(2));
         layers.setLayerGravity(2, Gravity.BOTTOM | Gravity.FILL_HORIZONTAL);
         return layers;
+    }
+
+    /** Full-width 6dp seek rail: two solid colors separated at its midpoint. */
+    private Drawable mediaSeekTrackDrawable() {
+        final int railHeight = dp(6);
+        return new Drawable() {
+            private final Paint topPaint = new Paint();
+            private final Paint bottomPaint = new Paint();
+
+            {
+                topPaint.setColor(MEDIA_SEEK_TRACK_TOP);
+                bottomPaint.setColor(MEDIA_SEEK_TRACK_BOTTOM);
+            }
+
+            @Override public void draw(Canvas canvas) {
+                Rect bounds = getBounds();
+                int halfway = bounds.top + bounds.height() / 2;
+                canvas.drawRect(bounds.left, bounds.top, bounds.right, halfway, topPaint);
+                canvas.drawRect(bounds.left, halfway, bounds.right, bounds.bottom, bottomPaint);
+            }
+
+            @Override public int getIntrinsicHeight() {
+                return railHeight;
+            }
+
+            @Override public void setAlpha(int alpha) {
+                topPaint.setAlpha(alpha);
+                bottomPaint.setAlpha(alpha);
+                invalidateSelf();
+            }
+
+            @Override public void setColorFilter(ColorFilter filter) {
+                topPaint.setColorFilter(filter);
+                bottomPaint.setColorFilter(filter);
+                invalidateSelf();
+            }
+
+            @Override public int getOpacity() {
+                return PixelFormat.TRANSLUCENT;
+            }
+        };
     }
 
     /** Silver by default; selected pill alone uses the existing BB UI blue. */
