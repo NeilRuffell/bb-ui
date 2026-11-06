@@ -13,8 +13,10 @@ import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.Bitmap;
 import android.os.Bundle;
+import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.LayerDrawable;
 import android.media.session.MediaSession;
 import android.text.TextUtils;
 import android.text.format.DateFormat;
@@ -295,7 +297,7 @@ final class TwoColumnPanel extends FrameLayout {
         mediaSeekRow.setOrientation(LinearLayout.HORIZONTAL);
         mediaSeekRow.setGravity(Gravity.CENTER_VERTICAL);
         mediaSeekRow.setPadding(dp(10), 0, dp(10), 0);
-        mediaSeekRow.setBackgroundColor(palette.heading);
+        mediaSeekRow.setBackground(mediaSeekBackground());
         mediaSeekRow.setVisibility(View.GONE);
 
         mediaElapsed = text("0:00", 11, palette.muted);
@@ -826,6 +828,19 @@ final class TwoColumnPanel extends FrameLayout {
         super.onDetachedFromWindow();
     }
 
+    /** BBOS6 seek area: fixed dark vertical gradient with a top-only 1dp border. */
+    private Drawable mediaSeekBackground() {
+        GradientDrawable fill = new GradientDrawable(
+                GradientDrawable.Orientation.TOP_BOTTOM,
+                new int[] {0xff222422, 0xff181818});
+        LayerDrawable layers = new LayerDrawable(new Drawable[] {
+                fill, new ColorDrawable(0xff393c3c)
+        });
+        layers.setLayerHeight(1, dp(1));
+        layers.setLayerGravity(1, Gravity.TOP | Gravity.FILL_HORIZONTAL);
+        return layers;
+    }
+
     /** Silver by default; selected pill alone uses the existing BB UI blue. */
     private GradientDrawable mediaSeekThumb(boolean selected) {
         GradientDrawable pill = new GradientDrawable(
@@ -856,13 +871,8 @@ final class TwoColumnPanel extends FrameLayout {
         mediaShuffleStatus.setTint(statusTint);
         mediaRepeatStatus.setTint(statusTint);
         boolean seekFocused = focused && mediaControlsOpen && mediaSeekSelected;
-        // Never highlight the entire seek row: selection is visible exclusively
-        // on the movable pill. The elapsed/total timestamps stay unchanged.
-        mediaSeekRow.setBackground(new GradientDrawable(
-                GradientDrawable.Orientation.TOP_BOTTOM,
-                palette == BB7Theme.Palette.DARK
-                        ? new int[] {0xff2f4053, 0xff1e2c3b}
-                        : new int[] {0xffecf1f7, 0xffd8e2ec}));
+        // Keep the fixed seek-area background; focus changes only the pill.
+        // The elapsed/total timestamps stay unchanged.
         mediaSeekBar.setThumb(mediaSeekThumb(seekFocused));
         mediaElapsed.setTextColor(palette.muted);
         mediaDuration.setTextColor(palette.muted);
