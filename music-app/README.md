@@ -9,8 +9,13 @@ It has its own Gradle project under `music-app/`.
 The BlackBerry OS 6-style home screen uses a native Android `ListView` and
 `BaseAdapter`, with the same one-row-at-a-time hardware Up/Down navigation
 and native touch scrolling model as the BB UI Quick Settings shade.
-Selected rows have a full-width, square-cornered blue gradient. The outer
-`FrameLayout.setFitsSystemWindows(true)` keeps the list below system bars.
+BB Music's library is always dark: its shared list background, outer
+viewport and unfocused row backgrounds are pure black (`#000000`) in both
+Android light and dark modes. Titles remain white, counts muted, and row
+separators dark gray. **The original full-width, square-cornered blue focus
+gradient and border are unchanged**, including the existing color-selection
+logic. The outer `FrameLayout.setFitsSystemWindows(true)` keeps the list
+below system bars.
 
 Home screen, in order:
 
