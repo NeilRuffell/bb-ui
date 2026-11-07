@@ -67,6 +67,12 @@ abstract class MusicLibraryDatabase extends RoomDatabase {
 
         @Query("DELETE FROM library_tracks")
         void deleteAllTracks();
+
+        @Query("DELETE FROM library_tracks WHERE sourceTree = :sourceTree")
+        void deleteTracksFromTree(String sourceTree);
+
+        @Query("DELETE FROM library_scan")
+        void deleteScanState();
     }
 
     abstract LibraryDao libraryDao();
