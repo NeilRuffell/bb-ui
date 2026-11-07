@@ -54,13 +54,15 @@ final class MusicListView extends ListView {
         final int menuIconRes;
         // Non-null only for track rows in an album detail page.
         final String trackNumber;
+        // Song rows only: right-aligned duration next to the first-line title.
+        final String durationLabel;
         final String artworkKey;
         final List<Uri> artworkCandidates;
         final boolean showRemoveButton;
 
         RowData(String title, String subtitle, boolean enabled,
                 boolean showArtwork, boolean albumFallback, int menuIconRes,
-                String trackNumber, String artworkKey,
+                String trackNumber, String durationLabel, String artworkKey,
                 List<Uri> artworkCandidates, boolean showRemoveButton) {
             this.title = title;
             this.subtitle = subtitle;
@@ -69,6 +71,7 @@ final class MusicListView extends ListView {
             this.albumFallback = albumFallback;
             this.menuIconRes = menuIconRes;
             this.trackNumber = trackNumber;
+            this.durationLabel = durationLabel;
             this.artworkKey = artworkKey;
             this.artworkCandidates = artworkCandidates;
             this.showRemoveButton = showRemoveButton;
@@ -97,17 +100,19 @@ final class MusicListView extends ListView {
         final Drawable noArtwork;
         final TextView trackNumber;
         final TextView label;
+        final TextView duration;
         final TextView count;
         final TextView removeAction;
 
         RowViews(LinearLayout root, ImageView artwork, Drawable noArtwork,
-                TextView trackNumber, TextView label, TextView count,
-                TextView removeAction) {
+                TextView trackNumber, TextView label, TextView duration,
+                TextView count, TextView removeAction) {
             this.root = root;
             this.artwork = artwork;
             this.noArtwork = noArtwork;
             this.trackNumber = trackNumber;
             this.label = label;
+            this.duration = duration;
             this.count = count;
             this.removeAction = removeAction;
         }
@@ -309,13 +314,32 @@ final class MusicListView extends ListView {
         row.addView(textColumn, new LinearLayout.LayoutParams(
                 0, ViewGroup.LayoutParams.MATCH_PARENT, 1f));
 
+        // First line: song title expands to available space, while duration
+        // stays right-aligned just as on the original BBOS6 Songs screen.
+        // Non-song rows hide duration and retain their existing title width.
+        LinearLayout titleLine = new LinearLayout(getContext());
+        titleLine.setOrientation(LinearLayout.HORIZONTAL);
+        titleLine.setGravity(Gravity.CENTER_VERTICAL);
+        textColumn.addView(titleLine, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT));
+
         TextView title = new TextView(getContext());
         title.setTextSize(15);
         title.setPadding(dp(16), 0, dp(16), 0);
         title.setSingleLine(true);
         title.setEllipsize(TextUtils.TruncateAt.END);
-        textColumn.addView(title, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
+        titleLine.addView(title, new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+        TextView duration = new TextView(getContext());
+        duration.setTextSize(15);
+        duration.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
+        duration.setPadding(0, 0, dp(16), 0);
+        duration.setSingleLine(true);
+        duration.setVisibility(View.GONE);
+        titleLine.addView(duration, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT));
 
         TextView count = new TextView(getContext());
@@ -349,13 +373,16 @@ final class MusicListView extends ListView {
         removeLayout.setMargins(dp(4), 0, dp(10), 0);
         row.addView(remove, removeLayout);
 
-        row.setTag(new RowViews(row, art, placeholder, number, title, count,
-                remove));
+        row.setTag(new RowViews(row, art, placeholder, number, title, duration,
+                count, remove));
         return row;
     }
 
     private void bindRow(RowViews views, RowData row, int position) {
         views.label.setText(row.title);
+        views.duration.setVisibility(
+                row.durationLabel == null ? View.GONE : View.VISIBLE);
+        views.duration.setText(row.durationLabel == null ? "" : row.durationLabel);
         boolean numbered = row.trackNumber != null;
         views.trackNumber.setVisibility(numbered ? View.VISIBLE : View.GONE);
         views.trackNumber.setText(numbered ? row.trackNumber : "");
@@ -376,6 +403,7 @@ final class MusicListView extends ListView {
                 : "Track " + row.trackNumber + ", ") + row.title;
         views.root.setContentDescription((detail == null ? spoken
                 : spoken + ", " + detail)
+                + (row.durationLabel == null ? "" : ", " + row.durationLabel)
                 + (row.showRemoveButton ? ", Remove available" : ""));
         bindArtwork(views, row);
         styleRow(views, position);
@@ -505,6 +533,7 @@ final class MusicListView extends ListView {
             views.root.setBackgroundColor(rowColor);
         }
         views.label.setTextColor(focused ? Color.WHITE : titleColor);
+        views.duration.setTextColor(focused ? Color.WHITE : titleColor);
         views.trackNumber.setTextColor(focused ? Color.WHITE : 0xffc9c9c9);
         views.count.setTextColor(focused ? 0xffedf4ff : (rowColor == Color.WHITE
                 ? 0xff66798a : 0xffb3c1ce));
