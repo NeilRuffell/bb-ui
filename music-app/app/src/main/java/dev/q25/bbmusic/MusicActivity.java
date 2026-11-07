@@ -422,17 +422,26 @@ public final class MusicActivity extends Activity {
     }
 
     private String albumKeyForRow(MenuRow row) {
-        if (row.kind == ROW_SONG) return groupKey(row.song, 2);
+        if (row.kind == ROW_SONG) return artworkAlbumKey(row.song);
         if (row.kind != ROW_GROUP || row.songs == null || row.songs.isEmpty()) {
             return null;
         }
         if (row.groupCategory == 2) {
             // The album entry always displays its own album art.
-            return groupKey(row.songs.get(0), 2);
+            return artworkAlbumKey(row.songs.get(0));
         }
         // Artists and genres take the artwork of their first alphabetical
         // album. Missing art on that album never selects a later album.
-        return groupKey(Collections.min(row.songs, FIRST_ALBUM), 2);
+        return artworkAlbumKey(Collections.min(row.songs, FIRST_ALBUM));
+    }
+
+    private static String artworkAlbumKey(LocalMusicSource.Song song) {
+        // No album tag means no verified album association. Such tracks must
+        // not borrow a different untagged song's embedded image.
+        if ("Unknown Album".equalsIgnoreCase(song.album)) {
+            return "untagged:" + song.uri;
+        }
+        return groupKey(song, 2);
     }
 
     /**
@@ -447,7 +456,7 @@ public final class MusicActivity extends Activity {
         }
         Map<String, ArrayList<LocalMusicSource.Song>> byAlbum = new LinkedHashMap<>();
         for (LocalMusicSource.Song song : localSongs) {
-            String albumKey = groupKey(song, 2);
+            String albumKey = artworkAlbumKey(song);
             byAlbum.computeIfAbsent(albumKey, unused -> new ArrayList<>()).add(song);
         }
         Map<String, List<Uri>> indexed = new LinkedHashMap<>();
