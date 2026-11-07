@@ -96,9 +96,12 @@ public final class PullDownHook implements IXposedHookLoadPackage {
     private static Context focusReceiverContext;
     // The system task selected before the popup grabs keyboard focus.
     private static ForegroundTaskActions.Target popupTaskTarget;
-    // The original CommandQueue instance continues to own native Quickstep.
+    // Retain only a weak reference to the native SystemUI command owner.
+    // There is no separate Recents presenter or task backend.
     private static WeakReference<Object> nativeRecentsQueue = new WeakReference<>(null);
-    private static boolean bypassRecentsMenuInterception;
+    // Suppress only this thread's reentrant BB-key hook while forwarding the
+    // menu action back into the exact same native CommandQueue entry point.
+    private static final ThreadLocal<Boolean> forwardingNativeRecents = new ThreadLocal<>();
 
     /**
      * One navigation/session owner for the native status bar and both shade
@@ -225,13 +228,18 @@ public final class PullDownHook implements IXposedHookLoadPackage {
             return;
         }
         try {
+            // The popup can be entered by a native callback other than a
+            // preceding Recents toggle. Capture its owner on construction too.
+            XposedBridge.hookAllConstructors(queue, new XC_MethodHook() {
+                @Override protected void afterHookedMethod(MethodHookParam param) {
+                    nativeRecentsQueue = new WeakReference<>(param.thisObject);
+                }
+            });
             XposedBridge.hookAllMethods(queue, "toggleRecentApps", new XC_MethodHook() {
                 @Override protected void beforeHookedMethod(MethodHookParam param) {
                     if (!enabled()) return;
-                    // Menu's Switch Application uses this same queue without
-                    // recursively invoking the BB-key interception path.
-                    if (bypassRecentsMenuInterception) return;
                     nativeRecentsQueue = new WeakReference<>(param.thisObject);
+                    if (Boolean.TRUE.equals(forwardingNativeRecents.get())) return;
                     View bar = nativeStatusBar.get();
                     if (bar == null || locked(bar.getContext())) {
                         Log.w(TAG, "BB menu: native bar unavailable/locked; stock retained");
@@ -286,23 +294,21 @@ public final class PullDownHook implements IXposedHookLoadPackage {
             }
             return;
         }
+        forwardingNativeRecents.set(Boolean.TRUE);
         try {
-            // Unlike toggleRecentApps, showRecentApps is not our BB-key hook.
-            XposedHelpers.callMethod(queue, "showRecentApps", false);
-        } catch (Throwable showError) {
-            Log.w(TAG, "showRecentApps unavailable; trying native toggle", showError);
-            bypassRecentsMenuInterception = true;
-            try {
-                XposedHelpers.callMethod(queue, "toggleRecentApps");
-            } catch (Throwable toggleError) {
-                Log.e(TAG, "Quickstep activation unavailable", toggleError);
-                if (context != null) {
-                    Toast.makeText(context, "Unable to open applications",
-                            Toast.LENGTH_SHORT).show();
-                }
-            } finally {
-                bypassRecentsMenuInterception = false;
+            // The native toggle is the actual command intercepted for the BB
+            // key. The old showRecentApps(false) call could return normally
+            // even when Quickstep did not enter Overview; do not use it.
+            XposedHelpers.callMethod(queue, "toggleRecentApps");
+            Log.i(TAG, "Switch Application forwarded to native Quickstep toggle");
+        } catch (Throwable error) {
+            Log.e(TAG, "Native Quickstep toggle failed", error);
+            if (context != null) {
+                Toast.makeText(context, "Unable to open applications",
+                        Toast.LENGTH_SHORT).show();
             }
+        } finally {
+            forwardingNativeRecents.remove();
         }
     }
 
