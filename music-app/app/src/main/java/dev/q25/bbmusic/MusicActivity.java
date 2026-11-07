@@ -279,13 +279,22 @@ public final class MusicActivity extends Activity {
     }
 
     private MusicListView.RowData rowPresentation(MenuRow row) {
-        boolean hasArtwork = row.kind == ROW_GROUP || row.kind == ROW_SONG;
+        // The BBOS6 album detail page has its cover in the album header.
+        // Its tracks show the tagged track number instead of repeated art.
+        boolean albumTrack = currentPage.albumGroup != null
+                && row.kind == ROW_SONG;
+        boolean hasArtwork = !albumTrack
+                && (row.kind == ROW_GROUP || row.kind == ROW_SONG);
+        String trackNumber = albumTrack
+                ? (row.song.trackNumber > 0
+                ? Integer.toString(row.song.trackNumber) : "--") : null;
         String albumKey = hasArtwork ? albumKeyForRow(row) : null;
         List<Uri> candidates = albumKey == null
                 ? null : albumArtworkSources.get(albumKey);
         return new MusicListView.RowData(
                 row.title, childCountLabel(row), row.kind != ROW_MESSAGE,
-                hasArtwork, albumKey == null ? null : "album:" + albumKey,
+                hasArtwork, trackNumber,
+                albumKey == null ? null : "album:" + albumKey,
                 candidates);
     }
 
