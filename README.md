@@ -1,5 +1,10 @@
 # BB UI
 
+> **Separate application:** `music-app/` is a fully independent Android
+> **BB Music** APK (`dev.q25.bbmusic`), built from its own Gradle project.
+> It does not depend on this Vector/LSPosed module, root or SystemUI.
+> See [BB Music setup and architecture](music-app/README.md).
+
 BlackBerry OS 6/7-inspired interface and hardware-keyboard navigation for
 Android on the Zinwa Q25. The current test build is a single **Vector/LSPosed
 APK** that integrates with LineageOS SystemUI. The long-term target is a
