@@ -134,10 +134,13 @@ final class UnifiedShadeHost extends FrameLayout {
         // Same silver rule as the bottom of the seekbar area, placed above
         // this header without changing its height or child layout.
         LayerDrawable mediaModeChrome = new LayerDrawable(new Drawable[] {
-                mediaModeFill, MediaChromeDivider.silverLine()
+                mediaModeFill, MediaChromeDivider.silverLine(),
+                MediaChromeDivider.darkRule()
         });
         mediaModeChrome.setLayerHeight(1, dp(MediaChromeDivider.HEIGHT_DP));
         mediaModeChrome.setLayerGravity(1, Gravity.TOP | Gravity.FILL_HORIZONTAL);
+        mediaModeChrome.setLayerHeight(2, dp(MediaChromeDivider.DARK_RULE_HEIGHT_DP));
+        mediaModeChrome.setLayerGravity(2, Gravity.BOTTOM | Gravity.FILL_HORIZONTAL);
         mediaModeHeader.setBackground(mediaModeChrome);
         mediaModeHeader.setVisibility(View.GONE);
         layout.addView(mediaModeHeader, new LinearLayout.LayoutParams(

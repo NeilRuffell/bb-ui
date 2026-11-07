@@ -875,9 +875,9 @@ final class TwoColumnPanel extends FrameLayout {
         // The mode header's upper border uses this exact same silver gradient.
         GradientDrawable bottomBorder = MediaChromeDivider.silverLine();
         LayerDrawable layers = new LayerDrawable(new Drawable[] {
-                fill, new ColorDrawable(0xff393c3c), bottomBorder
+                fill, MediaChromeDivider.darkRule(), bottomBorder
         });
-        layers.setLayerHeight(1, dp(2));
+        layers.setLayerHeight(1, dp(MediaChromeDivider.DARK_RULE_HEIGHT_DP));
         layers.setLayerGravity(1, Gravity.TOP | Gravity.FILL_HORIZONTAL);
         layers.setLayerHeight(2, dp(MediaChromeDivider.HEIGHT_DP));
         layers.setLayerGravity(2, Gravity.BOTTOM | Gravity.FILL_HORIZONTAL);
