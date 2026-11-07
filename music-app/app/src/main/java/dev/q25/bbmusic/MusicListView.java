@@ -63,7 +63,6 @@ final class MusicListView extends ListView {
 
     // Shared height for the selection row and its edge-to-edge square artwork.
     private static final int ROW_HEIGHT_DP = 64;
-    private static final int BLUE_BORDER = 0xffb4e2fb;
     private static final int[] LIGHT_SELECTION = {
             0xff088eef, 0xff088aef, 0xff0886ef, 0xff0882ef, 0xff087de7,
             0xff0879e7, 0xff1075e7, 0xff1071e7, 0xff106dde, 0xff1069de,
@@ -344,7 +343,6 @@ final class MusicListView extends ListView {
             GradientDrawable highlight = new GradientDrawable(
                     GradientDrawable.Orientation.TOP_BOTTOM, selectionColors);
             highlight.setCornerRadius(0);
-            highlight.setStroke(dp(1), BLUE_BORDER);
             views.root.setBackground(highlight);
         } else {
             views.root.setBackgroundColor(rowColor);
