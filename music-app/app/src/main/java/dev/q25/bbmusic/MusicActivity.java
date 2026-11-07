@@ -702,9 +702,6 @@ public final class MusicActivity extends Activity {
         searchOpen = true;
         // A new text search supersedes an unfinished menu navigation.
         pendingMenu = -1;
-        searchInput.setHint(currentPage == rootPage
-                ? "Search songs, artists, albums, genres"
-                : "Search " + currentPage.name);
         searchInput.setVisibility(View.VISIBLE);
         ensureBackCallback();
         // Leave focus on the native ListView: blue selection, hardware
