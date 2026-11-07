@@ -7,8 +7,8 @@ android {
         applicationId 'dev.q25.trackpad'
         minSdk 33
         targetSdk 28
-        versionCode 129
-        versionName '0.9.99-bbos6-native-recents-icons-prototype'
+        versionCode 130
+        versionName '0.9.100-bbos6-recents-icons-only'
     }
     // Compile legacy feature sources into this one APK. These directories
     // are source roots only; their former application modules are not built.
