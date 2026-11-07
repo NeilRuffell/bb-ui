@@ -119,6 +119,10 @@ final class LocalMusicSource {
                                 row.artistId, row.albumId, row.durationMs,
                                 row.trackNumber));
                     }
+                    // Match the scanner's Java sort exactly on every launch.
+                    cached.sort(Comparator.comparing((Song song) -> song.title,
+                            String.CASE_INSENSITIVE_ORDER)
+                            .thenComparing(song -> song.uri.toString()));
                     songs = Collections.unmodifiableList(cached);
                     Log.i(TAG, "Loaded persistent music index: " + songs.size());
                 } else {
