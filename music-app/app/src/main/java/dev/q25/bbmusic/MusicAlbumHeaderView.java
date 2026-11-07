@@ -20,7 +20,9 @@ import java.util.List;
  * selected-folder album artwork cache as the music browse rows.
  */
 final class MusicAlbumHeaderView extends LinearLayout {
-    private static final int HEIGHT_DP = 72;
+    private static final int CONTENT_HEIGHT_DP = 88;
+    private static final int SEPARATOR_HEIGHT_DP = 1;
+    private static final int SEPARATOR_COLOR = 0xff515251;
     private final MusicListView list;
     private final ImageView cover;
     private final TextView title;
@@ -34,23 +36,38 @@ final class MusicAlbumHeaderView extends LinearLayout {
     MusicAlbumHeaderView(Context context, MusicListView list) {
         super(context);
         this.list = list;
-        setOrientation(HORIZONTAL);
-        setGravity(Gravity.CENTER_VERTICAL);
+        setOrientation(VERTICAL);
         setPadding(0, 0, 0, 0);
         setBackgroundColor(Color.BLACK);
         setFocusable(false);
+
+        // The content starts flush at the screen's left edge and just
+        // below the existing status-bar inset. The rule is a separate
+        // full-width line below the art, not an inset around the cover.
+        LinearLayout content = new LinearLayout(context);
+        content.setOrientation(HORIZONTAL);
+        content.setGravity(Gravity.CENTER_VERTICAL);
+        content.setPadding(0, 0, 0, 0);
+        addView(content, new LayoutParams(
+                LayoutParams.MATCH_PARENT, dp(CONTENT_HEIGHT_DP)));
 
         cover = new ImageView(context);
         cover.setScaleType(ImageView.ScaleType.CENTER_CROP);
         cover.setContentDescription("Album artwork");
         cover.setImageDrawable(noCover);
-        addView(cover, new LayoutParams(dp(HEIGHT_DP), dp(HEIGHT_DP)));
+        content.addView(cover, new LayoutParams(
+                dp(CONTENT_HEIGHT_DP), dp(CONTENT_HEIGHT_DP)));
 
         LinearLayout info = new LinearLayout(context);
         info.setOrientation(VERTICAL);
         info.setGravity(Gravity.CENTER_VERTICAL);
         info.setPadding(dp(10), 0, dp(4), 0);
-        addView(info, new LayoutParams(0, LayoutParams.MATCH_PARENT, 1f));
+        content.addView(info, new LayoutParams(0, LayoutParams.MATCH_PARENT, 1f));
+
+        View separator = new View(context);
+        separator.setBackgroundColor(SEPARATOR_COLOR);
+        addView(separator, new LayoutParams(
+                LayoutParams.MATCH_PARENT, dp(SEPARATOR_HEIGHT_DP)));
 
         title = line(info, 16, Color.WHITE);
         artist = line(info, 12, 0xffc9c9c9);
@@ -59,7 +76,7 @@ final class MusicAlbumHeaderView extends LinearLayout {
     }
 
     static int heightDp() {
-        return HEIGHT_DP;
+        return CONTENT_HEIGHT_DP + SEPARATOR_HEIGHT_DP;
     }
 
     private TextView line(LinearLayout column, float sp, int color) {
