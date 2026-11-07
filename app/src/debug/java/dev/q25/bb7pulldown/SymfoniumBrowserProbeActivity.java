@@ -88,6 +88,10 @@ public final class SymfoniumBrowserProbeActivity extends Activity {
                             report("CONNECTED; root=" + clip(root));
                             report("Root extras keys=" + (extras == null
                                     ? "(none)" : extras.keySet().toString()));
+                            if (extras != null) {
+                                report("Search supported=" + extras.getBoolean(
+                                        "android.media.browse.SEARCH_SUPPORTED", false));
+                            }
                             if (root == null || root.isEmpty()) {
                                 report("No browseable root provided.");
                                 return;
