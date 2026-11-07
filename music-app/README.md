@@ -31,6 +31,11 @@ Home screen, in order:
 
 ### Original BBOS6 music menu icons
 
+**Canonical icon reference:** [`assets/bbos6/icon-index.csv`](../assets/bbos6/icon-index.csv).
+For every newly identified original BBOS6 icon, update that index in the
+same change. The repository-wide rule is documented in [`AGENTS.md`](../AGENTS.md).
+Do not rename original numbered PNGs or guess icon identities.
+
 The first six home-menu rows now render the **original PNGs** from the
 repository-wide `assets/bbos6/icons/` collection. They were matched
 visually and by image comparison against screenshots of the BlackBerry
