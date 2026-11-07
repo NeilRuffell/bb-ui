@@ -78,9 +78,12 @@ its PNG is packaged without modification. Album artwork on songs,
 albums, artists and genres remains independent of these static home-menu icons.
 
 **Missing album covers:** Original BBOS6 `543.png` is packaged as
-`bbos6_album_no_art.png` and displayed when an **Albums** category entry
-or an open album's information header has no embedded cover. Other library
-artwork fallbacks and original audio files are unchanged.
+`bbos6_album_no_art.png` and displayed when an **Albums** category entry,
+an open album's information header, or the **Now Playing** artwork area
+has no embedded cover. Real embedded album art replaces this fallback in
+Now Playing when successfully decoded; each track change immediately
+resets the artwork area to the original fallback until the new cover loads.
+Other library artwork fallbacks and original audio files are unchanged.
 
 
 ### Shared list component
@@ -352,6 +355,9 @@ The Now Playing screen is a standalone presentation port of BB UI master
   enter seek-edit mode; another press exits. Touch-dragging works directly.
 - An independent `MusicArtworkLoader` reads embedded album artwork only
   from the selected track's existing document URI on a background thread.
+  If decoding returns no cover, Now Playing displays the same original
+  BBOS6 `543.png` album-art fallback as the album list/header, instead
+  of an `Artwork unavailable` text label.
 
 Media3 owns audio focus, noisy-headset handling and the media-session
 notification, including background playback. The Activity disconnects its
@@ -412,7 +418,10 @@ adb -s 202512003630 install -r app/build/outputs/apk/debug/app-debug.apk
    changing touch scroll position.
 12. Select a track: Now Playing opens and first-party audio starts.
 13. Check Play/Pause, Previous/Next, duration, drag-to-seek and trackpad
-    two-stage seek mode. Verify album art when embedded artwork exists.
+    two-stage seek mode. Verify album art when embedded artwork exists,
+    and the original BBOS6 `543.png` cover when it does not. Switch between
+    tracks with and without embedded art and confirm the previous track's
+    cover never remains visible or replaces the fallback late.
 14. Check Shuffle, Repeat All, Repeat One and Off, using touch and trackpad.
 15. Back should return to the same music list without pausing playback.
 16. Background the app and use system notification/headset media controls.
