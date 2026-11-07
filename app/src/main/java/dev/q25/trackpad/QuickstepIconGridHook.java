@@ -1,21 +1,16 @@
 package dev.q25.trackpad;
 
-import android.content.Context;
 import android.graphics.Rect;
-import android.graphics.drawable.GradientDrawable;
-import android.graphics.drawable.StateListDrawable;
+import android.graphics.Canvas;
+import android.graphics.Paint;
+import android.graphics.drawable.Drawable;
 import android.os.Build;
 import android.util.Log;
-import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowInsets;
-import android.widget.FrameLayout;
-import android.widget.TextView;
-import android.text.TextUtils;
 
-import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.WeakHashMap;
@@ -31,9 +26,9 @@ import de.robv.android.xposed.callbacks.XC_LoadPackage;
  *
  * The existing RecentsView remains the ONLY Overview host. The actual native
  * TaskViews (and their task objects and click handlers) remain the ONLY task
- * views. We arrange those objects as icons, using the existing Quickstep icon
- * and label from each TaskContainer instead of creating an overlay, activity,
- * task snapshot model or duplicate task views.
+ * views. Its native TaskViews paint the existing Quickstep app Drawables
+ * directly, not the chip/title/thumbnail child UI. No overlays, second
+ * activity, screenshot cards or replicated task models are introduced.
  *
  * Initial Q25 compatibility build is opt-in until physically verified.
  * It is a Vector integration adapter, not the future ROM implementation.
@@ -47,7 +42,6 @@ public final class QuickstepIconGridHook implements IXposedHookLoadPackage {
     private static final String TASK = "com.android.quickstep.views.TaskView";
 
     private static final WeakHashMap<View, Integer> MAX_SCROLL = new WeakHashMap<>();
-    private static final WeakHashMap<View, Boolean> STYLED = new WeakHashMap<>();
     private static boolean firstLayoutLogged;
 
     @Override public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lp) {
@@ -59,7 +53,7 @@ public final class QuickstepIconGridHook implements IXposedHookLoadPackage {
             return;
         }
         try {
-            // These are native Quickstep layout hooks, not a second renderer.
+            // Native Quickstep layout hooks: no second task renderer.
             XposedBridge.hookAllMethods(recents, "getTaskSize", new XC_MethodHook() {
                 @Override protected void afterHookedMethod(MethodHookParam p) {
                     if (!requested() || !(p.thisObject instanceof View)
@@ -73,6 +67,39 @@ public final class QuickstepIconGridHook implements IXposedHookLoadPackage {
                             grid.gap + grid.cellWidth, grid.top + grid.cellHeight);
                 }
             });
+
+            // TaskView owns native input, task IDs and launch behavior. Replace
+            // its *actual draw pass*, rather than hiding a giant tile beneath
+            // a pill-shaped header. Render NOTHING except real task icons
+            // and a compact focus indicator.
+            XposedBridge.hookAllMethods(task, "draw", new XC_MethodHook() {
+                @Override protected void beforeHookedMethod(MethodHookParam p) {
+                    if (!requested() || p.args.length != 1
+                            || !(p.args[0] instanceof Canvas)) return;
+                    View nativeTask = (View) p.thisObject;
+                    drawIconsOnly(nativeTask, (Canvas) p.args[0]);
+                    // Skip stock TaskView.draw completely: no thumbnail,
+                    // no preview card, no chip background, no title strip.
+                    p.setResult(null);
+                }
+            });
+
+            // Quickstep loads application icons asynchronously. The existing
+            // chip owns the Drawable; when its icon changes, invalidate the
+            // *same* native TaskView so its icon-only paint is refreshed.
+            Class<?> iconChip = XposedHelpers.findClassIfExists(
+                    "com.android.quickstep.views.IconAppChipView", lp.classLoader);
+            if (iconChip != null) {
+                XposedBridge.hookAllMethods(iconChip, "setDrawable",
+                        new XC_MethodHook() {
+                    @Override protected void afterHookedMethod(MethodHookParam p) {
+                        if (!requested() || !(p.thisObject instanceof View)) return;
+                        View chip = (View) p.thisObject;
+                        if (chip.getParent() instanceof View)
+                            ((View) chip.getParent()).invalidate();
+                    }
+                });
+            }
 
             XposedBridge.hookAllMethods(recents, "getPageScrolls", new XC_MethodHook() {
                 @Override protected void beforeHookedMethod(MethodHookParam p) {
@@ -101,9 +128,9 @@ public final class QuickstepIconGridHook implements IXposedHookLoadPackage {
                     if (grid == null) return;
 
                     boolean place = (Boolean) p.args[1];
-                    int extraClearPage = clearAll == null ? 0 : 1;
-                    int endScroll = Math.max(0,
-                            grid.pageCount + extraClearPage - 1) * grid.pageWidth;
+                    // Clear All is intentionally NOT another icon/page.
+                    // No trailing blank 'clear all' page in the icon grid.
+                    int endScroll = grid.lastTaskScroll();
                     MAX_SCROLL.put(root, endScroll);
                     boolean changed = false;
                     int taskNumber = 0;
@@ -115,25 +142,24 @@ public final class QuickstepIconGridHook implements IXposedHookLoadPackage {
                             int y = grid.y(taskNumber);
                             scroll = grid.scrollForTask(taskNumber);
                             if (place) {
-                                // No reparenting, cloning or hidden stock
-                                // RecentsView: these ARE Quickstep TaskViews.
+                                // Native task hit targets are exactly ONE
+                                // compact icon cell, not a fullscreen card.
+                                // TaskView.draw is replaced separately.
                                 if (child.getLeft() != x || child.getTop() != y
-                                        || child.getWidth() != child.getMeasuredWidth()
-                                        || child.getHeight() != child.getMeasuredHeight()) {
-                                    child.layout(x, y, x + child.getMeasuredWidth(),
-                                            y + child.getMeasuredHeight());
+                                        || child.getWidth() != grid.cellWidth
+                                        || child.getHeight() != grid.cellHeight) {
+                                    child.layout(x, y, x + grid.cellWidth,
+                                            y + grid.cellHeight);
                                 }
-                                makeNativeTaskIconOnly(child, grid);
                             }
                             taskNumber++;
                         } else {
                             scroll = endScroll;
                             if (place) {
-                                int x = scroll + (root.getWidth()
-                                        - child.getMeasuredWidth()) / 2;
-                                int y = (root.getHeight() - child.getMeasuredHeight()) / 2;
-                                child.layout(x, y, x + child.getMeasuredWidth(),
-                                        y + child.getMeasuredHeight());
+                                // Existing native ClearAllButton remains
+                                // allocated for Quickstep internals, but
+                                // cannot paint into the icon-only screen.
+                                child.setVisibility(View.GONE);
                             }
                         }
                         if (scrolls[i] != scroll) {
@@ -249,8 +275,7 @@ public final class QuickstepIconGridHook implements IXposedHookLoadPackage {
                 if (!(containers instanceof List) || ((List<?>) containers).isEmpty())
                     return false;
                 for (Object c : (List<?>) containers) {
-                    if (!(XposedHelpers.callMethod(c, "getIconView") instanceof View)
-                            || !(XposedHelpers.callMethod(c, "getTaskContentView") instanceof View))
+                    if (!(XposedHelpers.callMethod(c, "getIconView") instanceof View))
                         return false;
                 }
             }
@@ -261,136 +286,77 @@ public final class QuickstepIconGridHook implements IXposedHookLoadPackage {
     }
 
     /**
-     * Reconfigure native TaskView's existing app-chip icon and title.
-     * The native thumbnail component is not a second Recents presentation;
-     * it remains measured for Quickstep animations but is not rendered in
-     * this one icon-only TaskView presentation.
+     * Paint the already-bound native task's application Drawable directly.
+     * We do not attach a new view or replicate any native task data. This
+     * bypasses the native tile/card and chip rendering altogether.
      */
-    private static void makeNativeTaskIconOnly(View task, RecentsIconGridLayout grid) {
-        if (!(task instanceof FrameLayout)) return;
-        if (STYLED.put(task, Boolean.TRUE) == null) {
-            task.setBackground(focusBackground(task));
-            ((FrameLayout) task).setDescendantFocusability(
-                    ViewGroup.FOCUS_BLOCK_DESCENDANTS);
-        }
+    private static void drawIconsOnly(View task, Canvas canvas) {
+        int width = task.getWidth();
+        int height = task.getHeight();
+        if (width <= 0 || height <= 0) return;
+
+        List<?> containers;
         try {
-            @SuppressWarnings("unchecked")
-            List<Object> containers = (List<Object>)
-                    XposedHelpers.callMethod(task, "getTaskContainers");
-            for (Object container : containers) {
-                View preview = (View) XposedHelpers.callMethod(
-                        container, "getTaskContentView");
-                preview.setVisibility(View.INVISIBLE);
-                View iconChip = (View) XposedHelpers.callMethod(container, "getIconView");
-                iconChip.setVisibility(View.VISIBLE);
-                iconChip.setFocusable(false);
-                iconChip.setClickable(false);
-                iconChip.setClipToOutline(false);
-                iconChip.setBackground(null);
-                iconChip.setForeground(null);
-                if (iconChip.getLayoutParams() instanceof FrameLayout.LayoutParams) {
-                    FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams)
-                            iconChip.getLayoutParams();
-                    int width = grid.cellWidth - dp(task, 8);
-                    int height = grid.cellHeight - dp(task, 8);
-                    if (lp.width != width || lp.height != height
-                            || lp.gravity != Gravity.CENTER) {
-                        lp.width = width;
-                        lp.height = height;
-                        lp.gravity = Gravity.CENTER;
-                        lp.leftMargin = 0;
-                        lp.rightMargin = 0;
-                        lp.topMargin = 0;
-                        lp.bottomMargin = 0;
-                        iconChip.setLayoutParams(lp);
-                    }
-                }
-                layoutNativeAppChip(iconChip, grid);
-                // Icon tap is now the same TaskView action as tapping its
-                // normal native thumbnail: native launch, never a new task API.
-                iconChip.setOnClickListener(v -> task.performClick());
-            }
-        } catch (Throwable error) {
-            Log.e(TAG, "Native icon-chip presentation unavailable", error);
+            Object nativeContainers = XposedHelpers.callMethod(
+                    task, "getTaskContainers");
+            if (!(nativeContainers instanceof List)) return;
+            containers = (List<?>) nativeContainers;
+        } catch (Throwable ignored) {
+            return; // task not bound yet
         }
-    }
+        if (containers.isEmpty()) return;
 
-    private static void layoutNativeAppChip(View chip, RecentsIconGridLayout grid) {
-        if (!(chip instanceof FrameLayout)) return;
-        Context context = chip.getContext();
-        int iconId = context.getResources().getIdentifier(
-                "icon_view", "id", PACKAGE);
-        int titleId = context.getResources().getIdentifier(
-                "icon_title", "id", PACKAGE);
-        int arrowId = context.getResources().getIdentifier(
-                "icon_arrow", "id", PACKAGE);
-        if (arrowId != 0) {
-            View arrow = chip.findViewById(arrowId);
-            if (arrow != null) arrow.setVisibility(View.GONE);
-        }
-        if (iconId != 0) {
-            View icon = chip.findViewById(iconId);
-            if (icon != null && icon.getLayoutParams() instanceof FrameLayout.LayoutParams) {
-                FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams)
-                        icon.getLayoutParams();
-                int iconSize = Math.min(dp(chip, 52), grid.cellWidth - dp(chip, 20));
-                if (lp.width != iconSize || lp.height != iconSize
-                        || lp.gravity != (Gravity.TOP | Gravity.CENTER_HORIZONTAL)) {
-                    lp.width = iconSize;
-                    lp.height = iconSize;
-                    lp.gravity = Gravity.TOP | Gravity.CENTER_HORIZONTAL;
-                    lp.topMargin = dp(chip, 9);
-                    lp.leftMargin = 0;
-                    lp.rightMargin = 0;
-                    icon.setLayoutParams(lp);
-                }
-            }
-        }
-        if (titleId != 0) {
-            View title = chip.findViewById(titleId);
-            if (title instanceof TextView) {
-                TextView label = (TextView) title;
-                label.setVisibility(View.VISIBLE);
-                label.setGravity(Gravity.CENTER);
-                label.setTextSize(11f);
-                label.setTextColor(0xfff2f2f4);
-                label.setSingleLine(true);
-                label.setEllipsize(TextUtils.TruncateAt.END);
-                if (label.getLayoutParams() instanceof FrameLayout.LayoutParams) {
-                    FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams)
-                            label.getLayoutParams();
-                    int width = grid.cellWidth - dp(chip, 14);
-                    if (lp.width != width || lp.gravity != (Gravity.BOTTOM
-                            | Gravity.CENTER_HORIZONTAL)) {
-                        lp.width = width;
-                        lp.height = dp(chip, 28);
-                        lp.gravity = Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL;
-                        lp.bottomMargin = dp(chip, 6);
-                        lp.leftMargin = 0;
-                        lp.rightMargin = 0;
-                        label.setLayoutParams(lp);
-                    }
-                }
-            }
-        }
-    }
+        int count = Math.min(4, containers.size());
+        int size = Math.max(1, Math.min(dp(task, count == 1 ? 52 : 37),
+                Math.min(width / (count > 2 ? 2 : count), height)
+                        - dp(task, 8)));
+        int cols = Math.min(2, count);
+        int rows = (count + cols - 1) / cols;
+        int step = size + dp(task, 3);
+        int totalWidth = cols * size + (cols - 1) * dp(task, 3);
+        int totalHeight = rows * size + (rows - 1) * dp(task, 3);
+        int originX = (width - totalWidth) / 2;
+        int originY = (height - totalHeight) / 2;
 
-    private static StateListDrawable focusBackground(View view) {
-        GradientDrawable selected = new GradientDrawable(
-                GradientDrawable.Orientation.TOP_BOTTOM,
-                new int[]{0xff4384c7, 0xff204e83});
-        selected.setCornerRadius(dp(view, 7));
-        selected.setStroke(dp(view, 2), 0xffadcef5);
-        GradientDrawable normal = new GradientDrawable(
-                GradientDrawable.Orientation.TOP_BOTTOM,
-                new int[]{0xff4b4e53, 0xff32363c});
-        normal.setCornerRadius(dp(view, 7));
-        normal.setStroke(dp(view, 1), 0xff5a5d63);
-        StateListDrawable states = new StateListDrawable();
-        states.addState(new int[]{android.R.attr.state_focused}, selected);
-        states.addState(new int[]{android.R.attr.state_pressed}, selected);
-        states.addState(new int[]{}, normal);
-        return states;
+        // BBOS6 focus is blue; its target is only the icon cluster, not
+        // a cell-sized rectangle or screenshot-like card.
+        if (task.isFocused() || task.isPressed() || task.hasFocus()) {
+            float pad = dp(task, 6);
+            Paint marker = new Paint(Paint.ANTI_ALIAS_FLAG);
+            marker.setColor(0xaa245b97);
+            float left = originX - pad;
+            float top = originY - pad;
+            float right = originX + totalWidth + pad;
+            float bottom = originY + totalHeight + pad;
+            canvas.drawRoundRect(left, top, right, bottom,
+                    dp(task, 9), dp(task, 9), marker);
+            marker.setStyle(Paint.Style.STROKE);
+            marker.setStrokeWidth(dp(task, 1));
+            marker.setColor(0xffa8cef3);
+            canvas.drawRoundRect(left, top, right, bottom,
+                    dp(task, 9), dp(task, 9), marker);
+        }
+
+        for (int i = 0; i < count; i++) {
+            try {
+                Object nativeChip = XposedHelpers.callMethod(
+                        containers.get(i), "getIconView");
+                Object source = XposedHelpers.callMethod(nativeChip, "getDrawable");
+                if (!(source instanceof Drawable)) continue;
+                Drawable icon = (Drawable) source;
+                Rect original = new Rect(icon.getBounds());
+                int x = originX + (i % cols) * step;
+                int y = originY + (i / cols) * step;
+                try {
+                    icon.setBounds(x, y, x + size, y + size);
+                    icon.draw(canvas);
+                } finally {
+                    icon.setBounds(original);
+                }
+            } catch (Throwable ignored) {
+                // Unbound or missing native icon: draw nothing for this task.
+            }
+        }
     }
 
     private static RecentsIconGridLayout geometry(View root, int tasks) {
