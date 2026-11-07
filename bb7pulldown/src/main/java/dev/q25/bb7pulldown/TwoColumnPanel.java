@@ -287,7 +287,9 @@ final class TwoColumnPanel extends FrameLayout {
             final int action = i;
             ImageView button = new ImageView(context);
             button.setImageResource(icons[i]);
-            button.setScaleType(ImageView.ScaleType.FIT_CENTER);
+            // Render Android's stock media drawable at its intrinsic size.
+            // CENTER neither upscales nor downscales the raster image.
+            button.setScaleType(ImageView.ScaleType.CENTER);
             button.setPadding(dp(9), dp(9), dp(9), dp(9));
             button.setFocusable(false); // Trackpad focus remains on the parent row.
             // Transport buttons belong exclusively to the expanded media view.
