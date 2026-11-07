@@ -49,6 +49,33 @@ lifecycle and releases it when the Activity is destroyed.
 The current standalone implementation still does not depend on BB UI,
 Vector/LSPosed, a custom ROM, or another music app.
 
+### Album detail header (BBOS6 Music)
+
+Opening an entry on the **Albums** page displays a 72dp-tall black
+album header above its song list, based on the supplied BBOS6 screenshot.
+
+- Album artwork occupies a 72dp square, aligned exactly to the left and
+  top of the content area; there is no extra padding against the Android
+  status-bar inset or the left screen edge.
+- To its right are the album title, artist, a genre line in parentheses
+  (or `(Unknown)` if no genre tag was found), and the album's singular or
+  plural song count.
+- Art comes from **the same album-keyed, selected-folder-only thumbnail
+  cache** used by regular Music list rows. Albums without embedded art show
+  the existing placeholder.
+- The header is displayed only on song lists reached from an album.
+  Artists and Genres retain their existing list navigation.
+- It sits above the `MusicListView`, not in its adapter: row indices,
+  full-width blue selections, physical-keyboard search, trackpad behavior,
+  playback queues and Back-stack selection remain unchanged.
+- Back restores the parent album list; returning to the album restores
+  its header. The header stays visible while filtering an album's songs.
+
+The four-line layout reflects fields currently available in the
+selected-folder metadata index. The third line explicitly represents
+genre; the proprietary BBOS6 screenshot does not establish what its
+`(Unknown)` label originally referred to.
+
 ### Physical keyboard instant search
 
 While a music list or main menu is visible, **simply type** on the Q25's
@@ -292,6 +319,14 @@ adb -s 202512003630 install -r app/build/outputs/apk/debug/app-debug.apk
 23. Play a song from filtered results, press Back, and verify search
     results return intact. Ensure typing on Now Playing does not open
     the library search and the background player is unaffected.
+24. Open Albums and select an album. Check the 72dp artwork touches the
+    left screen edge and begins immediately beneath the status bar,
+    without white space. Its title, artist, genre and song count should
+    appear alongside the cover.
+25. Enter the song list with trackpad Up/Down and Enter. Check selected
+    tracks, playback queues, instant search and Back navigation behave
+    unchanged. Artist, genre, home and Settings pages must not show an
+    album header. Coverless albums must show the normal placeholder.
 
 For relevant logs:
 
