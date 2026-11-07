@@ -18,7 +18,7 @@ import android.widget.FrameLayout;
  * its upper rule and the rounded inset text-field background.
  */
 final class MusicSearchBarView extends FrameLayout {
-    private static final int HEIGHT_DP = 42;
+    private static final int HEIGHT_DP = 54;
     private static final int TOP_BORDER = 0xff5a5d63;
     private static final int TOP_GRADIENT = 0xff4b4e53;
     private static final int BOTTOM_GRADIENT = 0xff292c31;
@@ -45,13 +45,13 @@ final class MusicSearchBarView extends FrameLayout {
         setBackground(chrome);
         setPadding(dp(6), dp(6), dp(6), dp(5));
 
-        // Screenshot: an approximately 31dp-tall, near-white field with
+        // Enlarged: a 43dp-tall, near-white field with
         // softly rounded corners, a dark thin outer rim and an inset
         // gray-to-white highlight/shadow that fades near the field's top.
         GradientDrawable rim = new GradientDrawable(
                 GradientDrawable.Orientation.TOP_BOTTOM,
                 new int[] {0xff4e555b, 0xff6b7074});
-        rim.setCornerRadius(dp(4));
+        rim.setCornerRadius(dp(5));
 
         GradientDrawable inset = new GradientDrawable(
                 GradientDrawable.Orientation.TOP_BOTTOM,
@@ -65,7 +65,7 @@ final class MusicSearchBarView extends FrameLayout {
                 0xffd6d7d6, 0xffe7e7e7, 0xffefefef,
                 0xfff7f7f7, Color.WHITE, Color.WHITE
         }, new float[] {0f, 0.04f, 0.08f, 0.12f, 0.18f, 1f});
-        inset.setCornerRadius(dp(3));
+        inset.setCornerRadius(dp(4));
 
         LayerDrawable field = new LayerDrawable(
                 new android.graphics.drawable.Drawable[] {rim, inset});
