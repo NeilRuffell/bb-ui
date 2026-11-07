@@ -18,3 +18,11 @@ android {
 
 // An ordinary Android application: no BB UI module dependency, no
 // Xposed/Vector, SystemUI APIs, root, privileged permissions, or audio engine.
+
+dependencies {
+    // Standalone first-party player, independent of Symfonium and BB UI.
+    // Same stable Media3 version for player, session, and MediaController.
+    def media3Version = '1.11.1'
+    implementation "androidx.media3:media3-exoplayer:$media3Version"
+    implementation "androidx.media3:media3-session:$media3Version"
+}
