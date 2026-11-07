@@ -874,9 +874,8 @@ final class TwoColumnPanel extends FrameLayout {
         GradientDrawable fill = new GradientDrawable(
                 GradientDrawable.Orientation.TOP_BOTTOM,
                 new int[] {0xff222422, 0xff181818});
-        GradientDrawable bottomBorder = new GradientDrawable(
-                GradientDrawable.Orientation.LEFT_RIGHT,
-                new int[] {0xffb5b6b5, 0xffffffff, 0xffb5b6b5});
+        // The mode header's upper border uses this exact same silver gradient.
+        GradientDrawable bottomBorder = MediaChromeDivider.silverLine();
         LayerDrawable layers = new LayerDrawable(new Drawable[] {
                 fill, new ColorDrawable(0xff393c3c), bottomBorder
         });

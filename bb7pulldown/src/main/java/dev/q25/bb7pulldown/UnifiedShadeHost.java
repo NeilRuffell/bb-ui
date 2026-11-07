@@ -9,6 +9,8 @@ import android.content.Context;
 import android.graphics.Color;
 import android.graphics.Rect;
 import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.LayerDrawable;
+import android.graphics.drawable.Drawable;
 import android.view.Gravity;
 import android.widget.TextView;
 import android.view.View;
@@ -128,9 +130,18 @@ final class UnifiedShadeHost extends FrameLayout {
         mediaModeHeader.setPadding(dp(8), 0, dp(8), 0);
         // Neutral, unfocused media surface: reserve BB UI blue for the
         // individually selected shuffle/repeat control, not the whole header.
-        mediaModeHeader.setBackground(new GradientDrawable(
+        GradientDrawable mediaModeFill = new GradientDrawable(
                 GradientDrawable.Orientation.TOP_BOTTOM,
-                new int[] {0xff2f4053, 0xff1e2c3b}));
+                new int[] {0xff2f4053, 0xff1e2c3b});
+        // Match the silver 2dp bottom border of the seekbar area. This is
+        // drawn at the top of the shuffle/repeat header without changing
+        // its height or child layout.
+        LayerDrawable mediaModeChrome = new LayerDrawable(new Drawable[] {
+                mediaModeFill, MediaChromeDivider.silverLine()
+        });
+        mediaModeChrome.setLayerHeight(1, dp(2));
+        mediaModeChrome.setLayerGravity(1, Gravity.TOP | Gravity.FILL_HORIZONTAL);
+        mediaModeHeader.setBackground(mediaModeChrome);
         mediaModeHeader.setVisibility(View.GONE);
         layout.addView(mediaModeHeader, new LinearLayout.LayoutParams(
                 LayoutParams.MATCH_PARENT, dp(32)));
