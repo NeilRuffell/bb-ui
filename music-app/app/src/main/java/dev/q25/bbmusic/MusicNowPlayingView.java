@@ -274,8 +274,15 @@ final class MusicNowPlayingView extends LinearLayout {
             trackArtist.setText(artist == null ? "" : artist);
             trackArtist.setVisibility(artist == null || artist.length() == 0
                     ? View.GONE : View.VISIBLE);
-            updateArtwork(item.localConfiguration == null
-                    ? null : item.localConfiguration.uri);
+            // A MediaSession may omit LocalConfiguration from the
+            // controller-facing MediaItem. Our own mediaId preserves the
+            // exact SAF URI already approved by MusicFolders.
+            Uri artworkSource = item.localConfiguration == null
+                    ? null : item.localConfiguration.uri;
+            if (artworkSource == null && item.mediaId.startsWith("content://")) {
+                artworkSource = Uri.parse(item.mediaId);
+            }
+            updateArtwork(artworkSource);
         }
         boolean playing = controller != null && controller.isPlaying();
         transportButtons[1].setImageDrawable(
