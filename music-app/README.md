@@ -69,6 +69,22 @@ before display; stale rows from revoked/removed folder access cannot leak
 into the library. A changed permission/selection set invalidates the
 saved scan marker.
 
+**Audio document validation:** Before indexing a purported audio file,
+`LocalMusicSource` opens it through Android's `MediaExtractor` and requires
+an actual `audio/*` track. An extension or document-provider MIME label alone
+is insufficient. Directories retain their recursive traversal; when a provider
+mislabels an extensionless folder as audio, the scanner can detect a valid
+child-document cursor and continue into that directory. The scanner excludes
+invalid or unreadable non-audio entries instead of adding them as songs with
+zero duration. A playable audio file with unreadable title tags still uses
+its filename and Unknown Artist/Album/Genre fallbacks.
+
+**One-time index revision:** The audio-validation change versions the saved
+scan marker so an existing pre-fix Room catalog is rebuilt once after upgrade
+to remove previously misindexed entries. After this one scan, ordinary app
+launches continue reading the saved database without rescanning. No folder
+grants, existing files, Room database schema or playback settings are reset.
+
 This is **manual on-demand refresh**, not a periodic scanner. To find files
 added, moved, deleted or retagged outside BB Music, choose **Refresh library**.
 Force-stopping the app, restarting Android, or reopening the app does not
@@ -341,8 +357,9 @@ selections there are no media queries.
 - The manifest does **not** request `READ_MEDIA_AUDIO`,
   `READ_EXTERNAL_STORAGE`, `MANAGE_EXTERNAL_STORAGE`, network access,
   or root permissions for this feature.
-- The scanner reads audio metadata inside allowed trees on a background
-  thread. Results are stored in an app-private Room database and presented
+- The scanner validates actual audio tracks and reads their metadata inside
+  allowed trees on a background thread. Results are stored in an app-private
+  Room database and presented
   through an in-memory snapshot. A newly selected folder invalidates the
   snapshot and scans the updated allowlist; unchanged libraries load from
   Room without rescanning.
@@ -511,6 +528,10 @@ adb -s 202512003630 install -r app/build/outputs/apk/debug/app-debug.apk
 21. Remove or revoke a selected tree grant and confirm its tracks do not
     reappear from the saved database. A failed refresh must not destroy the
     last successfully saved snapshot.
+    After upgrading to the audio-validation build, verify one automatic
+    reindex removes the bogus `PEI (Legacy)` folder entry while the songs
+    inside valid selected subfolders remain available; then force-close and
+    reopen to verify Room resumes fast cached startup.
 18. Confirm tracks from unselected folders do not appear or enter a queue.
 19. Verify song and album rows display their own album cover; artist and
     genre rows select the first album in alphabetical album-title order.
