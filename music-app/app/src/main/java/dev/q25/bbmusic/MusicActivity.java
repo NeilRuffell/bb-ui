@@ -10,6 +10,7 @@ import android.net.Uri;
 import android.provider.DocumentsContract;
 import android.os.Bundle;
 import android.util.Log;
+import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
@@ -20,6 +21,7 @@ import android.window.OnBackInvokedDispatcher;
 import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
+import android.widget.TextView;
 import android.widget.Toast;
 
 import java.util.ArrayDeque;
@@ -68,6 +70,7 @@ public final class MusicActivity extends Activity {
     private MusicAlbumHeaderView albumHeader;
     private EditText searchInput;
     private MusicSearchBarView searchBar;
+    private TextView noSearchResults;
     private Page rootPage;
     private List<MenuRow> visibleRows;
     private boolean searchOpen;
@@ -251,6 +254,19 @@ public final class MusicActivity extends Activity {
         libraryShell.addView(searchBar, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 dp(MusicSearchBarView.heightDp())));
+        // Empty search feedback is not a ListView row: it never receives
+        // the row selector, participates in navigation, or adds a divider.
+        noSearchResults = new TextView(this);
+        noSearchResults.setText("No search results found");
+        noSearchResults.setTextSize(15);
+        noSearchResults.setTextColor(Color.WHITE);
+        noSearchResults.setGravity(Gravity.CENTER);
+        noSearchResults.setPadding(dp(16), dp(20), dp(16), dp(20));
+        noSearchResults.setFocusable(false);
+        noSearchResults.setVisibility(View.GONE);
+        libraryShell.addView(noSearchResults, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT));
         libraryShell.addView(list, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
         safeViewport.addView(libraryShell, new FrameLayout.LayoutParams(
@@ -775,6 +791,7 @@ public final class MusicActivity extends Activity {
         if (!searchOpen) return;
         searchOpen = false;
         searchBar.setVisibility(View.GONE);
+        noSearchResults.setVisibility(View.GONE);
         searchInput.setText("");
         visibleRows = currentPage.rows;
         list.notifyRowsChanged();
@@ -822,9 +839,10 @@ public final class MusicActivity extends Activity {
                     }
                 }
             }
-            if (matches.isEmpty()) matches.add(MenuRow.message("No matches"));
             visibleRows = matches;
         }
+        noSearchResults.setVisibility(!term.isEmpty() && visibleRows.isEmpty()
+                ? View.VISIBLE : View.GONE);
         list.notifyRowsChanged();
         list.setSelectionFromTop(0, 0);
         list.refreshSelection();
