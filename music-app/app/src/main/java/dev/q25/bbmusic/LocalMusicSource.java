@@ -3,6 +3,8 @@ package dev.q25.bbmusic;
 import android.content.ContentResolver;
 import android.content.Context;
 import android.database.Cursor;
+import android.media.MediaExtractor;
+import android.media.MediaFormat;
 import android.media.MediaMetadataRetriever;
 import android.net.Uri;
 import android.os.Handler;
@@ -33,6 +35,9 @@ import java.util.concurrent.Executors;
  */
 final class LocalMusicSource {
     private static final String TAG = "BBMusic-Local";
+    // Rebuild previously indexed libraries once after introducing actual
+    // audio-track validation. No database schema/data reset is required.
+    private static final String INDEX_RULES_VERSION = "verified-audio-v2:";
     private final Context context;
     private final ContentResolver resolver;
     private final MusicLibraryDatabase libraryDatabase;
@@ -185,7 +190,7 @@ final class LocalMusicSource {
         for (String tree : sorted) {
             key.append(tree.length()).append(':').append(tree);
         }
-        return key.toString();
+        return INDEX_RULES_VERSION + key;
     }
 
     void invalidate() {
@@ -325,7 +330,44 @@ final class LocalMusicSource {
                 || lower.endsWith(".amr");
     }
 
+    /**
+     * Confirm that an authorized SAF document contains an actual audio track
+     * before creating a playable row. A provider's audio/* MIME type or a
+     * filename extension alone is not evidence: some providers label
+     * directories or non-audio documents as audio.
+     *
+     * Return -1 when the document is not recognized as audio. A verified
+     * audio document may legitimately have an unknown duration (zero).
+     * MediaExtractor is short-lived and runs only on the scan worker.
+     */
+    private long probeAudioTrack(Uri fileUri) {
+        MediaExtractor extractor = new MediaExtractor();
+        try {
+            extractor.setDataSource(context, fileUri, null);
+            for (int i = 0; i < extractor.getTrackCount(); i++) {
+                MediaFormat format = extractor.getTrackFormat(i);
+                String mime = format.getString(MediaFormat.KEY_MIME);
+                if (mime == null || !mime.startsWith("audio/")) continue;
+                long durationUs = format.containsKey(MediaFormat.KEY_DURATION)
+                        ? format.getLong(MediaFormat.KEY_DURATION) : 0L;
+                return Math.max(0L, durationUs / 1000L);
+            }
+        } catch (java.io.IOException | RuntimeException exception) {
+            Log.d(TAG, "Document is not a readable audio track: " + fileUri,
+                    exception);
+        } finally {
+            extractor.release();
+        }
+        return -1L;
+    }
+
     private Song inspectAudio(Uri sourceTree, Uri fileUri, String filename) {
+        long verifiedDurationMs = probeAudioTrack(fileUri);
+        if (verifiedDurationMs < 0L) {
+            Log.i(TAG, "Ignoring non-audio selected document: " + fileUri);
+            return null;
+        }
+
         String fallbackTitle = filename == null ? "Unknown Title" : filename;
         int dot = fallbackTitle.lastIndexOf('.');
         if (dot > 0) fallbackTitle = fallbackTitle.substring(0, dot);
@@ -334,7 +376,7 @@ final class LocalMusicSource {
         String artist = "Unknown Artist";
         String album = "Unknown Album";
         String genre = "Unknown Genre";
-        long duration = 0L;
+        long duration = verifiedDurationMs;
         int track = 0;
 
         MediaMetadataRetriever metadata = new MediaMetadataRetriever();
@@ -349,13 +391,14 @@ final class LocalMusicSource {
                     MediaMetadataRetriever.METADATA_KEY_ALBUM), album);
             genre = name(metadata.extractMetadata(
                     MediaMetadataRetriever.METADATA_KEY_GENRE), genre);
-            duration = parseLong(metadata.extractMetadata(
+            long taggedDuration = parseLong(metadata.extractMetadata(
                     MediaMetadataRetriever.METADATA_KEY_DURATION));
+            if (taggedDuration > 0L) duration = taggedDuration;
             track = parseTrack(metadata.extractMetadata(
                     MediaMetadataRetriever.METADATA_KEY_CD_TRACK_NUMBER));
         } catch (RuntimeException exception) {
-            // Audio extensions without readable tags remain browseable by
-            // filename and their selected-folder content URI.
+            // A positively verified audio stream remains browseable by
+            // filename even when it lacks readable tags.
             Log.d(TAG, "Metadata unavailable for " + fileUri, exception);
         } finally {
             try {
