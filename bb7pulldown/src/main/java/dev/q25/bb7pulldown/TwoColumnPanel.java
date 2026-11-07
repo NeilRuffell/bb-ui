@@ -871,9 +871,7 @@ final class TwoColumnPanel extends FrameLayout {
 
     /** BBOS6 seek area: dark vertical fill, 2dp top rule and silver bottom rule. */
     private Drawable mediaSeekBackground() {
-        GradientDrawable fill = new GradientDrawable(
-                GradientDrawable.Orientation.TOP_BOTTOM,
-                new int[] {0xff222422, 0xff181818});
+        GradientDrawable fill = MediaChromeDivider.darkMediaBackground();
         // The mode header's upper border uses this exact same silver gradient.
         GradientDrawable bottomBorder = MediaChromeDivider.silverLine();
         LayerDrawable layers = new LayerDrawable(new Drawable[] {

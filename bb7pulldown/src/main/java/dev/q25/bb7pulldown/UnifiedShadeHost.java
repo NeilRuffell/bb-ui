@@ -128,14 +128,11 @@ final class UnifiedShadeHost extends FrameLayout {
         mediaModeHeader.setOrientation(LinearLayout.HORIZONTAL);
         mediaModeHeader.setGravity(Gravity.CENTER_VERTICAL);
         mediaModeHeader.setPadding(dp(8), 0, dp(8), 0);
-        // Neutral, unfocused media surface: reserve BB UI blue for the
-        // individually selected shuffle/repeat control, not the whole header.
-        GradientDrawable mediaModeFill = new GradientDrawable(
-                GradientDrawable.Orientation.TOP_BOTTOM,
-                new int[] {0xff2f4053, 0xff1e2c3b});
-        // Match the silver 2dp bottom border of the seekbar area. This is
-        // drawn at the top of the shuffle/repeat header without changing
-        // its height or child layout.
+        // Share the seekbar's dark vertical fill. Keep the individual
+        // shuffle/repeat selection styling and the 1dp silver top rule.
+        GradientDrawable mediaModeFill = MediaChromeDivider.darkMediaBackground();
+        // Same silver rule as the bottom of the seekbar area, placed above
+        // this header without changing its height or child layout.
         LayerDrawable mediaModeChrome = new LayerDrawable(new Drawable[] {
                 mediaModeFill, MediaChromeDivider.silverLine()
         });

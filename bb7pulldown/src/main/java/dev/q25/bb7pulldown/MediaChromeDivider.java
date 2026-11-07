@@ -10,6 +10,12 @@ final class MediaChromeDivider {
 
     private MediaChromeDivider() { }
 
+    /** Shared vertical background for the expanded seekbar and media-mode header. */
+    static GradientDrawable darkMediaBackground() {
+        return new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+                new int[] {0xff222422, 0xff181818});
+    }
+
     static GradientDrawable silverLine() {
         return new GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,
                 new int[] {0xffb5b6b5, 0xffffffff, 0xffb5b6b5});
