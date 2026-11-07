@@ -35,6 +35,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Random;
 import java.util.Set;
 
 /**
@@ -82,6 +83,13 @@ public final class MusicActivity extends Activity {
     private BaseAdapter adapter;
     private TrackpadPressHandler trackpadPress;
     private LocalMusicSource localSource;
+    private MusicPlaybackClient playback;
+    private FrameLayout safeViewport;
+    private MusicNowPlayingView nowPlaying;
+    private boolean nowPlayingVisible;
+    private int savedListPosition;
+    private int savedListTop;
+    private boolean pendingShuffleStart;
     private List<LocalMusicSource.Song> localSongs;
     private final int[] localCategoryCounts = new int[4];
     private boolean loading;
@@ -179,6 +187,15 @@ public final class MusicActivity extends Activity {
         trackpadPress = new TrackpadPressHandler(this::activateSelected,
                 () -> { /* Long-press behavior will be specified later. */ });
         localSource = new LocalMusicSource(this);
+        playback = new MusicPlaybackClient(this, new MusicPlaybackClient.Listener() {
+            @Override public void onPlaybackChanged() {
+                if (nowPlayingVisible && nowPlaying != null) nowPlaying.render();
+            }
+
+            @Override public void onPlaybackError(String message) {
+                Toast.makeText(MusicActivity.this, message, Toast.LENGTH_LONG).show();
+            }
+        });
         ArrayList<MenuRow> rootRows = new ArrayList<>();
         for (int index = 0; index < MENU.length; index++) {
             rootRows.add(MenuRow.root(MENU[index], index));
@@ -249,7 +266,7 @@ public final class MusicActivity extends Activity {
         // The ListView itself retains its unmodified scroll/focus behavior.
         // On edge-to-edge Android versions, this keeps rows and their selected
         // backgrounds beneath the visible status bar without fixed offsets.
-        FrameLayout safeViewport = new FrameLayout(this);
+        safeViewport = new FrameLayout(this);
         safeViewport.setBackgroundColor(canvasColor);
         safeViewport.setFitsSystemWindows(true);
         safeViewport.setClipChildren(true);
@@ -411,7 +428,11 @@ public final class MusicActivity extends Activity {
     }
 
     private void activateSelected() {
-        activate(list.getSelectedItemPosition());
+        if (nowPlayingVisible) {
+            if (nowPlaying != null) nowPlaying.activate();
+        } else {
+            activate(list.getSelectedItemPosition());
+        }
     }
 
     private void activate(int position) {
@@ -424,8 +445,7 @@ public final class MusicActivity extends Activity {
                 Toast.makeText(this, "Playlists are not implemented yet",
                         Toast.LENGTH_SHORT).show();
             } else if (row.menuIndex == 5) {
-                Toast.makeText(this, "Playback is not implemented yet",
-                        Toast.LENGTH_SHORT).show();
+                shuffleAllSongs();
             } else if (row.menuIndex == 6) {
                 ArrayList<MenuRow> settings = new ArrayList<>();
                 settings.add(MenuRow.setting("Add folders"));
@@ -441,11 +461,82 @@ public final class MusicActivity extends Activity {
             }
             navigateTo(new Page(row.title, songRows(groupSongs)));
         } else if (row.kind == ROW_SONG) {
-            // The selected document tree provided this URI for our native player.
-            Log.i(TAG, "Local track selected, media id=" + row.song.id);
-            Toast.makeText(this, "Playback is not implemented yet",
-                    Toast.LENGTH_SHORT).show();
+            // Play this track within its currently displayed folder-scoped
+            // song list, preserving the order for native Previous/Next.
+            ArrayList<LocalMusicSource.Song> queue = new ArrayList<>();
+            int startIndex = -1;
+            for (MenuRow item : currentPage.rows) {
+                if (item.kind != ROW_SONG) continue;
+                if (item == row) startIndex = queue.size();
+                queue.add(item.song);
+            }
+            if (startIndex >= 0) {
+                openNowPlaying();
+                playback.playSongs(queue, startIndex, false);
+            }
         }
+    }
+
+    private void shuffleAllSongs() {
+        if (MusicFolders.selectedTrees(this).isEmpty()) {
+            Toast.makeText(this, "Add a music folder in Settings first",
+                    Toast.LENGTH_LONG).show();
+            return;
+        }
+        if (localSongs == null) {
+            pendingShuffleStart = true;
+            startLocalScan(true);
+            return;
+        }
+        if (localSongs.isEmpty()) {
+            Toast.makeText(this, "No songs in selected folders",
+                    Toast.LENGTH_SHORT).show();
+            return;
+        }
+        openNowPlaying();
+        int index = new Random().nextInt(localSongs.size());
+        playback.playSongs(localSongs, index, true);
+    }
+
+    private void openNowPlaying() {
+        if (nowPlayingVisible) return;
+        savedListPosition = list.getSelectedItemPosition();
+        View selectedRow = list.getSelectedView();
+        savedListTop = selectedRow == null ? 0 : selectedRow.getTop();
+        safeViewport.removeView(list);
+        nowPlaying = new MusicNowPlayingView(this, playback);
+        safeViewport.addView(nowPlaying, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT));
+        nowPlayingVisible = true;
+        ensureBackCallback();
+        nowPlaying.requestFocus();
+        nowPlaying.render();
+    }
+
+    private void closeNowPlaying() {
+        if (!nowPlayingVisible) return;
+        nowPlayingVisible = false;
+        if (nowPlaying != null) {
+            safeViewport.removeView(nowPlaying);
+            nowPlaying.dispose();
+            nowPlaying = null;
+        }
+        safeViewport.addView(list, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT));
+        if (backStack.isEmpty()) unregisterNestedBack();
+        list.post(() -> {
+            if (nowPlayingVisible || isFinishing() || isDestroyed()) return;
+            list.requestFocus();
+            list.setSelectionFromTop(Math.max(0, savedListPosition), savedListTop);
+            styleVisibleRows();
+        });
+    }
+
+    @Override protected void onStart() {
+        super.onStart();
+        playback.connect();
     }
 
     private void showFolderPicker() {
@@ -536,6 +627,10 @@ public final class MusicActivity extends Activity {
                 localSongs = songs;
                 updateLocalCategoryCounts();
                 Log.i(TAG, "Selected-folder music ready: " + songs.size() + " tracks");
+                if (pendingShuffleStart) {
+                    pendingShuffleStart = false;
+                    shuffleAllSongs();
+                }
                 int menu = pendingMenu;
                 pendingMenu = -1;
                 if (menu >= 0 && backStack.isEmpty()) showLocalCategory(menu);
@@ -544,6 +639,7 @@ public final class MusicActivity extends Activity {
             @Override public void onError(String reason) {
                 loading = false;
                 pendingMenu = -1;
+                pendingShuffleStart = false;
                 refreshVisibleRows();
                 Toast.makeText(MusicActivity.this, reason, Toast.LENGTH_LONG).show();
             }
@@ -617,13 +713,7 @@ public final class MusicActivity extends Activity {
         View selectedView = list.getSelectedView();
         previous.selectedTop = selectedView == null ? 0 : selectedView.getTop();
         backStack.push(previous);
-        if (backStack.size() == 1) {
-            // Keep system Back navigation at the root; intercept it only
-            // while a nested library list is actually displayed.
-            nestedBackCallback = this::navigateBack;
-            getOnBackInvokedDispatcher().registerOnBackInvokedCallback(
-                    OnBackInvokedDispatcher.PRIORITY_DEFAULT, nestedBackCallback);
-        }
+        ensureBackCallback();
         showPage(next);
     }
 
@@ -639,7 +729,18 @@ public final class MusicActivity extends Activity {
         });
     }
 
+    private void ensureBackCallback() {
+        if (nestedBackCallback != null) return;
+        nestedBackCallback = this::navigateBack;
+        getOnBackInvokedDispatcher().registerOnBackInvokedCallback(
+                OnBackInvokedDispatcher.PRIORITY_DEFAULT, nestedBackCallback);
+    }
+
     private void navigateBack() {
+        if (nowPlayingVisible) {
+            closeNowPlaying();
+            return;
+        }
         if (backStack.isEmpty()) return;
         Page previous = backStack.pop();
         if (backStack.isEmpty()) unregisterNestedBack();
@@ -656,7 +757,7 @@ public final class MusicActivity extends Activity {
     @Override
     @SuppressWarnings("deprecation")
     public void onBackPressed() {
-        if (!backStack.isEmpty()) navigateBack();
+        if (nowPlayingVisible || !backStack.isEmpty()) navigateBack();
         else super.onBackPressed();
     }
 
@@ -669,6 +770,18 @@ public final class MusicActivity extends Activity {
         }
         if (TrackpadPressHandler.isConfirmKey(code)) {
             return trackpadPress.handle(event);
+        }
+        if (nowPlayingVisible) {
+            if (code == KeyEvent.KEYCODE_DPAD_UP
+                    || code == KeyEvent.KEYCODE_DPAD_DOWN
+                    || code == KeyEvent.KEYCODE_DPAD_LEFT
+                    || code == KeyEvent.KEYCODE_DPAD_RIGHT) {
+                if (event.getAction() == KeyEvent.ACTION_DOWN && nowPlaying != null) {
+                    nowPlaying.directional(code);
+                }
+                return true;
+            }
+            return super.dispatchKeyEvent(event);
         }
         if (code == KeyEvent.KEYCODE_DPAD_UP || code == KeyEvent.KEYCODE_DPAD_DOWN) {
             if (event.getAction() == KeyEvent.ACTION_DOWN) {
@@ -710,12 +823,15 @@ public final class MusicActivity extends Activity {
     @Override
     protected void onStop() {
         trackpadPress.cancel();
+        playback.disconnect();
         super.onStop();
     }
 
     @Override
     protected void onDestroy() {
         unregisterNestedBack();
+        if (nowPlaying != null) nowPlaying.dispose();
+        playback.disconnect();
         localSource.close();
         super.onDestroy();
     }
