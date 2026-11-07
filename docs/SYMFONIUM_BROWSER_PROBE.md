@@ -43,12 +43,15 @@ Read the screen or the logs for:
 
 - `CONNECTED` / `CONNECTION_FAILED`: is the ordinary BB UI app accepted?
 - `root=`: did Symfonium provide a browsable root?
-- `CHILDREN`: browseable/playable items and sample metadata.
+- `CHILDREN`: browseable/playable items and sample metadata, including nested
+  album tracks and the second page of albums.
 - `SUBSCRIPTION_ERROR` / `TIMEOUT`: categories Symfonium did not expose.
 
 The probe requests the first 25 entries per category with Android's
-standard pagination extras. It logs at most 18 items per category and probes
-at most 14 nodes, to avoid enumerating a large personal library. Item IDs
+standard pagination extras, including a second albums page. It follows
+selected album/artist entries down to individual track listings (up to four
+levels), logs at most 12 items per category and probes at most 38 nodes to
+avoid enumerating an entire personal library. Item IDs and artwork URIs
 are truncated in the log. It does not play, download, edit or delete music.
 
 ## Limitations
