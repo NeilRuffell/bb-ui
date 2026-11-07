@@ -68,6 +68,12 @@ Only entries whose icons were present in the screenshot were mapped.
 identify its matching BlackBerry 6 icon. Album artwork on songs, albums,
 artists and genres remains independent of these static home-menu icons.
 
+**Missing album covers:** Original BBOS6 `543.png` is packaged as
+`bbos6_album_no_art.png` and displayed when an **Albums** category entry
+or an open album's information header has no embedded cover. Other library
+artwork fallbacks and original audio files are unchanged.
+
+
 ### Shared list component
 
 The list implementation is extracted into `MusicListView.java`. This class
