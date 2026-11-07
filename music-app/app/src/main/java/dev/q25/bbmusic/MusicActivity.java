@@ -6,6 +6,8 @@ import android.net.Uri;
 import android.provider.DocumentsContract;
 import android.content.res.Configuration;
 import android.graphics.Color;
+import android.graphics.Bitmap;
+import android.graphics.drawable.Drawable;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
@@ -21,6 +23,7 @@ import android.widget.AbsListView;
 import android.widget.AdapterView;
 import android.widget.BaseAdapter;
 import android.widget.FrameLayout;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.TextView;
@@ -83,6 +86,8 @@ public final class MusicActivity extends Activity {
     private BaseAdapter adapter;
     private TrackpadPressHandler trackpadPress;
     private LocalMusicSource localSource;
+    private MusicListArtworkLoader listArtwork;
+    private Map<String, List<Uri>> albumArtworkSources = Collections.emptyMap();
     private MusicPlaybackClient playback;
     private FrameLayout safeViewport;
     private MusicNowPlayingView nowPlaying;
@@ -163,15 +168,30 @@ public final class MusicActivity extends Activity {
 
     private static final class RowViews {
         final LinearLayout root;
+        final ImageView artwork;
+        final Drawable noArtwork;
         final TextView label;
         final TextView count;
 
-        RowViews(LinearLayout root, TextView label, TextView count) {
+        RowViews(LinearLayout root, ImageView artwork, Drawable noArtwork,
+                TextView label, TextView count) {
             this.root = root;
+            this.artwork = artwork;
+            this.noArtwork = noArtwork;
             this.label = label;
             this.count = count;
         }
     }
+
+    // Artist/genre representative: alphabetical first album title, with
+    // deterministic tie-breaking for identical album names.
+    private static final Comparator<LocalMusicSource.Song> FIRST_ALBUM =
+            Comparator.comparing((LocalMusicSource.Song song) -> song.album,
+                    String.CASE_INSENSITIVE_ORDER)
+                    .thenComparing(song -> song.album)
+                    .thenComparing(song -> song.artist, String.CASE_INSENSITIVE_ORDER)
+                    .thenComparing(song -> song.artist)
+                    .thenComparing(song -> song.uri.toString());
 
     @Override
     protected void onCreate(Bundle state) {
@@ -187,6 +207,7 @@ public final class MusicActivity extends Activity {
         trackpadPress = new TrackpadPressHandler(this::activateSelected,
                 () -> { /* Long-press behavior will be specified later. */ });
         localSource = new LocalMusicSource(this);
+        listArtwork = new MusicListArtworkLoader(this);
         playback = new MusicPlaybackClient(this, new MusicPlaybackClient.Listener() {
             @Override public void onPlaybackChanged() {
                 if (nowPlayingVisible && nowPlaying != null) nowPlaying.render();
@@ -303,6 +324,20 @@ public final class MusicActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT, dp(55)));
         row.setFocusable(false);
 
+        // Only song/artist/album/genre lists have album art. The root
+        // menu and Settings retain the original label-only presentation.
+        ImageView art = new ImageView(this);
+        art.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        art.setFocusable(false);
+        art.setContentDescription("Album artwork");
+        art.setVisibility(View.GONE);
+        Drawable placeholder = new MusicCoverPlaceholderDrawable();
+        LinearLayout.LayoutParams artLayout =
+                new LinearLayout.LayoutParams(dp(44), dp(44));
+        artLayout.leftMargin = dp(10);
+        artLayout.rightMargin = dp(4);
+        row.addView(art, artLayout);
+
         LinearLayout textColumn = new LinearLayout(this);
         textColumn.setOrientation(LinearLayout.VERTICAL);
         textColumn.setGravity(Gravity.CENTER_VERTICAL);
@@ -328,7 +363,7 @@ public final class MusicActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT));
 
-        row.setTag(new RowViews(row, title, count));
+        row.setTag(new RowViews(row, art, placeholder, title, count));
         return row;
     }
 
@@ -352,7 +387,85 @@ public final class MusicActivity extends Activity {
         views.count.setText(detail == null ? "" : detail);
         views.root.setContentDescription(
                 detail == null ? row.title : row.title + ", " + detail);
+        bindArtwork(views, row);
         styleRow(views, position);
+    }
+
+    private void bindArtwork(RowViews views, MenuRow row) {
+        if (row.kind != ROW_GROUP && row.kind != ROW_SONG) {
+            views.artwork.setVisibility(View.GONE);
+            views.artwork.setTag(null);
+            views.artwork.setImageDrawable(null);
+            return;
+        }
+        views.artwork.setVisibility(View.VISIBLE);
+        String albumKey = albumKeyForRow(row);
+        List<Uri> candidates = albumKey == null
+                ? null : albumArtworkSources.get(albumKey);
+        if (candidates == null || candidates.isEmpty()) {
+            views.artwork.setTag(null);
+            views.artwork.setImageDrawable(views.noArtwork);
+            return;
+        }
+        String requestKey = "album:" + albumKey;
+        if (!requestKey.equals(views.artwork.getTag())) {
+            views.artwork.setTag(requestKey);
+            views.artwork.setImageDrawable(views.noArtwork);
+        }
+        // The view's tag protects against asynchronous results arriving
+        // after the native ListView recycles a row for a different album.
+        listArtwork.request(requestKey, candidates, image -> {
+            if (!requestKey.equals(views.artwork.getTag())) return;
+            if (image == null) views.artwork.setImageDrawable(views.noArtwork);
+            else views.artwork.setImageBitmap(image);
+        });
+    }
+
+    private String albumKeyForRow(MenuRow row) {
+        if (row.kind == ROW_SONG) return groupKey(row.song, 2);
+        if (row.kind != ROW_GROUP || row.songs == null || row.songs.isEmpty()) {
+            return null;
+        }
+        if (row.groupCategory == 2) {
+            // The album entry always displays its own album art.
+            return groupKey(row.songs.get(0), 2);
+        }
+        // Artists and genres take the artwork of their first alphabetical
+        // album. Missing art on that album never selects a later album.
+        return groupKey(Collections.min(row.songs, FIRST_ALBUM), 2);
+    }
+
+    /**
+     * Index artwork candidates from the selected-folder scan only.
+     * All songs in an album share one cover. If its first track has no
+     * embedded image, the loader tries the remaining tracks OF THAT ALBUM.
+     */
+    private void updateAlbumArtworkSources() {
+        if (localSongs == null || localSongs.isEmpty()) {
+            albumArtworkSources = Collections.emptyMap();
+            return;
+        }
+        Map<String, ArrayList<LocalMusicSource.Song>> byAlbum = new LinkedHashMap<>();
+        for (LocalMusicSource.Song song : localSongs) {
+            String albumKey = groupKey(song, 2);
+            byAlbum.computeIfAbsent(albumKey, unused -> new ArrayList<>()).add(song);
+        }
+        Map<String, List<Uri>> indexed = new LinkedHashMap<>();
+        Comparator<LocalMusicSource.Song> trackOrder =
+                Comparator.comparingInt((LocalMusicSource.Song song) ->
+                        song.trackNumber > 0 ? song.trackNumber : Integer.MAX_VALUE)
+                        .thenComparing(song -> song.title, String.CASE_INSENSITIVE_ORDER)
+                        .thenComparing(song -> song.uri.toString());
+        for (Map.Entry<String, ArrayList<LocalMusicSource.Song>> album
+                : byAlbum.entrySet()) {
+            album.getValue().sort(trackOrder);
+            ArrayList<Uri> uris = new ArrayList<>();
+            for (LocalMusicSource.Song song : album.getValue()) {
+                uris.add(song.uri);
+            }
+            indexed.put(album.getKey(), Collections.unmodifiableList(uris));
+        }
+        albumArtworkSources = indexed;
     }
 
     private String childCountLabel(MenuRow row) {
@@ -576,6 +689,8 @@ public final class MusicActivity extends Activity {
                 // New scans can read only the updated authorized allowlist.
                 localSource.invalidate();
                 localSongs = null;
+                albumArtworkSources = Collections.emptyMap();
+                listArtwork.clear();
                 loading = false;
                 pendingMenu = -1;
                 startLocalScan(false);
@@ -625,6 +740,7 @@ public final class MusicActivity extends Activity {
             @Override public void onLoaded(List<LocalMusicSource.Song> songs) {
                 loading = false;
                 localSongs = songs;
+                updateAlbumArtworkSources();
                 updateLocalCategoryCounts();
                 Log.i(TAG, "Selected-folder music ready: " + songs.size() + " tracks");
                 if (pendingShuffleStart) {
@@ -832,6 +948,7 @@ public final class MusicActivity extends Activity {
         unregisterNestedBack();
         if (nowPlaying != null) nowPlaying.dispose();
         playback.disconnect();
+        listArtwork.close();
         localSource.close();
         super.onDestroy();
     }
