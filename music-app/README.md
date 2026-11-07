@@ -300,9 +300,11 @@ Android's DocumentsProvider must actually expose the folders for SAF access.
 ### Manage selected folders
 
 The Settings page retains **Add folders** as its first row. Beneath it,
-one regular 64dp list row appears for each **currently authorized** selected
-SAF folder, with its document-provider display name, the tree document ID
-as a distinguishing subtitle, and a right-side **Remove** button. Settings
+one regular 64dp list row appears for each **saved** selected SAF folder,
+with its document-provider display name, the tree document ID as a
+distinguishing subtitle, and a right-side **Remove** button. Folders whose
+Android read permission is no longer held remain listed with an
+**Access unavailable** subtitle so they can be removed or re-authorized. Settings
 uses the existing shared `MusicListView`, selection gradient, touch
 scrolling, physical keyboard and one-row trackpad Up/Down navigation.
 Tapping Remove, tapping a folder row, or pressing Enter/trackpad on a
@@ -315,8 +317,11 @@ in-progress scans are invalidated, old library metadata and artwork caches
 are cleared, and the remaining authorized folders are scanned again.
 Removing the final folder leaves an empty selected-folder library. Back
 retains normal page navigation, and Settings refreshes after Add folders
-returns from the Android folder picker. If a document provider cannot return
-a friendly folder name, the UI derives a label from its tree document ID.
+returns from the Android folder picker. Re-selecting a saved folder that had
+lost its read grant restores authorization and triggers a new library scan.
+The scanner still reads **only** the intersection of saved folders and live
+read grants. If a document provider cannot return a friendly folder name,
+the UI derives a label from its tree document ID.
 
 
 ## Native playback and the BB UI Now Playing port
@@ -397,7 +402,9 @@ adb -s 202512003630 install -r app/build/outputs/apk/debug/app-debug.apk
    in the removed folder must remain untouched. Remove the last folder and
    verify the library is empty; Add folders remains available.
 9. Re-add a removed folder and restart BB Music to confirm the remaining
-   folder grants and Settings entries persist.
+   folder grants and Settings entries persist. If a saved folder loses its
+   permission, Settings should still list it as Access unavailable. Re-add
+   that folder to restore access or use Remove to discard the saved entry.
 10. Confirm main-menu counters show the selected-folder track count, distinct
    artists/albums/genres and their singular/plural labels. Group rows show
    their direct number of child songs.
