@@ -35,12 +35,20 @@ final class MusicPlaybackClient {
     private ListenableFuture<MediaController> controllerFuture;
     private MediaController controller;
     private boolean connected;
+    // A failed controller future must never leave the player permanently stuck.
+    private int connectionRetryCount;
     private List<MediaItem> pendingItems;
     private int pendingIndex;
     private boolean pendingShuffle;
 
     private final Player.Listener playerListener = new Player.Listener() {
         @Override public void onEvents(Player player, Player.Events events) {
+            if (events.contains(Player.EVENT_PLAYBACK_STATE_CHANGED)
+                    || events.contains(Player.EVENT_MEDIA_ITEM_TRANSITION)) {
+                Log.i(TAG, "Player state=" + player.getPlaybackState()
+                        + ", hasItem=" + (player.getCurrentMediaItem() != null)
+                        + ", playWhenReady=" + player.getPlayWhenReady());
+            }
             if (connected) listener.onPlaybackChanged();
         }
 
@@ -56,39 +64,70 @@ final class MusicPlaybackClient {
     }
 
     void connect() {
-        if (connected) return;
         connected = true;
-        SessionToken token = new SessionToken(context,
-                new ComponentName(context, MusicPlaybackService.class));
-        controllerFuture = new MediaController.Builder(context, token).buildAsync();
-        final ListenableFuture<MediaController> future = controllerFuture;
-        future.addListener(() -> {
-            MediaController established;
-            try {
-                established = future.get();
-            } catch (InterruptedException exception) {
-                Thread.currentThread().interrupt();
-                Log.e(TAG, "Controller connection interrupted", exception);
-                if (connected && controllerFuture == future) {
-                    listener.onPlaybackError("Player connection interrupted");
+        if (controller != null || controllerFuture != null) return;
+        try {
+            SessionToken token = new SessionToken(context,
+                    new ComponentName(context, MusicPlaybackService.class));
+            final ListenableFuture<MediaController> future =
+                    new MediaController.Builder(context, token).buildAsync();
+            controllerFuture = future;
+            Log.i(TAG, "Connecting Media3 controller");
+            future.addListener(() -> {
+                MediaController established;
+                try {
+                    established = future.get();
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                    onConnectionFailed(future, exception);
+                    return;
+                } catch (ExecutionException | RuntimeException exception) {
+                    onConnectionFailed(future, exception);
+                    return;
                 }
-                return;
-            } catch (ExecutionException | RuntimeException exception) {
-                Log.e(TAG, "Cannot connect to BB Music playback service", exception);
-                if (connected && controllerFuture == future) {
-                    listener.onPlaybackError("Cannot connect to BB Music player");
+                if (!connected || controllerFuture != future) {
+                    // The Activity has stopped and released this generation.
+                    return;
                 }
-                return;
-            }
-            if (!connected || controllerFuture != future) return;
-            controller = established;
-            controller.addListener(playerListener);
-            if (pendingItems != null) {
-                startQueue(pendingItems, pendingIndex, pendingShuffle);
-                pendingItems = null;
-            }
-            listener.onPlaybackChanged();
-        }, context.getMainExecutor());
+                controller = established;
+                connectionRetryCount = 0;
+                controller.addListener(playerListener);
+                Log.i(TAG, "Media3 controller connected; queuePending="
+                        + (pendingItems != null));
+                flushPendingQueue();
+                listener.onPlaybackChanged();
+            }, context.getMainExecutor());
+        } catch (RuntimeException exception) {
+            Log.e(TAG, "Unable to initialize Media3 controller", exception);
+            controllerFuture = null;
+            listener.onPlaybackError("Cannot initialize BB Music player");
+        }
+    }
+
+    private void onConnectionFailed(ListenableFuture<MediaController> future,
+            Exception exception) {
+        Log.e(TAG, "Media3 controller connection failed", exception);
+        if (!connected || controllerFuture != future) return;
+        controllerFuture = null;
+        MediaController.releaseFuture(future);
+        // A temporary startup/connection failure must not strand queued
+        // music. One bounded retry is attempted; additional attempts require
+        // another user-initiated play, preventing unbounded retry loops.
+        if (pendingItems != null && connectionRetryCount++ == 0) {
+            Log.w(TAG, "Retrying failed Media3 connection once");
+            connect();
+            return;
+        }
+        listener.onPlaybackError("Cannot connect to BB Music player");
+    }
+
+    private void flushPendingQueue() {
+        if (controller == null || pendingItems == null) return;
+        List<MediaItem> items = pendingItems;
+        int index = pendingIndex;
+        boolean shuffle = pendingShuffle;
+        pendingItems = null;
+        startQueue(items, index, shuffle);
     }
 
     void playSongs(List<LocalMusicSource.Song> songs, int index, boolean shuffle) {
@@ -98,8 +137,11 @@ final class MusicPlaybackClient {
         }
         ArrayList<MediaItem> items = new ArrayList<>(songs.size());
         for (LocalMusicSource.Song song : songs) {
-            // Never construct a file path or scan anything outside the
-            // user-selected SAF trees; these were issued by LocalMusicSource.
+            if (song == null || song.uri == null
+                    || !"content".equals(song.uri.getScheme())) {
+                listener.onPlaybackError("Invalid selected-folder audio URI");
+                return;
+            }
             MediaMetadata metadata = new MediaMetadata.Builder()
                     .setTitle(song.title)
                     .setArtist(song.artist)
@@ -111,19 +153,28 @@ final class MusicPlaybackClient {
                     .setMediaMetadata(metadata)
                     .build());
         }
-        if (!connected) connect();
-        if (controller == null) {
-            pendingItems = items;
-            pendingIndex = index;
-            pendingShuffle = shuffle;
+        Log.i(TAG, "Play requested: queueSize=" + items.size() + ", index=" + index
+                + ", controllerReady=" + (controller != null));
+        // Store the request BEFORE connecting. An immediately completed
+        // future must still find the queue waiting in the callback.
+        pendingItems = items;
+        pendingIndex = index;
+        pendingShuffle = shuffle;
+        if (controller != null) {
+            flushPendingQueue();
         } else {
-            startQueue(items, index, shuffle);
+            // A previous failed future must not prevent this play request
+            // from trying again.
+            if (controllerFuture == null) connectionRetryCount = 0;
+            connect();
         }
     }
 
     private void startQueue(List<MediaItem> songs, int index, boolean shuffle) {
         if (controller == null) return;
         try {
+            Log.i(TAG, "Submitting Media3 playback queue: tracks=" + songs.size()
+                    + ", index=" + index);
             controller.setShuffleModeEnabled(shuffle);
             controller.setRepeatMode(Player.REPEAT_MODE_OFF);
             controller.setMediaItems(songs, index, 0L);
@@ -178,6 +229,7 @@ final class MusicPlaybackClient {
     void disconnect() {
         connected = false;
         pendingItems = null;
+        connectionRetryCount = 0;
         if (controller != null) {
             controller.removeListener(playerListener);
             controller = null;
