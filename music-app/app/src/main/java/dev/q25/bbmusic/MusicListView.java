@@ -26,7 +26,7 @@ import java.util.List;
 /**
  * One reusable, standalone BBOS6 library ListView for every Music page.
  *
- * Owns exactly one native ListView, BaseAdapter, recycled 55dp rows, album
+ * Owns exactly one native ListView, BaseAdapter, recycled 64dp rows, album
  * thumbnails, selection gradient, touch scrolling and hardware Up/Down
  * navigation. Page hierarchy, count calculations, album selection and
  * actions remain outside this visual component.
@@ -61,6 +61,8 @@ final class MusicListView extends ListView {
         }
     }
 
+    // Shared height for the selection row and its edge-to-edge square artwork.
+    private static final int ROW_HEIGHT_DP = 64;
     private static final int BLUE_BORDER = 0xffb4e2fb;
     private static final int[] LIGHT_SELECTION = {
             0xff088eef, 0xff088aef, 0xff0886ef, 0xff0882ef, 0xff087de7,
@@ -240,7 +242,7 @@ final class MusicListView extends ListView {
         // Selection spans the entire row; art touches all three outer edges.
         row.setPadding(0, 0, 0, 0);
         row.setLayoutParams(new AbsListView.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(55)));
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(ROW_HEIGHT_DP)));
         row.setFocusable(false);
 
         ImageView art = new ImageView(getContext());
@@ -250,7 +252,7 @@ final class MusicListView extends ListView {
         art.setVisibility(View.GONE);
         Drawable placeholder = new MusicCoverPlaceholderDrawable();
         LinearLayout.LayoutParams artLayout =
-                new LinearLayout.LayoutParams(dp(55), dp(55));
+                new LinearLayout.LayoutParams(dp(ROW_HEIGHT_DP), dp(ROW_HEIGHT_DP));
         row.addView(art, artLayout);
 
         LinearLayout textColumn = new LinearLayout(getContext());
