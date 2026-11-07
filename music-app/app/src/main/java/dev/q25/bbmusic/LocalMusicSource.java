@@ -239,7 +239,14 @@ final class LocalMusicSource {
             // filename and their selected-folder content URI.
             Log.d(TAG, "Metadata unavailable for " + fileUri, exception);
         } finally {
-            metadata.release();
+            try {
+                metadata.release();
+            } catch (java.io.IOException | RuntimeException exception) {
+                // A cleanup error must not discard a readable track or abort
+                // the remaining scan of user-selected music folders.
+                Log.w(TAG, "Unable to release metadata retriever for " + fileUri,
+                        exception);
+            }
         }
         long songId = fileUri.toString().hashCode() & 0xffffffffL;
         return new Song(songId, fileUri, title, artist, album, genre,
