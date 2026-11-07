@@ -86,6 +86,8 @@ public final class MusicActivity extends Activity {
                 () -> { /* No long-press menu has been specified yet. */ });
 
         list = new ListView(this);
+        // Rows and their selection backgrounds must span the full content width.
+        list.setPadding(0, 0, 0, 0);
         list.setBackgroundColor(canvasColor);
         list.setVerticalScrollBarEnabled(false);
         list.setFastScrollEnabled(false);
@@ -167,13 +169,15 @@ public final class MusicActivity extends Activity {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(dp(16), dp(4), dp(16), dp(4));
+        // Keep the row/background edge-to-edge; indent only the label.
+        row.setPadding(0, dp(4), 0, dp(4));
         row.setLayoutParams(new AbsListView.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, dp(55)));
         row.setFocusable(false);
 
         TextView title = new TextView(this);
         title.setTextSize(15);
+        title.setPadding(dp(16), 0, dp(16), 0);
         title.setGravity(Gravity.CENTER_VERTICAL);
         title.setSingleLine(true);
         row.addView(title, new LinearLayout.LayoutParams(
@@ -201,7 +205,7 @@ public final class MusicActivity extends Activity {
         if (focused) {
             GradientDrawable highlight = new GradientDrawable(
                     GradientDrawable.Orientation.TOP_BOTTOM, selectionColors);
-            highlight.setCornerRadius(dp(3));
+            highlight.setCornerRadius(0);
             highlight.setStroke(dp(1), BLUE_BORDER);
             views.root.setBackground(highlight);
         } else {
