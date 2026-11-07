@@ -48,6 +48,8 @@ final class MusicListView extends ListView {
         final String subtitle;
         final boolean enabled;
         final boolean showArtwork;
+        // Album browse rows show original 543.png when embedded art is absent.
+        final boolean albumFallback;
         // Non-zero only for verified original BBOS6 home-menu PNG resources.
         final int menuIconRes;
         // Non-null only for track rows in an album detail page.
@@ -56,12 +58,14 @@ final class MusicListView extends ListView {
         final List<Uri> artworkCandidates;
 
         RowData(String title, String subtitle, boolean enabled,
-                boolean showArtwork, int menuIconRes, String trackNumber,
-                String artworkKey, List<Uri> artworkCandidates) {
+                boolean showArtwork, boolean albumFallback, int menuIconRes,
+                String trackNumber, String artworkKey,
+                List<Uri> artworkCandidates) {
             this.title = title;
             this.subtitle = subtitle;
             this.enabled = enabled;
             this.showArtwork = showArtwork;
+            this.albumFallback = albumFallback;
             this.menuIconRes = menuIconRes;
             this.trackNumber = trackNumber;
             this.artworkKey = artworkKey;
@@ -370,20 +374,33 @@ final class MusicListView extends ListView {
         if (row.artworkKey == null
                 || row.artworkCandidates == null || row.artworkCandidates.isEmpty()) {
             views.artwork.setTag(null);
-            views.artwork.setImageDrawable(views.noArtwork);
+            showAlbumFallback(views, row.albumFallback);
             return;
         }
         String requestKey = row.artworkKey;
-        if (!requestKey.equals(views.artwork.getTag())) {
-            views.artwork.setTag(requestKey);
-            views.artwork.setImageDrawable(views.noArtwork);
+        String bindingKey = requestKey + (row.albumFallback ? "|album" : "|default");
+        if (!bindingKey.equals(views.artwork.getTag())) {
+            views.artwork.setTag(bindingKey);
+            showAlbumFallback(views, row.albumFallback);
         }
         // A recycled image can never display a previous row's cover.
         artworkLoader.request(requestKey, row.artworkCandidates, image -> {
-            if (!requestKey.equals(views.artwork.getTag())) return;
-            if (image == null) views.artwork.setImageDrawable(views.noArtwork);
-            else views.artwork.setImageBitmap(image);
+            if (!bindingKey.equals(views.artwork.getTag())) return;
+            if (image == null) showAlbumFallback(views, row.albumFallback);
+            else {
+                views.artwork.setScaleType(ImageView.ScaleType.CENTER_CROP);
+                views.artwork.setImageBitmap(image);
+            }
         });
+    }
+
+    private void showAlbumFallback(RowViews views, boolean useOriginalAlbumArt) {
+        if (useOriginalAlbumArt) {
+            views.artwork.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            views.artwork.setImageResource(R.drawable.bbos6_album_no_art);
+        } else {
+            views.artwork.setImageDrawable(views.noArtwork);
+        }
     }
 
     /**
