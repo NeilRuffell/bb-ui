@@ -43,7 +43,6 @@ final class MusicNowPlayingView extends LinearLayout {
     private final TextView modeShuffle;
     private final TextView modeRepeat;
     private final ImageView artworkImage;
-    private final TextView artworkPlaceholder;
     private final TextView trackTitle;
     private final TextView trackArtist;
     private final TextView elapsed;
@@ -137,11 +136,9 @@ final class MusicNowPlayingView extends LinearLayout {
         artworkImage.setContentDescription("Album artwork");
         artArea.addView(artworkImage, new FrameLayout.LayoutParams(
                 LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
-
-        artworkPlaceholder = text("Artwork unavailable", 13, 0xff99aab8);
-        artworkPlaceholder.setGravity(Gravity.CENTER);
-        artArea.addView(artworkPlaceholder, new FrameLayout.LayoutParams(
-                LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
+        // Same original BBOS6 543.png fallback used in album browse lists.
+        // This is replaced only when embedded cover artwork is decoded.
+        artworkImage.setImageResource(R.drawable.bbos6_album_no_art);
 
         LinearLayout trackInfo = new LinearLayout(context);
         trackInfo.setOrientation(VERTICAL);
@@ -306,19 +303,14 @@ final class MusicNowPlayingView extends LinearLayout {
         String key = uri == null ? "" : uri.toString();
         if (key.equals(shownArtworkUri)) return;
         shownArtworkUri = key;
-        artworkImage.setImageDrawable(null);
-        artworkPlaceholder.setText(key.isEmpty()
-                ? "Artwork unavailable" : "Loading artwork");
-        artworkPlaceholder.setVisibility(View.VISIBLE);
+        // Display the bundled original cover whenever embedded art is absent.
+        // Reset immediately so a previous track's art is never shown for a
+        // new track while the metadata loader is still working.
+        artworkImage.setImageResource(R.drawable.bbos6_album_no_art);
         artworkLoader.load(uri, bitmap -> {
             if (!active || !key.equals(shownArtworkUri)) return;
-            if (bitmap != null) {
-                artworkImage.setImageBitmap(bitmap);
-                artworkPlaceholder.setVisibility(View.GONE);
-            } else {
-                artworkPlaceholder.setText("Artwork unavailable");
-                artworkPlaceholder.setVisibility(View.VISIBLE);
-            }
+            if (bitmap != null) artworkImage.setImageBitmap(bitmap);
+            // A null result keeps the already displayed BBOS6 fallback.
         });
     }
 
