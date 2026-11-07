@@ -2,7 +2,6 @@ package dev.q25.bbmusic;
 
 import android.app.Activity;
 import android.content.ComponentName;
-import android.content.Context;
 import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
 import android.media.MediaMetadata;
@@ -212,7 +211,7 @@ public final class MusicActivity extends Activity {
         root.addView(entries, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
         root.addView(empty, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, 0));
+                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
         entries.setEmptyView(empty);
 
         LinearLayout controls = new LinearLayout(this);
