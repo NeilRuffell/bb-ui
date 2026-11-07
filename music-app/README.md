@@ -376,6 +376,17 @@ obtained from **only the selected SAF folder trees**. Back returns to the
 previous library page without stopping playback. The root **Shuffle Songs**
 action starts a shuffled queue of selected-folder music.
 
+**Local-file media source:** `MusicPlaybackService` supplies
+`ProgressiveMediaSource.Factory(new DefaultDataSource.Factory(this))` to
+`ExoPlayer.Builder`. Selected-folder songs are regular SAF audio documents,
+not HLS/DASH streams. Do not revert to the default auto-detecting media-source
+factory without supporting its optional streaming modules. The device log on
+2026-11-07 confirmed that auto-detection attempted to instantiate the missing
+`androidx.media3.exoplayer.hls.HlsMediaSource$Factory`, resulting in an empty
+Now Playing queue after `setMediaItems`. The progressive source avoids that
+class lookup and uses Android's content URI resolver. This change does not
+grant additional storage access and does not affect the Room catalog.
+
 The Now Playing screen is a standalone presentation port of BB UI master
 `TwoColumnPanel.java` and `UnifiedShadeHost.java`, preserving:
 
