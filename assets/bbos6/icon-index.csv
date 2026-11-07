@@ -1,6 +1,7 @@
 filename,name,keywords,android_resource
 337.png,Playlists,music playlist lists,bbos6_menu_playlists
 339.png,Shuffle Songs,music shuffle random playback,bbos6_menu_shuffle_songs
+341.png,Now Playing,music current track playback paused resume screen shortcut,bbos6_menu_now_playing
 345.png,Artists,music artists performers,bbos6_menu_artists
 348.png,Genres,music genres categories,bbos6_menu_genres
 350.png,All Songs,music songs tracks library,bbos6_menu_all_songs

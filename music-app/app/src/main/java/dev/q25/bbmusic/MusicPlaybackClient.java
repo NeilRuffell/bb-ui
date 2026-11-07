@@ -191,6 +191,18 @@ final class MusicPlaybackClient {
         return controller;
     }
 
+    /**
+     * The home Now Playing shortcut exists only while an actual track is
+     * prepared/playing/paused. It never creates a queue or resumes playback.
+     */
+    boolean hasCurrentTrack() {
+        if (controller == null || controller.getCurrentMediaItem() == null) {
+            return false;
+        }
+        int state = controller.getPlaybackState();
+        return state == Player.STATE_READY || state == Player.STATE_BUFFERING;
+    }
+
     void playPause() {
         if (controller == null) return;
         if (controller.getPlayWhenReady()) controller.pause();

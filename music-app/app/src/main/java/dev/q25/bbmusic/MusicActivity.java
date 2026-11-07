@@ -57,6 +57,7 @@ public final class MusicActivity extends Activity {
     private static final int ROW_MESSAGE = 3;
     private static final int ROW_SETTING = 4;
     private static final int ROW_FOLDER = 5;
+    private static final int ROW_NOW_PLAYING = 6;
     private static final String[] MENU = {
             "All Songs",
             "Artists",
@@ -121,6 +122,11 @@ public final class MusicActivity extends Activity {
 
         static MenuRow root(String name, int index) {
             return new MenuRow(name, ROW_MENU, index, -1, null, null, null, null);
+        }
+
+        static MenuRow nowPlaying() {
+            return new MenuRow("Now Playing...", ROW_NOW_PLAYING, -1, -1,
+                    null, null, null, null);
         }
 
         static MenuRow group(String name, int category,
@@ -189,6 +195,7 @@ public final class MusicActivity extends Activity {
         localSource = new LocalMusicSource(this);
         playback = new MusicPlaybackClient(this, new MusicPlaybackClient.Listener() {
             @Override public void onPlaybackChanged() {
+                updateNowPlayingHomeRow();
                 if (nowPlayingVisible && nowPlaying != null) nowPlaying.render();
             }
 
@@ -322,11 +329,17 @@ public final class MusicActivity extends Activity {
         List<Uri> candidates = albumKey == null
                 ? null : albumArtworkSources.get(albumKey);
         boolean albumFallback = row.kind == ROW_GROUP && row.groupCategory == 2;
+        // BBOS6 Songs: the artist occupies the second line and the tagged
+        // duration sits at the far right of the title line. Existing menu
+        // counts and folder locations keep their original subtitle policies.
+        String subtitle = row.kind == ROW_SONG ? row.song.artist
+                : row.kind == ROW_FOLDER ? row.folderLocation : childCountLabel(row);
+        String duration = row.kind == ROW_SONG && row.song.durationMs > 0L
+                ? MediaSeekPolicy.formatTime(row.song.durationMs) : null;
         return new MusicListView.RowData(
-                row.title, row.kind == ROW_FOLDER
-                        ? row.folderLocation : childCountLabel(row),
+                row.title, subtitle,
                 row.kind != ROW_MESSAGE, hasArtwork, albumFallback,
-                menuIconForRow(row), trackNumber,
+                menuIconForRow(row), trackNumber, duration,
                 albumKey == null ? null : "album:" + albumKey,
                 candidates, row.kind == ROW_FOLDER);
     }
@@ -337,6 +350,9 @@ public final class MusicActivity extends Activity {
      * Settings uses the verified BBOS6 Options wrench icon (3412.png).
      */
     private static int menuIconForRow(MenuRow row) {
+        if (row.kind == ROW_NOW_PLAYING) {
+            return R.drawable.bbos6_menu_now_playing; // 341.png
+        }
         if (row.kind != ROW_MENU) return 0;
         switch (row.menuIndex) {
             case 0: return R.drawable.bbos6_menu_all_songs;      // 350.png
@@ -457,7 +473,11 @@ public final class MusicActivity extends Activity {
     private void activate(int position) {
         if (position < 0 || position >= visibleRows.size()) return;
         MenuRow row = visibleRows.get(position);
-        if (row.kind == ROW_MENU) {
+        if (row.kind == ROW_NOW_PLAYING) {
+            // A shortcut to the existing Media3 session, not a play command.
+            // In particular, selecting it must never resume a paused track.
+            if (playback.hasCurrentTrack()) openNowPlaying();
+        } else if (row.kind == ROW_MENU) {
             if (row.menuIndex < 4) {
                 openLocalCategory(row.menuIndex);
             } else if (row.menuIndex == 4) {
@@ -592,6 +612,63 @@ public final class MusicActivity extends Activity {
             Toast.makeText(this, "Unable to remove music folder",
                     Toast.LENGTH_LONG).show();
         }
+    }
+
+    /**
+     * Add/remove a single home-row shortcut as the existing Media3 session
+     * gains or loses a playable track. Keep the stable home-menu indices
+     * unchanged, and preserve the original selected row after index shifts.
+     *
+     * The root Page.rows list is shared with Back navigation. No second
+     * adapter, page reconstruction, or extra playback controller is needed.
+     */
+    private void updateNowPlayingHomeRow() {
+        if (rootPage == null || list == null) return;
+        boolean shouldShow = playback.hasCurrentTrack();
+        boolean isShown = !rootPage.rows.isEmpty()
+                && rootPage.rows.get(0).kind == ROW_NOW_PLAYING;
+        if (shouldShow == isShown) return;
+
+        int offset = shouldShow ? 1 : -1;
+        if (shouldShow) {
+            rootPage.rows.add(0, MenuRow.nowPlaying());
+        } else {
+            rootPage.rows.remove(0);
+        }
+        // When home is on the Back stack, its saved selected row represents
+        // the same menu entry despite inserting/removing the new first row.
+        rootPage.selected = Math.max(0, rootPage.selected + offset);
+        if (currentPage != rootPage) return;
+
+        if (searchOpen) {
+            searchOriginalPosition = Math.max(0, searchOriginalPosition + offset);
+            // Home search results are songs, not home menu rows. Only the
+            // empty query uses rootPage.rows as the visible adapter source.
+            if (!searchInput.getText().toString().trim().isEmpty()) return;
+        }
+
+        if (nowPlayingVisible) {
+            // Root list is detached while Now Playing is open. Restore the
+            // same selected entry when Back reattaches it.
+            savedListPosition = Math.max(0, savedListPosition + offset);
+            list.notifyRowsChanged();
+            return;
+        }
+
+        int selected = list.getSelectedItemPosition();
+        int nextSelection = Math.max(0, selected + offset);
+        View selectedView = list.getSelectedView();
+        int top = selectedView == null ? 0 : selectedView.getTop();
+        list.notifyRowsChanged();
+        list.post(() -> {
+            if (currentPage != rootPage || nowPlayingVisible || isFinishing()
+                    || isDestroyed()) return;
+            if (searchOpen && !searchInput.getText().toString().trim().isEmpty()) {
+                return;
+            }
+            list.setSelectionFromTop(nextSelection, top);
+            list.refreshSelection();
+        });
     }
 
     private void shuffleAllSongs() {

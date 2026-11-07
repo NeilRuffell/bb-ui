@@ -19,13 +19,27 @@ below system bars.
 
 Home screen, in order:
 
-1. All Songs
-2. Artists
-3. Albums
-4. Genres
-5. Playlists (not implemented yet)
-6. Shuffle Songs (first-party shuffled playback)
-7. Settings
+1. **Now Playing...** — only while Media3 has a current track in
+   ready/buffering state (playing or paused)
+2. All Songs
+3. Artists
+4. Albums
+5. Genres
+6. Playlists (not implemented yet)
+7. Shuffle Songs (first-party shuffled playback)
+8. Settings
+
+The **Now Playing...** item is the first row of the existing shared native
+`MusicListView`, with the original BBOS6 `341.png` icon and identical
+row sizing/gradient/trackpad handling. It is not shown before a song is
+queued, and disappears if the session no longer has an active track.
+Tapping or pressing Enter on this item reopens the existing Now Playing
+screen for the **same** Media3 session; it does **not** restart, resume, or
+requeue the song, so paused audio remains paused. The same row appears
+when resuming the app if the live session still has a current track.
+The original seven menu indices remain unchanged in code. Updates modify
+only `rootPage.rows` and preserve existing list selection/Back navigation;
+the shortcut is not included in the home screen's song-search results.
 
 **Settings** provides **Add folders**, **Refresh library**, and a live list
 of each saved music folder, with a per-folder **Remove** control. Removing a
@@ -55,6 +69,25 @@ before display; stale rows from revoked/removed folder access cannot leak
 into the library. A changed permission/selection set invalidates the
 saved scan marker.
 
+**Audio document validation:** Before indexing a purported audio file,
+`LocalMusicSource` opens it through Android's `MediaExtractor` and requires
+an actual `audio/*` track. An extension or document-provider MIME label alone
+is insufficient. Only SAF entries explicitly identified as directories by
+`DocumentsContract.Document.MIME_TYPE_DIR` are traversed. Playlist
+documents (`.m3u`, `.m3u8`, `.pls`, `.xspf`) are excluded even if a provider
+reports an audio MIME type; a successful child-query cursor does **not**
+prove that a document is a folder. The scanner excludes unrecognized or
+unsupported audio candidates rather than adding them as playable songs
+with zero duration. `MediaExtractor` may also reject otherwise legitimate
+formats such as WMA when no extractor is available on the device. A playable audio file with unreadable title tags still uses
+its filename and Unknown Artist/Album/Genre fallbacks.
+
+**One-time index revision:** The audio-validation change versions the saved
+scan marker so an existing pre-fix Room catalog is rebuilt once after upgrade
+to remove previously misindexed entries. After this one scan, ordinary app
+launches continue reading the saved database without rescanning. No folder
+grants, existing files, Room database schema or playback settings are reset.
+
 This is **manual on-demand refresh**, not a periodic scanner. To find files
 added, moved, deleted or retagged outside BB Music, choose **Refresh library**.
 Force-stopping the app, restarting Android, or reopening the app does not
@@ -76,6 +109,7 @@ OS 6 Music home menu supplied for this project:
 
 | Menu entry | Original asset | Android packaged resource |
 | --- | --- | --- |
+| Now Playing... (when active) | `341.png` | `bbos6_menu_now_playing.png` |
 | All Songs | `350.png` | `bbos6_menu_all_songs.png` |
 | Artists | `345.png` | `bbos6_menu_artists.png` |
 | Albums | `351.png` | `bbos6_menu_albums.png` |
@@ -95,12 +129,12 @@ resource, so it does not introduce a second adapter or custom scrolling.
 PNG once, finds the bounding rectangle of pixels with alpha greater than 16,
 and creates an in-memory cropped bitmap. `FIT_CENTER` then scales that
 visible region proportionally into a centered **52 × 52dp** area inside
-the existing **64 × 64dp** image slot. This normalizes the apparent size
+the existing **68 × 68dp** image slot. This normalizes the apparent size
 despite the original 65px/75px source dimensions and differing transparent
 margins. The original PNG files remain byte-for-byte unchanged. Cached
 bitmaps are reused by the shared list adapter. When a recycled row changes
-from a home-menu icon to album artwork, its temporary 6dp inset is cleared;
-album covers retain their full edge-to-edge 64dp presentation.
+from a home-menu icon to album artwork, its temporary 8dp inset is cleared;
+album covers retain their full edge-to-edge 68dp presentation.
 
 The initial six icons were identified from the Music menu reference.
 **Settings** now uses the original BBOS6 **Options** wrench from
@@ -120,7 +154,7 @@ Other library artwork fallbacks and original audio files are unchanged.
 ### Shared list component
 
 The list implementation is extracted into `MusicListView.java`. This class
-extends Android's native `ListView` and owns one `BaseAdapter`, 64dp recycled
+extends Android's native `ListView` and owns one `BaseAdapter`, 68dp recycled
 rows, the full-width square-cornered BBOS6 selection gradient, cached album
 artwork binding, count/text presentation, and the same QS-derived Up/Down
 trackpad behavior. Every menu and library page uses **the same instance**;
@@ -232,17 +266,27 @@ The search field does not automatically invoke a touch keyboard.
 
 ### Artwork in music browse lists
 
-The shared row height is **64dp**, increased from 55dp to better match the
-relative height of the BBOS6 Music category bands in the supplied screenshot
-(approximately 113px per row across 640px content width). A single
+The shared row height is **68dp**, increased from 64dp to add approximately
+2dp of space above and below centered text relative to the separators.
+A single
 `MusicListView.ROW_HEIGHT_DP` constant sizes both the rows and square artwork,
 keeping the image flush with the selection's left, top and bottom edges.
 
-Songs, Artists, Albums and Genres now display 64dp square album covers
-flush with the left, top and bottom edges of the 64dp `ListView` selection
+Songs, Artists, Albums and Genres display 68dp square album covers
+flush with the left, top and bottom edges of the 68dp `ListView` selection
 bounds, with zero artwork or row padding. Text labels keep their own internal
 inset. The existing selected-row gradient stays full-width.
-Home-menu entries and Settings are left unchanged.
+The home menu and Settings use the same shared 68dp rows.
+
+**BBOS6 song-row metadata:** Every song entry in All Songs, artist/genre
+track lists, album track lists and song-search results shows its **title on
+the left**, the stored **track duration (M:SS, or H:MM:SS when needed) on
+the right of the same line**, and its **artist on the second line**.
+Unknown durations are not fabricated or displayed. The title truncates
+before overlapping the right-aligned duration. Album track-number columns
+and the shared 68dp artwork/selection bounds remain unchanged. Non-song
+rows continue displaying their existing item-count or folder-location
+subtitles, with no duration field.
 
 The cover-selection rules are **BB Music project rules**, not a verified
 claim about the proprietary BlackBerry OS 6 selection algorithm:
@@ -277,13 +321,14 @@ algorithm for artist/genre representative artwork.
 
 
 **Child-item counters:** The main menu and browsable category entries use
-two-line 64dp ListView rows, matching the BBOS6 Music example: a primary
+two-line 68dp ListView rows, matching the BBOS6 Music example: a primary
 label and a smaller muted count underneath. All Songs displays the number
 of selected-folder audio tracks (e.g. `1 Song`, `2 Songs`); Artists, Albums
 and Genres display distinct category entries (`1 Item`, `2 Items`).
 Artist/album/genre groups display their direct number of songs when opened.
 Settings has no child-count subtitle on the home menu, while retaining
-its Add folders entry. Playlists displays `0 Items` until the app supports
+its Add folders entry. The conditional Now Playing shortcut also has no
+child-count subtitle. Playlists displays `0 Items` until the app supports
 playlists. Shuffle Songs is an action and has no child count.
 
 When the app opens, counts come from the saved Room catalog for the current
@@ -315,8 +360,9 @@ selections there are no media queries.
 - The manifest does **not** request `READ_MEDIA_AUDIO`,
   `READ_EXTERNAL_STORAGE`, `MANAGE_EXTERNAL_STORAGE`, network access,
   or root permissions for this feature.
-- The scanner reads audio metadata inside allowed trees on a background
-  thread. Results are stored in an app-private Room database and presented
+- The scanner validates actual audio tracks and reads their metadata inside
+  allowed trees on a background thread. Results are stored in an app-private
+  Room database and presented
   through an in-memory snapshot. A newly selected folder invalidates the
   snapshot and scans the updated allowlist; unchanged libraries load from
   Room without rescanning.
@@ -337,7 +383,7 @@ Android's DocumentsProvider must actually expose the folders for SAF access.
 ### Manage selected folders
 
 The Settings page retains **Add folders** as its first row. Beneath it,
-one regular 64dp list row appears for each **saved** selected SAF folder,
+one regular 68dp list row appears for each **saved** selected SAF folder,
 with its document-provider display name, the tree document ID as a
 distinguishing subtitle, and a right-side **Remove** button. Folders whose
 Android read permission is no longer held remain listed with an
@@ -485,6 +531,10 @@ adb -s 202512003630 install -r app/build/outputs/apk/debug/app-debug.apk
 21. Remove or revoke a selected tree grant and confirm its tracks do not
     reappear from the saved database. A failed refresh must not destroy the
     last successfully saved snapshot.
+    After upgrading to the audio-validation build, verify one automatic
+    reindex removes the bogus `PEI (Legacy)` folder entry while the songs
+    inside valid selected subfolders remain available; then force-close and
+    reopen to verify Room resumes fast cached startup.
 18. Confirm tracks from unselected folders do not appear or enter a queue.
 19. Verify song and album rows display their own album cover; artist and
     genre rows select the first album in alphabetical album-title order.
@@ -501,8 +551,12 @@ adb -s 202512003630 install -r app/build/outputs/apk/debug/app-debug.apk
     selected-folder songs with the correct artwork.
 23. Type on the Artists, Albums, Genres and nested song lists. Verify
     only the current page is filtered; all search results retain the
-    regular 64dp borderless blue selector and trackpad navigation.
-24. Enter a query with no matches on the main and nested pages.
+    regular 68dp borderless blue selector and trackpad navigation.
+24. Verify song rows in All Songs, album pages, artist/genre pages and
+    search results show artist directly under the title and duration at
+    the far right of the title line. Long titles must ellipsize without
+    overlapping the duration. Confirm non-song rows still show counts.
+25. Enter a query with no matches on the main and nested pages.
     Confirm the empty adapter leaves no selectable rows and shows
     horizontally centered `No search results found` below the search bar,
     without the blue selection gradient or a row divider. Backspace to
