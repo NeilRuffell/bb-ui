@@ -71,6 +71,12 @@ album header above its song list, based on the supplied BBOS6 screenshot.
 - It sits above the `MusicListView`, not in its adapter: row indices,
   full-width blue selections, physical-keyboard search, trackpad behavior,
   playback queues and Back-stack selection remain unchanged.
+- Only when an **album** is open, its song rows replace the left-side cover
+  with their tagged track number. The 64dp-wide column is centered; tracks
+  with no valid track-number tag show exactly `--` (two hyphens), matching
+  the supplied BBOS6 reference. Regular All Songs, Artist and Genre song
+  lists continue to display album artwork. Filtering an open album retains
+  its number column.
 - Back restores the parent album list; returning to the album restores
   its header. The header stays visible while filtering an album's songs.
 
@@ -330,6 +336,10 @@ adb -s 202512003630 install -r app/build/outputs/apk/debug/app-debug.apk
     tracks, playback queues, instant search and Back navigation behave
     unchanged. Artist, genre, home and Settings pages must not show an
     album header. Coverless albums must show the normal placeholder.
+26. In an album song list, verify each row's left edge shows the tagged
+    track number rather than album artwork. Missing/zero track tags show
+    `--`. Verify all other song lists retain artwork, row selection
+    gradients have no stroke, and rapid scrolling never mixes row types.
 
 For relevant logs:
 
