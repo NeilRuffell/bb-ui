@@ -1,6 +1,7 @@
 package dev.q25.bbmusic;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.Intent;
 import android.graphics.Color;
 import android.text.Editable;
@@ -55,6 +56,7 @@ public final class MusicActivity extends Activity {
     private static final int ROW_GROUP = 2;
     private static final int ROW_MESSAGE = 3;
     private static final int ROW_SETTING = 4;
+    private static final int ROW_FOLDER = 5;
     private static final String[] MENU = {
             "All Songs",
             "Artists",
@@ -72,6 +74,7 @@ public final class MusicActivity extends Activity {
     private MusicSearchBarView searchBar;
     private TextView noSearchResults;
     private Page rootPage;
+    private Page settingsPage;
     private List<MenuRow> visibleRows;
     private boolean searchOpen;
     private int searchOriginalPosition;
@@ -100,36 +103,46 @@ public final class MusicActivity extends Activity {
         final int groupCategory;
         final List<LocalMusicSource.Song> songs;
         final LocalMusicSource.Song song;
+        final Uri folderTree;
+        final String folderLocation;
 
         MenuRow(String title, int kind, int menuIndex, int groupCategory,
-                List<LocalMusicSource.Song> songs, LocalMusicSource.Song song) {
+                List<LocalMusicSource.Song> songs, LocalMusicSource.Song song,
+                Uri folderTree, String folderLocation) {
             this.title = title;
             this.kind = kind;
             this.menuIndex = menuIndex;
             this.groupCategory = groupCategory;
             this.songs = songs;
             this.song = song;
+            this.folderTree = folderTree;
+            this.folderLocation = folderLocation;
         }
 
         static MenuRow root(String name, int index) {
-            return new MenuRow(name, ROW_MENU, index, -1, null, null);
+            return new MenuRow(name, ROW_MENU, index, -1, null, null, null, null);
         }
 
         static MenuRow group(String name, int category,
                 List<LocalMusicSource.Song> songs) {
-            return new MenuRow(name, ROW_GROUP, -1, category, songs, null);
+            return new MenuRow(name, ROW_GROUP, -1, category, songs, null, null, null);
         }
 
         static MenuRow song(LocalMusicSource.Song song) {
-            return new MenuRow(song.title, ROW_SONG, -1, -1, null, song);
+            return new MenuRow(song.title, ROW_SONG, -1, -1, null, song, null, null);
         }
 
         static MenuRow message(String message) {
-            return new MenuRow(message, ROW_MESSAGE, -1, -1, null, null);
+            return new MenuRow(message, ROW_MESSAGE, -1, -1, null, null, null, null);
         }
 
         static MenuRow setting(String title) {
-            return new MenuRow(title, ROW_SETTING, -1, -1, null, null);
+            return new MenuRow(title, ROW_SETTING, -1, -1, null, null, null, null);
+        }
+
+        static MenuRow folder(String name, String location, Uri tree) {
+            return new MenuRow(name, ROW_FOLDER, -1, -1,
+                    null, null, tree, location);
         }
     }
 
@@ -310,10 +323,12 @@ public final class MusicActivity extends Activity {
                 ? null : albumArtworkSources.get(albumKey);
         boolean albumFallback = row.kind == ROW_GROUP && row.groupCategory == 2;
         return new MusicListView.RowData(
-                row.title, childCountLabel(row), row.kind != ROW_MESSAGE,
-                hasArtwork, albumFallback, menuIconForRow(row), trackNumber,
+                row.title, row.kind == ROW_FOLDER
+                        ? row.folderLocation : childCountLabel(row),
+                row.kind != ROW_MESSAGE, hasArtwork, albumFallback,
+                menuIconForRow(row), trackNumber,
                 albumKey == null ? null : "album:" + albumKey,
-                candidates);
+                candidates, row.kind == ROW_FOLDER);
     }
 
     /**
@@ -451,12 +466,13 @@ public final class MusicActivity extends Activity {
             } else if (row.menuIndex == 5) {
                 shuffleAllSongs();
             } else if (row.menuIndex == 6) {
-                ArrayList<MenuRow> settings = new ArrayList<>();
-                settings.add(MenuRow.setting("Add folders"));
-                navigateTo(new Page("Settings", settings));
+                settingsPage = new Page("Settings", buildSettingsRows());
+                navigateTo(settingsPage);
             }
         } else if (row.kind == ROW_SETTING) {
             showFolderPicker();
+        } else if (row.kind == ROW_FOLDER) {
+            confirmFolderRemoval(row);
         } else if (row.kind == ROW_GROUP) {
             List<LocalMusicSource.Song> groupSongs = new ArrayList<>(row.songs);
             if (row.groupCategory == 2) {
@@ -479,6 +495,87 @@ public final class MusicActivity extends Activity {
                 openNowPlaying();
                 playback.playSongs(queue, startIndex, false);
             }
+        }
+    }
+
+    /** Rebuild the Settings menu from the same authorized tree allowlist as scans. */
+    private ArrayList<MenuRow> buildSettingsRows() {
+        ArrayList<MenuRow> rows = new ArrayList<>();
+        rows.add(MenuRow.setting("Add folders"));
+        for (Uri tree : MusicFolders.selectedTrees(this)) {
+            rows.add(MenuRow.folder(MusicFolders.displayName(this, tree),
+                    MusicFolders.documentId(tree), tree));
+        }
+        return rows;
+    }
+
+    private void refreshSettingsRows() {
+        if (settingsPage == null) return;
+        settingsPage.rows.clear();
+        settingsPage.rows.addAll(buildSettingsRows());
+        if (currentPage != settingsPage) return;
+        if (searchOpen) {
+            updateSearchResults();
+            return;
+        }
+        int selected = Math.max(0, Math.min(list.getSelectedItemPosition(),
+                settingsPage.rows.size() - 1));
+        View selectedView = list.getSelectedView();
+        int top = selectedView == null ? 0 : selectedView.getTop();
+        visibleRows = settingsPage.rows;
+        list.notifyRowsChanged();
+        list.post(() -> {
+            if (currentPage != settingsPage || searchOpen
+                    || isFinishing() || isDestroyed()) return;
+            list.requestFocus();
+            list.setSelectionFromTop(selected, top);
+            list.refreshSelection();
+        });
+    }
+
+    private void confirmFolderRemoval(MenuRow row) {
+        if (row.folderTree == null) return;
+        new AlertDialog.Builder(this)
+                .setTitle("Remove music folder?")
+                .setMessage("Remove \"" + row.title
+                        + "\" from the music library?\n\n"
+                        + "The files on your device will not be deleted.")
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Remove",
+                        (dialog, which) -> removeMusicFolder(row.folderTree))
+                .show();
+    }
+
+    private void removeMusicFolder(Uri tree) {
+        try {
+            if (!MusicFolders.remove(this, tree)) {
+                refreshSettingsRows();
+                Toast.makeText(this, "Folder already removed",
+                        Toast.LENGTH_SHORT).show();
+                return;
+            }
+            // Drop in-flight scans and cached song/artwork data from the old
+            // allowlist before scanning the remaining authorized trees.
+            localSource.invalidate();
+            loading = false;
+            pendingMenu = -1;
+            pendingShuffleStart = false;
+            localSongs = null;
+            albumArtworkSources = Collections.emptyMap();
+            list.clearArtworkCache();
+            refreshSettingsRows();
+            if (MusicFolders.selectedTrees(this).isEmpty()) {
+                localSongs = Collections.emptyList();
+                updateLocalCategoryCounts();
+            } else {
+                startLocalScan(false);
+            }
+            Toast.makeText(this, "Music folder removed",
+                    Toast.LENGTH_SHORT).show();
+        } catch (IllegalStateException exception) {
+            Log.w(TAG, "Cannot remove selected music folder", exception);
+            Toast.makeText(this, "Unable to remove music folder",
+                    Toast.LENGTH_LONG).show();
         }
     }
 
@@ -589,6 +686,7 @@ public final class MusicActivity extends Activity {
                 Log.i(TAG, "Selected music folder added; total="
                         + MusicFolders.selectedTrees(this).size());
             }
+            refreshSettingsRows();
             Toast.makeText(this, added ? "Music folder added"
                     : "Folder already selected", Toast.LENGTH_SHORT).show();
         } catch (SecurityException | IllegalStateException exception) {
