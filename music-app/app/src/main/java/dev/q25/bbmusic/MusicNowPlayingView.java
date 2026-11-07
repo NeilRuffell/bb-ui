@@ -284,7 +284,7 @@ final class MusicNowPlayingView extends LinearLayout {
             }
             updateArtwork(artworkSource);
         }
-        boolean playing = controller != null && controller.isPlaying();
+        boolean playing = controller != null && controller.getPlayWhenReady();
         transportButtons[1].setImageDrawable(
                 MusicPlayerChrome.transportIcon(getContext(), 1, playing));
         transportButtons[1].setContentDescription(playing ? "Pause" : "Play");
