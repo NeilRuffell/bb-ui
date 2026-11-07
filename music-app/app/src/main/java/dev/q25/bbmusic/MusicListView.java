@@ -46,16 +46,19 @@ final class MusicListView extends ListView {
         final String subtitle;
         final boolean enabled;
         final boolean showArtwork;
+        // Non-null only for track rows in an album detail page.
+        final String trackNumber;
         final String artworkKey;
         final List<Uri> artworkCandidates;
 
         RowData(String title, String subtitle, boolean enabled,
-                boolean showArtwork, String artworkKey,
+                boolean showArtwork, String trackNumber, String artworkKey,
                 List<Uri> artworkCandidates) {
             this.title = title;
             this.subtitle = subtitle;
             this.enabled = enabled;
             this.showArtwork = showArtwork;
+            this.trackNumber = trackNumber;
             this.artworkKey = artworkKey;
             this.artworkCandidates = artworkCandidates;
         }
@@ -76,14 +79,16 @@ final class MusicListView extends ListView {
         final LinearLayout root;
         final ImageView artwork;
         final Drawable noArtwork;
+        final TextView trackNumber;
         final TextView label;
         final TextView count;
 
         RowViews(LinearLayout root, ImageView artwork, Drawable noArtwork,
-                TextView label, TextView count) {
+                TextView trackNumber, TextView label, TextView count) {
             this.root = root;
             this.artwork = artwork;
             this.noArtwork = noArtwork;
+            this.trackNumber = trackNumber;
             this.label = label;
             this.count = count;
         }
@@ -255,6 +260,18 @@ final class MusicListView extends ListView {
                 ViewGroup.LayoutParams.MATCH_PARENT, dp(ROW_HEIGHT_DP)));
         row.setFocusable(false);
 
+        // Album detail songs use a text number in the same left-side
+        // position previously occupied by their square artwork. A missing
+        // metadata track number is rendered as two hyphens, per BBOS6.
+        TextView number = new TextView(getContext());
+        number.setTextSize(15);
+        number.setGravity(Gravity.CENTER);
+        number.setSingleLine(true);
+        number.setFocusable(false);
+        number.setVisibility(View.GONE);
+        row.addView(number, new LinearLayout.LayoutParams(
+                dp(ROW_HEIGHT_DP), LayoutParams.MATCH_PARENT));
+
         ImageView art = new ImageView(getContext());
         art.setScaleType(ImageView.ScaleType.CENTER_CROP);
         art.setFocusable(false);
@@ -290,17 +307,23 @@ final class MusicListView extends ListView {
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT));
 
-        row.setTag(new RowViews(row, art, placeholder, title, count));
+        row.setTag(new RowViews(row, art, placeholder, number, title, count));
         return row;
     }
 
     private void bindRow(RowViews views, RowData row, int position) {
         views.label.setText(row.title);
+        boolean numbered = row.trackNumber != null;
+        views.trackNumber.setVisibility(numbered ? View.VISIBLE : View.GONE);
+        views.trackNumber.setText(numbered ? row.trackNumber : "");
         String detail = row.subtitle;
         views.count.setVisibility(detail == null ? View.GONE : View.VISIBLE);
         views.count.setText(detail == null ? "" : detail);
+        String spoken = row.trackNumber == null ? row.title
+                : ("--".equals(row.trackNumber) ? "Track number unavailable, "
+                : "Track " + row.trackNumber + ", ") + row.title;
         views.root.setContentDescription(
-                detail == null ? row.title : row.title + ", " + detail);
+                detail == null ? spoken : spoken + ", " + detail);
         bindArtwork(views, row);
         styleRow(views, position);
     }
@@ -354,6 +377,7 @@ final class MusicListView extends ListView {
             views.root.setBackgroundColor(rowColor);
         }
         views.label.setTextColor(focused ? Color.WHITE : titleColor);
+        views.trackNumber.setTextColor(focused ? Color.WHITE : 0xffc9c9c9);
         views.count.setTextColor(focused ? 0xffedf4ff : (rowColor == Color.WHITE
                 ? 0xff66798a : 0xffb3c1ce));
     }
