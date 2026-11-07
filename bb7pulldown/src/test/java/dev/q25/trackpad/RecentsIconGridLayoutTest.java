@@ -3,52 +3,58 @@ package dev.q25.trackpad;
 import static org.junit.Assert.*;
 import org.junit.Test;
 
-/** Pure layout policy: TaskView contents and lifecycle are owned by Quickstep. */
+/** Quickstep keeps the original TaskView; these are only icon cell coordinates. */
 public final class RecentsIconGridLayoutTest {
-    @Test public void sixTasksShareOneNativePage() {
-        RecentsIconGridLayout layout = RecentsIconGridLayout.calculate(
-                480, 640, 1f, 0, 6);
-        assertNotNull(layout);
-        assertEquals(1, layout.pageCount);
-        assertEquals(0, layout.scrollForTask(5));
-        assertEquals(layout.x(0), layout.x(3));
-        assertTrue(layout.y(3) > layout.y(0));
-        assertTrue(layout.x(1) > layout.x(0));
+    @Test public void sixteenIconsFitOnePage() {
+        RecentsIconGridLayout grid = RecentsIconGridLayout.calculate(
+                720, 720, 2f, 0, 16);
+        assertNotNull(grid);
+        assertEquals(4, RecentsIconGridLayout.COLUMNS);
+        assertEquals(4, RecentsIconGridLayout.ROWS);
+        assertEquals(1, grid.pageCount);
+        assertEquals(0, grid.scrollForTask(15));
+        assertEquals(grid.x(0), grid.x(4));
+        assertEquals(grid.y(0), grid.y(1));
+        assertTrue(grid.x(1) > grid.x(0));
+        assertTrue(grid.y(4) > grid.y(0));
+        assertEquals(0, grid.lastTaskScroll());
     }
 
-    @Test public void seventhTaskBeginsNextNativePage() {
-        RecentsIconGridLayout layout = RecentsIconGridLayout.calculate(
-                480, 640, 1f, 12, 7);
-        assertNotNull(layout);
-        assertEquals(2, layout.pageCount);
-        assertEquals(480, layout.scrollForTask(6));
-        assertEquals(480, layout.lastTaskScroll());
-        assertTrue(layout.x(6) > layout.x(0));
+    @Test public void seventeenthIconUsesNativeNextPage() {
+        RecentsIconGridLayout grid = RecentsIconGridLayout.calculate(
+                720, 720, 2f, 0, 17);
+        assertNotNull(grid);
+        assertEquals(2, grid.pageCount);
+        assertEquals(720, grid.scrollForTask(16));
+        assertEquals(720, grid.lastTaskScroll());
+        assertTrue(grid.x(16) > grid.x(0));
     }
 
-    @Test public void keyboardMovementRetainsGridGeometry() {
-        RecentsIconGridLayout layout = RecentsIconGridLayout.calculate(
-                480, 640, 1f, 0, 8);
-        assertEquals(1, layout.nextIndex(0, 3)); // right
-        assertEquals(0, layout.nextIndex(0, 2)); // left blocked
-        assertEquals(3, layout.nextIndex(0, 1)); // down
-        assertEquals(0, layout.nextIndex(3, 0)); // up
-        assertEquals(2, layout.nextIndex(2, 3)); // right edge blocked
-        assertEquals(6, layout.nextIndex(3, 1)); // next page
-        assertEquals(6, layout.nextIndex(6, 1)); // no further task
+    @Test public void keyboardMovementFollowsIconRows() {
+        RecentsIconGridLayout grid = RecentsIconGridLayout.calculate(
+                720, 720, 2f, 0, 20);
+        assertNotNull(grid);
+        assertEquals(1, grid.nextIndex(0, 3)); // right
+        assertEquals(0, grid.nextIndex(0, 2)); // left blocked
+        assertEquals(4, grid.nextIndex(0, 1)); // down
+        assertEquals(0, grid.nextIndex(4, 0)); // up
+        assertEquals(3, grid.nextIndex(3, 3)); // right edge blocked
+        assertEquals(16, grid.nextIndex(12, 1)); // next page
+        assertEquals(16, grid.nextIndex(16, 1)); // bottom clamp
     }
 
-    @Test public void tooSmallViewportFailsClosed() {
+    @Test public void smallViewportsFailClosed() {
         assertNull(RecentsIconGridLayout.calculate(100, 120, 1f, 0, 4));
         assertNull(RecentsIconGridLayout.calculate(0, 640, 1f, 0, 1));
         assertNull(RecentsIconGridLayout.calculate(480, 640, 0, 0, 1));
     }
 
-    @Test public void emptyTasksNeverHaveNegativeScroll() {
-        RecentsIconGridLayout layout = RecentsIconGridLayout.calculate(
-                480, 640, 1f, 0, 0);
-        assertEquals(0, layout.pageCount);
-        assertEquals(0, layout.lastTaskScroll());
-        assertEquals(-1, layout.nextIndex(0, 1));
+    @Test public void emptyTasksHaveNoNegativeScroll() {
+        RecentsIconGridLayout grid = RecentsIconGridLayout.calculate(
+                720, 720, 2f, 0, 0);
+        assertNotNull(grid);
+        assertEquals(0, grid.pageCount);
+        assertEquals(0, grid.lastTaskScroll());
+        assertEquals(-1, grid.nextIndex(0, 1));
     }
 }
