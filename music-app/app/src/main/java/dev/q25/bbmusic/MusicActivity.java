@@ -14,6 +14,8 @@ import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
+import android.window.OnBackInvokedCallback;
+import android.window.OnBackInvokedDispatcher;
 import android.widget.AbsListView;
 import android.widget.AdapterView;
 import android.widget.BaseAdapter;
@@ -80,6 +82,7 @@ public final class MusicActivity extends Activity {
     private int pendingMenu = -1;
     private final ArrayDeque<Page> backStack = new ArrayDeque<>();
     private Page currentPage;
+    private OnBackInvokedCallback nestedBackCallback;
     private int canvasColor;
     private int rowColor;
     private int titleColor;
@@ -448,6 +451,13 @@ public final class MusicActivity extends Activity {
         View selectedView = list.getSelectedView();
         previous.selectedTop = selectedView == null ? 0 : selectedView.getTop();
         backStack.push(previous);
+        if (backStack.size() == 1) {
+            // Keep system Back navigation at the root; intercept it only
+            // while a nested library list is actually displayed.
+            nestedBackCallback = this::navigateBack;
+            getOnBackInvokedDispatcher().registerOnBackInvokedCallback(
+                    OnBackInvokedDispatcher.PRIORITY_DEFAULT, nestedBackCallback);
+        }
         showPage(next);
     }
 
@@ -463,14 +473,25 @@ public final class MusicActivity extends Activity {
         });
     }
 
+    private void navigateBack() {
+        if (backStack.isEmpty()) return;
+        Page previous = backStack.pop();
+        if (backStack.isEmpty()) unregisterNestedBack();
+        showPage(previous);
+    }
+
+    private void unregisterNestedBack() {
+        if (nestedBackCallback == null) return;
+        getOnBackInvokedDispatcher().unregisterOnBackInvokedCallback(
+                nestedBackCallback);
+        nestedBackCallback = null;
+    }
+
     @Override
     @SuppressWarnings("deprecation")
     public void onBackPressed() {
-        if (!backStack.isEmpty()) {
-            showPage(backStack.pop());
-        } else {
-            super.onBackPressed();
-        }
+        if (!backStack.isEmpty()) navigateBack();
+        else super.onBackPressed();
     }
 
     @Override
@@ -528,6 +549,7 @@ public final class MusicActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        unregisterNestedBack();
         localSource.close();
         super.onDestroy();
     }
