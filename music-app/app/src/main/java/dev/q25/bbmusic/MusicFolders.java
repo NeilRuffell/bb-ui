@@ -27,6 +27,18 @@ final class MusicFolders {
 
     private MusicFolders() {}
 
+    /** All saved selections, including folders whose OS read grant expired. */
+    static List<Uri> savedTrees(Context context) {
+        Set<String> saved = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getStringSet(TREES, Collections.emptySet());
+        ArrayList<String> sorted = new ArrayList<>(saved);
+        Collections.sort(sorted);
+        ArrayList<Uri> trees = new ArrayList<>(sorted.size());
+        for (String encoded : sorted) trees.add(Uri.parse(encoded));
+        return trees;
+    }
+
+    /** Only these still-authorized selections are permitted in a music scan. */
     static List<Uri> selectedTrees(Context context) {
         Set<String> granted = new HashSet<>();
         for (UriPermission permission :
@@ -36,15 +48,10 @@ final class MusicFolders {
             }
         }
 
-        Set<String> saved = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-                .getStringSet(TREES, Collections.emptySet());
-        ArrayList<String> authorized = new ArrayList<>();
-        for (String encoded : saved) {
-            if (granted.contains(encoded)) authorized.add(encoded);
+        ArrayList<Uri> selected = new ArrayList<>();
+        for (Uri tree : savedTrees(context)) {
+            if (granted.contains(tree.toString())) selected.add(tree);
         }
-        Collections.sort(authorized);
-        ArrayList<Uri> selected = new ArrayList<>(authorized.size());
-        for (String encoded : authorized) selected.add(Uri.parse(encoded));
         return selected;
     }
 
