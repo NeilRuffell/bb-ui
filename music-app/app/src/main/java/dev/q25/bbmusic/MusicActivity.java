@@ -756,6 +756,8 @@ public final class MusicActivity extends Activity {
             @Override public void onLoaded(List<LocalMusicSource.Song> songs) {
                 loading = false;
                 localSongs = songs;
+                // Music files and embedded album art can change on refresh.
+                if (refresh) list.clearArtworkCache();
                 updateAlbumArtworkSources();
                 updateLocalCategoryCounts();
                 if (searchOpen) updateSearchResults();
