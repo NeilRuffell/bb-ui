@@ -502,9 +502,17 @@ public final class MusicActivity extends Activity {
     private ArrayList<MenuRow> buildSettingsRows() {
         ArrayList<MenuRow> rows = new ArrayList<>();
         rows.add(MenuRow.setting("Add folders"));
+        Set<String> authorized = new HashSet<>();
         for (Uri tree : MusicFolders.selectedTrees(this)) {
+            authorized.add(tree.toString());
+        }
+        for (Uri tree : MusicFolders.savedTrees(this)) {
+            String location = MusicFolders.documentId(tree);
+            if (!authorized.contains(tree.toString())) {
+                location = "Access unavailable - " + location;
+            }
             rows.add(MenuRow.folder(MusicFolders.displayName(this, tree),
-                    MusicFolders.documentId(tree), tree));
+                    location, tree));
         }
         return rows;
     }
@@ -669,11 +677,15 @@ public final class MusicActivity extends Activity {
             return;
         }
         try {
+            boolean authorizedBefore =
+                    MusicFolders.selectedTrees(this).contains(selectedTree);
             // Persist read permission only; BB Music never modifies files.
             getContentResolver().takePersistableUriPermission(selectedTree,
                     Intent.FLAG_GRANT_READ_URI_PERMISSION);
             boolean added = MusicFolders.add(this, selectedTree);
-            if (added) {
+            boolean accessRestored = !authorizedBefore
+                    && MusicFolders.selectedTrees(this).contains(selectedTree);
+            if (added || accessRestored) {
                 // Invalidate old lists and stop accepting any pending scan.
                 // New scans can read only the updated authorized allowlist.
                 localSource.invalidate();
@@ -688,6 +700,7 @@ public final class MusicActivity extends Activity {
             }
             refreshSettingsRows();
             Toast.makeText(this, added ? "Music folder added"
+                    : accessRestored ? "Music folder access restored"
                     : "Folder already selected", Toast.LENGTH_SHORT).show();
         } catch (SecurityException | IllegalStateException exception) {
             Log.w(TAG, "Cannot persist selected folder", exception);
