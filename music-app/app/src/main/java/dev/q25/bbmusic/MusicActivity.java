@@ -317,9 +317,9 @@ public final class MusicActivity extends Activity {
     }
 
     /**
-     * Exact 64px BBOS6 menu icon bitmaps identified from supplied screenshots.
+     * Original BBOS6 menu icons identified from supplied screenshots.
      * The source PNGs remain in /assets/bbos6/icons/ and are reused as-is.
-     * No icon is assigned to Settings without a verified BBOS6 reference.
+     * Settings uses the verified BBOS6 Options wrench icon (3412.png).
      */
     private static int menuIconForRow(MenuRow row) {
         if (row.kind != ROW_MENU) return 0;
@@ -330,7 +330,8 @@ public final class MusicActivity extends Activity {
             case 3: return R.drawable.bbos6_menu_genres;         // 348.png
             case 4: return R.drawable.bbos6_menu_playlists;      // 337.png
             case 5: return R.drawable.bbos6_menu_shuffle_songs; // 339.png
-            default: return 0; // Settings was not in the BBOS6 reference.
+            case 6: return R.drawable.bbos6_menu_settings;      // 3412.png
+            default: return 0;
         }
     }
 

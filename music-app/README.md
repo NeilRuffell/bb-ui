@@ -49,6 +49,7 @@ OS 6 Music home menu supplied for this project:
 | Genres | `348.png` | `bbos6_menu_genres.png` |
 | Playlists | `337.png` | `bbos6_menu_playlists.png` |
 | Shuffle Songs | `339.png` | `bbos6_menu_shuffle_songs.png` |
+| Settings (Options wrench) | `3412.png` | `bbos6_menu_settings.png` |
 
 Android requires referenced PNGs to be present in application resource
 directories, so the exact original binary blobs are reused under
@@ -68,10 +69,11 @@ bitmaps are reused by the shared list adapter. When a recycled row changes
 from a home-menu icon to album artwork, its temporary 6dp inset is cleared;
 album covers retain their full edge-to-edge 64dp presentation.
 
-Only entries whose icons were present in the screenshot were mapped.
-**Settings** remains text-only because the supplied references do not
-identify its matching BlackBerry 6 icon. Album artwork on songs, albums,
-artists and genres remains independent of these static home-menu icons.
+The initial six icons were identified from the Music menu reference.
+**Settings** now uses the original BBOS6 **Options** wrench from
+`3412.png`, identified and confirmed against the supplied screenshot;
+its PNG is packaged without modification. Album artwork on songs,
+albums, artists and genres remains independent of these static home-menu icons.
 
 **Missing album covers:** Original BBOS6 `543.png` is packaged as
 `bbos6_album_no_art.png` and displayed when an **Albums** category entry
