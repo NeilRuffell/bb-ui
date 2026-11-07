@@ -99,7 +99,51 @@ def score(ref, image):
             if val<best:best=val
     return best
 
+def green_mask_normalized(arr):
+    """Binary footprint of green arrows, ignoring the blue selection panel."""
+    rgb=np.asarray(arr.convert("RGBA"))
+    R,G,B=[rgb[:,:,i].astype(np.int16) for i in range(3)]
+    a=rgb[:,:,3]
+    green=((G>R+20)&(G>B+12)&(G>60)&(a>32)).astype(np.uint8)
+    yy,xx=np.where(green>0)
+    if len(xx)<8:return None
+    patch=green[yy.min():yy.max()+1,xx.min():xx.max()+1]
+    h,w=patch.shape
+    scale=54/max(h,w)
+    nw=max(1,round(w*scale));nh=max(1,round(h*scale))
+    fitted=cv2.resize(patch,(nw,nh),interpolation=cv2.INTER_NEAREST)
+    out=np.zeros((64,64),dtype=np.uint8)
+    x=(64-nw)//2;y=(64-nh)//2
+    out[y:y+nh,x:x+nw]=fitted
+    return out
+
+def green_rank():
+    target=Image.open(io.BytesIO(base64.b64decode(TARGET_DATA.read_text().strip()))).convert("RGB")
+    target=target.crop((0,5*80,64,6*80))
+    ref=green_mask_normalized(target)
+    if ref is None:raise RuntimeError("No green target pixels")
+    scored=[]
+    for icon in ICON_DIR.glob("*.png"):
+        try:
+            with Image.open(icon) as im:
+                if im.width<22 or im.height<22 or im.width>384 or im.height>384:continue
+                mask=green_mask_normalized(im)
+        except Exception:continue
+        if mask is None:continue
+        best=0
+        for dx in (-4,-2,0,2,4):
+            for dy in (-4,-2,0,2,4):
+                shifted=np.roll(np.roll(mask,dy,axis=0),dx,axis=1)
+                overlap=np.count_nonzero((ref>0)&(shifted>0))
+                union=np.count_nonzero((ref>0)|(shifted>0))
+                iou=overlap/max(1,union)
+                if iou>best:best=iou
+        scored.append((best,icon.name))
+    scored.sort(reverse=True)
+    print("GREEN_MATCHES", " | ".join(f"{name}:{match:.4f}" for match,name in scored[:60]),flush=True)
+
 def main():
+    green_rank()
     refs=load_ref()
     results=[[] for _ in refs]
     candidates=list(ICON_DIR.glob("*.png"))
