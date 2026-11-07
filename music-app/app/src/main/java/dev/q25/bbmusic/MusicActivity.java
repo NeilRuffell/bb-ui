@@ -2,62 +2,55 @@ package dev.q25.bbmusic;
 
 import android.app.Activity;
 import android.graphics.Color;
-import android.media.MediaMetadata;
-import android.media.browse.MediaBrowser;
-import android.media.session.PlaybackState;
+import android.graphics.drawable.ColorDrawable;
 import android.os.Bundle;
-import android.util.Log;
 import android.view.View;
+import android.view.ViewGroup;
+import android.widget.BaseAdapter;
+import android.widget.ListView;
 
 /**
- * Standalone BB Music UI placeholder.
+ * Standalone BB Music UI host.
  *
- * No list, transport bar, layout styling or navigation is established here.
- * The user-guided BBOS6 interface will be constructed separately.
- * Media integration is retained independently in SymfoniumSource.
+ * The native ListView is configured like the BB UI Quick Settings ListView:
+ * one owner for touch scrolling, directional-key selection, and row recycling.
+ * No visual rows, headers, transport controls, or music menus are defined yet.
+ *
+ * Music-source connections are intentionally not started by this Activity.
+ * SymfoniumSource remains an optional adapter, not a startup dependency.
  */
 public final class MusicActivity extends Activity {
-    private static final String TAG = "BBMusic";
-    private SymfoniumSource musicSource;
+    private ListView list;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        View blank = new View(this);
-        blank.setBackgroundColor(Color.BLACK);
-        setContentView(blank);
 
-        musicSource = new SymfoniumSource(this, new SymfoniumSource.Listener() {
-            @Override public void onConnectionChanged(boolean connected, String rootId) {
-                Log.i(TAG, connected
-                        ? "Symfonium connected, root=" + rootId
-                        : "Symfonium disconnected or unavailable");
-            }
+        list = new ListView(this);
+        list.setBackgroundColor(Color.BLACK);
+        list.setVerticalScrollBarEnabled(false);
+        list.setFastScrollEnabled(false);
+        list.setItemsCanFocus(false);
+        list.setFocusable(true);
+        list.setFocusableInTouchMode(true);
+        list.setSelector(android.R.color.transparent);
+        list.setDivider(new ColorDrawable(0xff454a4d));
+        list.setDividerHeight(dp(1));
 
-            @Override public void onItems(String parentId, int page,
-                    java.util.List<MediaBrowser.MediaItem> items) {
-                Log.i(TAG, "Symfonium browse result " + parentId
-                        + " page=" + page + " count=" + items.size());
-            }
-
-            @Override public void onBrowseError(String parentId, int page) {
-                Log.w(TAG, "Symfonium browse error " + parentId + " page=" + page);
-            }
-
-            @Override public void onPlaybackChanged(MediaMetadata metadata,
-                    PlaybackState state) {
-                Log.d(TAG, "Symfonium playback state updated");
+        // An intentionally empty BaseAdapter. We will build row presentation
+        // and actions only as the BBOS6 UI is specified.
+        list.setAdapter(new BaseAdapter() {
+            @Override public int getCount() { return 0; }
+            @Override public Object getItem(int position) { return null; }
+            @Override public long getItemId(int position) { return position; }
+            @Override public View getView(int position, View convertView, ViewGroup parent) {
+                return convertView == null ? new View(MusicActivity.this) : convertView;
             }
         });
+        setContentView(list);
     }
 
-    @Override protected void onStart() {
-        super.onStart();
-        musicSource.connect();
-    }
-
-    @Override protected void onStop() {
-        musicSource.disconnect();
-        super.onStop();
+    private int dp(float value) {
+        return Math.round(getResources().getDisplayMetrics().density * value);
     }
 }
