@@ -52,6 +52,17 @@ modified. `MusicActivity.menuIconForRow` owns the menu-to-resource mapping;
 `MusicListView` uses its existing left image slot to draw the selected
 resource, so it does not introduce a second adapter or custom scrolling.
 
+**Shared icon normalization:** The renderer loads each original `drawable-nodpi`
+PNG once, finds the bounding rectangle of pixels with alpha greater than 16,
+and creates an in-memory cropped bitmap. `FIT_CENTER` then scales that
+visible region proportionally into a centered **52 × 52dp** area inside
+the existing **64 × 64dp** image slot. This normalizes the apparent size
+despite the original 65px/75px source dimensions and differing transparent
+margins. The original PNG files remain byte-for-byte unchanged. Cached
+bitmaps are reused by the shared list adapter. When a recycled row changes
+from a home-menu icon to album artwork, its temporary 6dp inset is cleared;
+album covers retain their full edge-to-edge 64dp presentation.
+
 Only entries whose icons were present in the screenshot were mapped.
 **Settings** remains text-only because the supplied references do not
 identify its matching BlackBerry 6 icon. Album artwork on songs, albums,
