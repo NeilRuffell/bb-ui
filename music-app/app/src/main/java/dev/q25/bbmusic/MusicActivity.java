@@ -412,7 +412,7 @@ public final class MusicActivity extends Activity {
         }
         if (row.kind != ROW_MENU) return null;
         if (row.menuIndex < 4) {
-            if (localSongs == null) return loading ? "Scanning..." : "Unavailable";
+            if (localSongs == null) return loading ? "Loading..." : "Unavailable";
             int count = row.menuIndex == 0
                     ? localSongs.size() : localCategoryCounts[row.menuIndex];
             return row.menuIndex == 0
@@ -470,7 +470,11 @@ public final class MusicActivity extends Activity {
                 navigateTo(settingsPage);
             }
         } else if (row.kind == ROW_SETTING) {
-            showFolderPicker();
+            if ("Refresh library".equals(row.title)) {
+                startLocalScan(true, true);
+            } else {
+                showFolderPicker();
+            }
         } else if (row.kind == ROW_FOLDER) {
             confirmFolderRemoval(row);
         } else if (row.kind == ROW_GROUP) {
@@ -502,6 +506,7 @@ public final class MusicActivity extends Activity {
     private ArrayList<MenuRow> buildSettingsRows() {
         ArrayList<MenuRow> rows = new ArrayList<>();
         rows.add(MenuRow.setting("Add folders"));
+        rows.add(MenuRow.setting("Refresh library"));
         Set<String> authorized = new HashSet<>();
         for (Uri tree : MusicFolders.selectedTrees(this)) {
             authorized.add(tree.toString());
@@ -576,7 +581,7 @@ public final class MusicActivity extends Activity {
                 localSongs = Collections.emptyList();
                 updateLocalCategoryCounts();
             } else {
-                startLocalScan(false);
+                startLocalScan(false, true);
             }
             Toast.makeText(this, "Music folder removed",
                     Toast.LENGTH_SHORT).show();
@@ -694,7 +699,7 @@ public final class MusicActivity extends Activity {
                 list.clearArtworkCache();
                 loading = false;
                 pendingMenu = -1;
-                startLocalScan(false);
+                startLocalScan(false, true);
                 Log.i(TAG, "Selected music folder added; total="
                         + MusicFolders.selectedTrees(this).size());
             }
@@ -726,6 +731,10 @@ public final class MusicActivity extends Activity {
     }
 
     private void startLocalScan(boolean showFeedback) {
+        startLocalScan(showFeedback, false);
+    }
+
+    private void startLocalScan(boolean showFeedback, boolean refresh) {
         if (loading) return;
         if (MusicFolders.selectedTrees(this).isEmpty()) {
             localSongs = Collections.emptyList();
@@ -733,13 +742,15 @@ public final class MusicActivity extends Activity {
             return;
         }
         loading = true;
-        localSongs = null;
+        // A manual refresh keeps the old snapshot browseable until the new
+        // one commits; selected-folder changes already invalidate localSongs.
+        if (!refresh) localSongs = null;
         list.refreshVisibleRows();
         if (showFeedback) {
-            Toast.makeText(this, "Reading selected music folders...",
-                    Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, refresh ? "Refreshing music library..."
+                    : "Loading music library...", Toast.LENGTH_SHORT).show();
         }
-        localSource.load(new LocalMusicSource.Listener() {
+        LocalMusicSource.Listener listener = new LocalMusicSource.Listener() {
             @Override public void onLoaded(List<LocalMusicSource.Song> songs) {
                 loading = false;
                 localSongs = songs;
@@ -764,7 +775,12 @@ public final class MusicActivity extends Activity {
                 if (searchOpen) updateSearchResults();
                 Toast.makeText(MusicActivity.this, reason, Toast.LENGTH_LONG).show();
             }
-        });
+        };
+        if (refresh) {
+            localSource.refresh(listener);
+        } else {
+            localSource.load(listener);
+        }
     }
 
     private void showLocalCategory(int category) {
