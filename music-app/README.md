@@ -9,8 +9,13 @@ It has its own Gradle project under `music-app/`.
 The BlackBerry OS 6-style home screen uses a native Android `ListView` and
 `BaseAdapter`, with the same one-row-at-a-time hardware Up/Down navigation
 and native touch scrolling model as the BB UI Quick Settings shade.
-Selected rows have a full-width, square-cornered blue gradient. The outer
-`FrameLayout.setFitsSystemWindows(true)` keeps the list below system bars.
+BB Music's library is always dark: its shared list background, outer
+viewport and unfocused row backgrounds are pure black (`#000000`) in both
+Android light and dark modes. Titles remain white, counts muted, and row
+separators dark gray. **The original full-width, square-cornered blue focus
+gradient is unchanged but has no outline or stroke**, including the color-selection
+logic. The outer `FrameLayout.setFitsSystemWindows(true)` keeps the list
+below system bars.
 
 Home screen, in order:
 
@@ -24,8 +29,142 @@ Home screen, in order:
 
 **Settings** currently has exactly one action: **Add folders**.
 
+### Shared list component
+
+The list implementation is extracted into `MusicListView.java`. This class
+extends Android's native `ListView` and owns one `BaseAdapter`, 64dp recycled
+rows, the full-width square-cornered BBOS6 selection gradient, cached album
+artwork binding, count/text presentation, and the same QS-derived Up/Down
+trackpad behavior. Every menu and library page uses **the same instance**;
+switching pages updates the adapter's data and preserves prior selection.
+
+`MusicActivity.java` owns only page data, album-art *selection policy*
+(which album's cover belongs to each entry), library counts, Back history,
+permissions, Settings and playback routing. It supplies platform-neutral
+`MusicListView.RowData` to the component through a small `DataSource`
+interface. No second list, independent adapter, separate selection style or
+custom touch scroll engine is introduced. The view owns its artwork cache
+lifecycle and releases it when the Activity is destroyed.
+
+The current standalone implementation still does not depend on BB UI,
+Vector/LSPosed, a custom ROM, or another music app.
+
+### Album detail header (BBOS6 Music)
+
+Opening an entry on the **Albums** page displays an 88dp-tall black
+album header above its song list, based on the supplied BBOS6 screenshot.
+
+- Album artwork occupies an 88dp square, aligned exactly to the left and
+  top of the content area; there is no extra padding against the Android
+  status-bar inset or the left screen edge.
+- A full-width **1dp separator in `#515251`** sits immediately below the
+  88dp header content. The header's total height, including this separator,
+  is 89dp. The separator is not an inset and does not overlap the artwork.
+- To its right are the album title, artist, a genre line in parentheses
+  (or `(Unknown)` if no genre tag was found), and the album's singular or
+  plural song count.
+- Art comes from **the same album-keyed, selected-folder-only thumbnail
+  cache** used by regular Music list rows. Albums without embedded art show
+  the existing placeholder.
+- The header is displayed only on song lists reached from an album.
+  Artists and Genres retain their existing list navigation.
+- It sits above the `MusicListView`, not in its adapter: row indices,
+  full-width blue selections, physical-keyboard search, trackpad behavior,
+  playback queues and Back-stack selection remain unchanged.
+- Only when an **album** is open, its song rows replace the left-side cover
+  with their tagged track number. The 64dp-wide column is centered; tracks
+  with no valid track-number tag show exactly `--` (two hyphens), matching
+  the supplied BBOS6 reference. Regular All Songs, Artist and Genre song
+  lists continue to display album artwork. Filtering an open album retains
+  its number column.
+- Back restores the parent album list; returning to the album restores
+  its header. The header stays visible while filtering an album's songs.
+
+The four-line layout reflects fields currently available in the
+selected-folder metadata index. The third line explicitly represents
+genre; the proprietary BBOS6 screenshot does not establish what its
+`(Unknown)` label originally referred to.
+
+### Physical keyboard instant search
+
+While a music list or main menu is visible, **simply type** on the Q25's
+physical keyboard. No search button, menu command or trackpad click is needed.
+The first printable character reveals a compact, black 44dp search field
+above the same existing `MusicListView`. Further typing filters results
+immediately. Shift and ALT characters work through Android key mapping.
+
+- **Music home:** Search the previously indexed **selected-folder songs**
+  across song title, artist, album and genre. The results are playable songs;
+  the original seven-entry home menu is unchanged when search is dismissed.
+- **All Songs / nested song lists:** Filter that list's songs by song title,
+  artist, album or genre.
+- **Artists / Albums / Genres:** Filter only the currently displayed
+  artist/album/genre entries by their visible name.
+- **Settings:** Filter the existing Settings entries by label.
+
+**Back** closes the active search first and restores the previous unfiltered
+selection and scroll position; a second Back performs normal page navigation.
+Back from Now Playing returns to the filtered search results if playback
+was started during a search. Backspace edits the query; an empty query
+shows the original page entries again. Trackpad Up/Down still moves one
+list row; Enter opens the highlighted result. Standard Android Ctrl/Meta
+keyboard shortcuts are not intercepted.
+
+The search operates solely on the in-memory catalog returned from
+`MusicFolders.selectedTrees`; typing never scans other folders,
+queries MediaStore, uses the network, or requests additional permissions.
+If a selected-folder scan is underway when search starts, the view
+displays a scan-in-progress message and refreshes when it finishes.
+The search field does not automatically invoke a touch keyboard.
+
+### Artwork in music browse lists
+
+The shared row height is **64dp**, increased from 55dp to better match the
+relative height of the BBOS6 Music category bands in the supplied screenshot
+(approximately 113px per row across 640px content width). A single
+`MusicListView.ROW_HEIGHT_DP` constant sizes both the rows and square artwork,
+keeping the image flush with the selection's left, top and bottom edges.
+
+Songs, Artists, Albums and Genres now display 64dp square album covers
+flush with the left, top and bottom edges of the 64dp `ListView` selection
+bounds, with zero artwork or row padding. Text labels keep their own internal
+inset. The existing selected-row gradient stays full-width.
+Home-menu entries and Settings are left unchanged.
+
+The cover-selection rules are **BB Music project rules**, not a verified
+claim about the proprietary BlackBerry OS 6 selection algorithm:
+
+- **Songs:** Artwork for that song's album.
+- **Artists:** Artwork of the artist's first album sorted alphabetically
+  by album title (case-insensitive, deterministic ties).
+- **Albums:** Artwork for the displayed album itself.
+- **Genres:** Artwork of the first album sorted alphabetically within
+  the genre (same deterministic tie-breaks).
+
+All tracks in an album share the same cached cover. For an album, tracks are
+checked in track-number/title order until an embedded cover is found;
+if none has embedded art, the row shows a small music-note placeholder.
+For Artists and Genres, **do not substitute another album** if the first
+alphabetical album has no embedded artwork.
+
+`MusicListArtworkLoader` reads embedded artwork using
+`MediaMetadataRetriever`, accepts only `content://` song URIs returned
+from the **user-selected SAF folder trees**, and does not query MediaStore,
+scan unselected folders, access the network, or use Symfonium. Thumbnails
+are decoded off the UI thread with two workers, bounded to approximately
+160px per side, memory cached at 12 MiB and deduplicated by album.
+When a row is recycled, its artwork binding key prevents earlier
+asynchronous results from being displayed on the wrong entry.
+
+**Current limitation:** External artwork files such as `folder.jpg` or
+`cover.png` are not searched; the feature reads **embedded audio artwork**
+only. The source repo and historical BlackBerry 6 documentation available
+during implementation do not establish a verifiable proprietary selection
+algorithm for artist/genre representative artwork.
+
+
 **Child-item counters:** The main menu and browsable category entries use
-two-line 55dp ListView rows, matching the BBOS6 Music example: a primary
+two-line 64dp ListView rows, matching the BBOS6 Music example: a primary
 label and a smaller muted count underneath. All Songs displays the number
 of selected-folder audio tracks (e.g. `1 Song`, `2 Songs`); Artists, Albums
 and Genres display distinct category entries (`1 Item`, `2 Items`).
@@ -167,6 +306,40 @@ adb -s 202512003630 install -r app/build/outputs/apk/debug/app-debug.apk
 14. Background the app and use system notification/headset media controls.
 15. Start Shuffle Songs from the home menu, and verify the shuffled queue.
 16. Confirm tracks from unselected folders do not appear or enter a queue.
+17. Verify song and album rows display their own album cover; artist and
+    genre rows select the first album in alphabetical album-title order.
+18. Scroll quickly with touch, then select rows using the Q25 trackpad:
+    artwork must not be cross-assigned by recycled ListView rows.
+    After the shared-list refactor, repeat this on the home menu, Settings,
+    All Songs, Artists, Albums, Genres and their nested song pages; Back must
+    still restore the previous selection and scroll position.
+19. Confirm coverless albums show a placeholder and that folder selection,
+    existing counts, previous navigation, status bar and Now Playing
+    remain functional.
+20. On the home menu type a song title, artist, album or genre directly
+    using the Q25 keyboard: a search field must appear and show matching
+    selected-folder songs with the correct artwork.
+21. Type on the Artists, Albums, Genres and nested song lists. Verify
+    only the current page is filtered; all search results retain the
+    regular 64dp borderless blue selector and trackpad navigation.
+22. Edit with Backspace, including an empty query. Press Back once to
+    dismiss search and restore the original list selection/scroll; a
+    second Back must navigate to the parent page.
+23. Play a song from filtered results, press Back, and verify search
+    results return intact. Ensure typing on Now Playing does not open
+    the library search and the background player is unaffected.
+24. Open Albums and select an album. Check the 88dp artwork touches the
+    left screen edge and begins immediately beneath the status bar,
+    without white space. Its title, artist, genre and song count should
+    appear alongside the cover.
+25. Enter the song list with trackpad Up/Down and Enter. Check selected
+    tracks, playback queues, instant search and Back navigation behave
+    unchanged. Artist, genre, home and Settings pages must not show an
+    album header. Coverless albums must show the normal placeholder.
+26. In an album song list, verify each row's left edge shows the tagged
+    track number rather than album artwork. Missing/zero track tags show
+    `--`. Verify all other song lists retain artwork, row selection
+    gradients have no stroke, and rapid scrolling never mixes row types.
 
 For relevant logs:
 
