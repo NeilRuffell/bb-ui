@@ -65,34 +65,47 @@ adb -s 202512003630 logcat -d -s 'BB7-PullDown:V' 'OverviewProxyRecentsImpl:V' '
 
 The presentation model and keyboard/trackpad policy should not import Xposed types. Use a minimal Q25-specific Vector bridge for class/lifecycle adaptation.
 
-## Native icon-only grid (0.9.100; Q25 validation pending)
+## Exclusive BBUI Recents presentation (0.9.101)
 
-Verified root cause from Q25 screenshot 2026-11-07: 0.9.99 arranged
-3x2 oversized Quickstep TaskViews but still painted their entire native
-card/thumb/header presentation. It was **not** an icon grid.
+Root cause: the screenshot of 0.9.99 shows stock Quickstep card
+geometry, thumbnail empty slots and pill-shaped app-chip headers. The 0.9.100
+attempt changed native TaskView drawing but still kept Quickstep's layout
+and interaction model. That does **not** meet the user's requirement.
 
-Corrected implementation:
+**Current architecture** (branch `feat/bbos6-recents-replacement`):
 
-- Still **one native RecentsView** and the very same TaskViews, task IDs,
-  app launch actions, Quickstep lifecycle and keyboard focus. No second
-  window, overlay, detached icon selector or replicated task model.
-- **Replaces TaskView.draw(Canvas)** when the feature is enabled; paints
-  only the bound real app `Drawable` from each TaskContainer's
-  IconAppChipView plus a small blue focus indicator. The old thumbnail,
-  title chip, labels and oversized card are **not drawn at all**.
-- Native TaskView **hit bounds** are compact 4-column x 4-row icon cells;
-  16 tasks per page, later tasks using Quickstep's own horizontal pager.
-- The native Clear All button is hidden in icon-only mode and gets no
-  additional blank page. Native task clicking remains owned by Quickstep.
-- `RecentsIconGridLayout` independently computes geometry and keyboard
-  movement. Local Gradle unit tests cover 4x4 placement and page breaks.
-- Opt-in flag `debug.bbui.recents.icons=true` (off by default); normal
-  Quickstep remains available when disabled. Reboot returns to default.
-- **No CI**: automatic GitHub Actions triggers are disabled on this branch;
-  commits use `[skip ci]`. Build and test with local Gradle/ADB only.
+- **One authoritative native host:** Quickstep `RecentsView`, which remains
+  responsible for task enumeration, task identity, native launch and task
+  lifecycle. No new Activity, overlay window or second task list is created.
+- **One exclusive presentation:** intercept `RecentsView.draw(Canvas)`
+  and paint BBUI's **4x4 application icon grid** to the host canvas.
+  The stock `RecentsView.draw`, `dispatchDraw`, **all native TaskView
+  drawing**, thumbnail widgets, header chips, previews, labels, stock
+  focus visuals and live-tile drawing are **not invoked**.
+- Native TaskView objects are retained as *headless data/action endpoints*
+  because Quickstep itself owns their task binding. They do **not** render
+  in this mode; this is not two concurrent renderers. A future ROM port
+  can remove their UI inflation completely while keeping the task model.
+- Remove separate stock Overview action and empty-message sibling views
+  from the active window rather than simply setting their alpha to zero.
+- BBUI owns *all* grid hit-testing, per-page selection, touch-swipe paging,
+  DPAD navigation and blue icon highlight. It does not invoke Quickstep
+  carousel snapping, tile layout, gesture recognition or task-card focus.
+- Enter/trackpad click/tap invokes the **existing native Quickstep task
+  object**, preferably through its non-animated native task launch API.
+  Back still follows Android's native Overview exit behavior.
+- No app labels or boxes: only the actual native app icon Drawables and
+  a compact blue focus indicator on a solid BBUI dark background.
+- The flag `debug.bbui.recents.icons=true` remains opt-in until Q25
+  confirmation. **Reboot** to return to stock behavior after testing.
+  The old `NativeRecentsGridHook` has been deleted.
+- CI remains disabled on this branch (workflow is manual-only), all commits
+  use `[skip ci]`, and testing uses **local Gradle and ADB only**.
 
-This release has not yet been validated on the Q25. The screenshot documents
-the previous defect; it does not prove the new output until installed.
+**Validation status:** implementation committed, **not yet confirmed
+on-device**. If the original cards are visible again, inspect the hook
+registration and Q25 Quickstep class/method signature; do not add another
+overlay or preserve stock card layout.
 
 ### Device test (single consolidated check)
 
