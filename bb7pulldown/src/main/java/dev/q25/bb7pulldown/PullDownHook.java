@@ -110,11 +110,8 @@ public final class PullDownHook implements IXposedHookLoadPackage {
                 @Override public void onStatusFocusChanged(int zone) {
                     TwoColumnPanel currentPanel = panel;
                     if (currentPanel != null) currentPanel.refreshAppIconFocus();
-                    // Up from the top content row opens the same menu as BB.
-                    if (zone != ShadeStatusNavigation.NONE && focusWindow == null
-                            && shadeHost != null && !openingOrClosing) {
-                        showStatusFocus(shadeHost.getContext());
-                    }
+                    // Popup visibility is controlled solely by the BB key hook.
+                    // Content navigation must never create a popup window.
                     ShadeDateHeader popup = standaloneHeader;
                     if (popup != null && zone != ShadeStatusNavigation.NONE) {
                         popup.setFocusedZone(zone);
@@ -236,7 +233,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
                             if (shadeHost != null) shadeHost.focusContent();
                         } else if (shadeHost != null) {
                             showStatusFocus(shadeHost.getContext());
-                            NAVIGATION.focusStatusBarFromPage(shadeHost.page());
+                            NAVIGATION.openPopupFromBlackBerryKey(shadeHost.page());
                         } else {
                             showStatusFocus(bar.getContext());
                         }

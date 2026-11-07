@@ -68,8 +68,8 @@ final class ShadeUiController {
         popup.leave();
     }
 
-    /** Reopening from BB or Up in shade content selects the current page. */
-    void focusStatusBarFromPage(int page) {
+    /** Only a deliberate BlackBerry-key press may reopen the popup. */
+    void openPopupFromBlackBerryKey(int page) {
         if (openPage == page) popup.enter(page);
     }
 

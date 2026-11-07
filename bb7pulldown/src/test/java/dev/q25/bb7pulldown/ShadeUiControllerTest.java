@@ -87,7 +87,7 @@ public final class ShadeUiControllerTest {
     @Test public void reopenedPopupBackPreservesExpandedShade() {
         FakeHost f = new FakeHost();
         f.navigation.onShadeOpened(ShadeStatusNavigation.NOTIFICATIONS);
-        f.navigation.focusStatusBarFromPage(ShadeStatusNavigation.NOTIFICATIONS);
+        f.navigation.openPopupFromBlackBerryKey(ShadeStatusNavigation.NOTIFICATIONS);
         key(f, KeyEvent.KEYCODE_BACK);
         assertEquals(1, f.popupDismissals);
         assertEquals(ShadeStatusNavigation.NOTIFICATIONS, f.navigation.activePage());
@@ -97,13 +97,13 @@ public final class ShadeUiControllerTest {
     @Test public void popupSwitchesRetainedShadePage() {
         FakeHost f = new FakeHost();
         f.navigation.onShadeOpened(ShadeStatusNavigation.NOTIFICATIONS);
-        f.navigation.focusStatusBarFromPage(ShadeStatusNavigation.NOTIFICATIONS);
+        f.navigation.openPopupFromBlackBerryKey(ShadeStatusNavigation.NOTIFICATIONS);
         key(f, KeyEvent.KEYCODE_DPAD_DOWN);
         key(f, KeyEvent.KEYCODE_ENTER);
         assertEquals(1, f.switched);
         assertEquals(0, f.popupDismissals);
         assertEquals(ShadeStatusNavigation.QUICK_SETTINGS, f.navigation.activePage());
-        f.navigation.focusStatusBarFromPage(ShadeStatusNavigation.QUICK_SETTINGS);
+        f.navigation.openPopupFromBlackBerryKey(ShadeStatusNavigation.QUICK_SETTINGS);
         key(f, KeyEvent.KEYCODE_DPAD_UP);
         key(f, KeyEvent.KEYCODE_ENTER);
         assertEquals(2, f.switched);
@@ -115,5 +115,21 @@ public final class ShadeUiControllerTest {
         f.navigation.onShadeOpened(ShadeStatusNavigation.QUICK_SETTINGS);
         assertFalse(f.navigation.handleKey(KeyEvent.KEYCODE_BACK, KeyEvent.ACTION_UP));
         assertFalse(f.navigation.handleKey(KeyEvent.KEYCODE_DEL, KeyEvent.ACTION_UP));
+    }
+
+    @Test public void upwardNavigationInEitherOpenShadeNeverOpensPopup() {
+        for (int page : new int[]{
+                ShadeStatusNavigation.NOTIFICATIONS,
+                ShadeStatusNavigation.QUICK_SETTINGS}) {
+            FakeHost f = new FakeHost();
+            f.navigation.onShadeOpened(page);
+            assertFalse(f.navigation.handleKey(
+                    KeyEvent.KEYCODE_DPAD_UP, KeyEvent.ACTION_DOWN));
+            assertFalse(f.navigation.handleKey(
+                    KeyEvent.KEYCODE_DPAD_UP, KeyEvent.ACTION_UP));
+            assertFalse(f.navigation.isStatusBarFocused());
+            assertEquals(ShadeStatusNavigation.NONE, f.focusZone);
+            assertEquals(page, f.navigation.activePage());
+        }
     }
 }

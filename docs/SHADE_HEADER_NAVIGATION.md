@@ -23,11 +23,13 @@ SystemUI-owned status-bar subpanel and is destroyed after a successful page
 activation. It is never reparented into the shade and no duplicate menu is
 allocated on subsequent keypresses.
 
-When the notification/Quick Settings shade is already open, BB reopens the same
-popup with the currently displayed page highlighted. Up from the first
-notification/media focus target or first QS row also opens the popup.
-Selecting either destination switches the retained pages in place, without
-rebuilding their View instances or replaying the shade entrance animation.
+When the notification/Quick Settings shade is already open, **only BB**
+reopens the same popup with the currently displayed page highlighted.
+Up from the first notification/media focus target or first unlocked QS row
+remains inside the shade and never opens the menu. This does not alter
+touch-driven swipe-up shade dismissal. Selecting either destination from
+the BB popup switches the retained pages in place, without rebuilding
+their View instances or replaying the shade entrance animation.
 Back from that popup returns focus to the current shade content, and does not
 close the expanded shade.
 
@@ -72,6 +74,10 @@ Acceptance:
 - Back or second BB press dismisses the popup without opening a shade.
 - From an open shade, BB reopens the popup. Selecting another page changes it
   in place without a shade blink. Back closes the popup, not the shade.
+- Trackpad Up from the first notification app icon (with no media), the
+  media row, or the first unlocked QS row stays in the shade; it never
+  traverses to the BB popup. Up from the first icon still reaches the
+  media row if media is visible.
 - Native status-bar swipe-down and finger-drag close remain operational.
 - No reserved 49dp header above notification or QS content.
 - Expanded media still displays its independent 40dp shuffle/repeat header.
