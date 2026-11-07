@@ -185,8 +185,33 @@ final class LocalMusicSource {
     }
 
     void invalidate() {
-        // Discard in-flight results after a folder is added.
+        // Discard in-flight scans after a selection changes.
         latestRequest++;
+    }
+
+    /**
+     * Erase metadata for a removed folder even if the next scan fails or the
+     * user immediately closes the Activity. Queue it ahead of the rescan.
+     */
+    void forgetRemovedTree(Uri tree, boolean noAuthorizedTreesRemain) {
+        if (closed) return;
+        worker.execute(() -> {
+            try {
+                MusicLibraryDatabase.LibraryDao dao = libraryDatabase.libraryDao();
+                libraryDatabase.runInTransaction(() -> {
+                    if (noAuthorizedTreesRemain) {
+                        dao.deleteAllTracks();
+                    } else {
+                        dao.deleteTracksFromTree(tree.toString());
+                    }
+                    // A failed subsequent rescan cannot validate old rows.
+                    dao.deleteScanState();
+                });
+            } catch (RuntimeException exception) {
+                Log.e(TAG, "Cannot remove deleted folder's cached metadata",
+                        exception);
+            }
+        });
     }
 
     private List<Song> scanSelectedFolders(int request) {
