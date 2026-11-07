@@ -32,9 +32,9 @@ public final class SymfoniumBrowserProbeActivity extends Activity {
             "app.symfonik.core.playback.service.PlayerService";
 
     private static final int PAGE_SIZE = 25;
-    private static final int MAX_NODES = 14;
-    private static final int MAX_DEPTH = 2;
-    private static final int MAX_DISPLAY_ITEMS = 18;
+    private static final int MAX_NODES = 38;
+    private static final int MAX_DEPTH = 4;
+    private static final int MAX_DISPLAY_ITEMS = 12;
     private static final long NODE_TIMEOUT_MS = 7000;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -52,11 +52,13 @@ public final class SymfoniumBrowserProbeActivity extends Activity {
         final String id;
         final String label;
         final int depth;
+        final int page;
 
-        Node(String id, String label, int depth) {
+        Node(String id, String label, int depth, int page) {
             this.id = id;
             this.label = label;
             this.depth = depth;
+            this.page = page;
         }
     }
 
@@ -111,8 +113,20 @@ public final class SymfoniumBrowserProbeActivity extends Activity {
     }
 
     private void enqueue(String id, String label, int depth) {
-        if (id == null || id.isEmpty() || depth > MAX_DEPTH || !seen.add(id)) return;
-        pending.addLast(new Node(id, label, depth));
+        enqueuePage(id, label, depth, 0);
+    }
+
+    private void enqueuePage(String id, String label, int depth, int page) {
+        if (id == null || id.isEmpty() || depth > MAX_DEPTH || page < 0
+                || !seen.add(id + "#" + page)) return;
+        Node node = new Node(id, label, depth, page);
+        // The library is the subject of this investigation; visit it before
+        // optional home/recommendations categories.
+        if (depth == 1 && "Library".equalsIgnoreCase(label)) {
+            pending.addFirst(node);
+        } else {
+            pending.addLast(node);
+        }
     }
 
     private void next() {
@@ -125,11 +139,11 @@ public final class SymfoniumBrowserProbeActivity extends Activity {
         Node node = pending.removeFirst();
         active = node;
         requests++;
-        report("REQUEST depth=" + node.depth + " label=" + clip(node.label)
-                + " id=" + clip(node.id));
+        report("REQUEST depth=" + node.depth + " page=" + node.page
+                + " label=" + clip(node.label) + " id=" + clip(node.id));
 
         Bundle page = new Bundle();
-        page.putInt(MediaBrowser.EXTRA_PAGE, 0);
+        page.putInt(MediaBrowser.EXTRA_PAGE, node.page);
         page.putInt(MediaBrowser.EXTRA_PAGE_SIZE, PAGE_SIZE);
         MediaBrowser.SubscriptionCallback callback = new MediaBrowser.SubscriptionCallback() {
             private boolean responded;
@@ -148,7 +162,8 @@ public final class SymfoniumBrowserProbeActivity extends Activity {
                 if (responded || disposed || active != node) return;
                 responded = true;
                 int count = children == null ? -1 : children.size();
-                report("CHILDREN depth=" + node.depth + " label=" + clip(node.label)
+                report("CHILDREN depth=" + node.depth + " page=" + node.page
+                        + " label=" + clip(node.label)
                         + " count=" + count + " paged=" + paged);
 
                 if (children != null) {
@@ -160,13 +175,19 @@ public final class SymfoniumBrowserProbeActivity extends Activity {
                         String title = description == null || description.getTitle() == null
                                 ? "(untitled)" : description.getTitle().toString();
                         if (printed < MAX_DISPLAY_ITEMS) {
+                            String subtitle = description == null || description.getSubtitle() == null
+                                    ? "" : description.getSubtitle().toString();
+                            String art = description == null || description.getIconUri() == null
+                                    ? "" : description.getIconUri().toString();
                             report("  " + (item.isBrowsable() ? "[BROWSE] " : "[PLAY] ")
-                                    + clip(title) + " | id=" + clip(item.getMediaId()));
+                                    + clip(title) + " | id=" + clip(item.getMediaId())
+                                    + (subtitle.isEmpty() ? "" : " | subtitle=" + clip(subtitle))
+                                    + (art.isEmpty() ? "" : " | art=" + clip(art)));
                             printed++;
                         }
-                        if (item.isBrowsable() && node.depth < MAX_DEPTH
-                                && enqueued < (node.depth == 0 ? 8 : 2)
-                                && seen.size() < 32) {
+                        if (node.page == 0 && item.isBrowsable() && node.depth < MAX_DEPTH
+                                && enqueued < (node.depth <= 1 ? 9 : node.depth == 2 ? 2 : 1)
+                                && seen.size() < 60) {
                             int before = seen.size();
                             enqueue(item.getMediaId(), title, node.depth + 1);
                             if (seen.size() > before) enqueued++;
@@ -174,6 +195,12 @@ public final class SymfoniumBrowserProbeActivity extends Activity {
                     }
                     if (count > printed) report("  ... " + (count - printed)
                             + " additional items omitted from log");
+                    // Check that BB UI can retrieve entries beyond the first page.
+                    if (node.page == 0 && node.depth == 2
+                            && "Albums".equalsIgnoreCase(node.label)
+                            && count == PAGE_SIZE) {
+                        enqueuePage(node.id, "Albums page two", node.depth, 1);
+                    }
                 }
                 finish(node, this);
             }
