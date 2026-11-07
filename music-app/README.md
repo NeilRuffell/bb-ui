@@ -26,6 +26,15 @@ not navigate or shuffle because those actions are not yet designed.
 No custom scrolling behavior, other music menus, or transport controls
 are included.
 
+**System bars:** The app targets SDK 35, which enforces edge-to-edge windows
+on Android 15+. `MusicActivity` wraps the ListView in a clipped FrameLayout
+whose padding is set from `WindowInsets.Type.statusBars()`,
+`navigationBars()` and `displayCutout()` on API 35+. This keeps every menu
+row, focus highlight and its scroll viewport out of the persistent status-bar
+and navigation-bar regions. On Android 13–14 the framework's conventional
+non-edge-to-edge content placement remains in effect. No hardcoded Q25 bar
+height, fullscreen flag, or temporary edge-to-edge opt-out is used.
+
 **Sources:** `SymfoniumSource.java` remains an optional source adapter. It
 uses public `MediaBrowser` and `MediaController` APIs and retains the
 read-only catalog support established by the Q25 diagnostic. `MusicActivity`
