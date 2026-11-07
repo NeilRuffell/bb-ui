@@ -329,11 +329,17 @@ public final class MusicActivity extends Activity {
         List<Uri> candidates = albumKey == null
                 ? null : albumArtworkSources.get(albumKey);
         boolean albumFallback = row.kind == ROW_GROUP && row.groupCategory == 2;
+        // BBOS6 Songs: the artist occupies the second line and the tagged
+        // duration sits at the far right of the title line. Existing menu
+        // counts and folder locations keep their original subtitle policies.
+        String subtitle = row.kind == ROW_SONG ? row.song.artist
+                : row.kind == ROW_FOLDER ? row.folderLocation : childCountLabel(row);
+        String duration = row.kind == ROW_SONG && row.song.durationMs > 0L
+                ? MediaSeekPolicy.formatTime(row.song.durationMs) : null;
         return new MusicListView.RowData(
-                row.title, row.kind == ROW_FOLDER
-                        ? row.folderLocation : childCountLabel(row),
+                row.title, subtitle,
                 row.kind != ROW_MESSAGE, hasArtwork, albumFallback,
-                menuIconForRow(row), trackNumber,
+                menuIconForRow(row), trackNumber, duration,
                 albumKey == null ? null : "album:" + albumKey,
                 candidates, row.kind == ROW_FOLDER);
     }
