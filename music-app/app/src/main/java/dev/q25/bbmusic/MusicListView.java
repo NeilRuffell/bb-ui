@@ -75,8 +75,9 @@ final class MusicListView extends ListView {
         }
     }
 
-    // Shared height for the selection row and its edge-to-edge square artwork.
-    private static final int ROW_HEIGHT_DP = 64;
+    // Slightly taller shared rows add 2dp of breathing room above and below
+    // centered text; square artwork still fills each row edge-to-edge.
+    private static final int ROW_HEIGHT_DP = 68;
     // Menu PNGs have different pixel dimensions and transparent borders.
     // Normalize the alpha-bounded artwork into this shared visible square.
     private static final int MENU_ICON_VISIBLE_DP = 52;
@@ -384,7 +385,7 @@ final class MusicListView extends ListView {
         if (row.menuIconRes != 0) {
             // Uniform visible-art bounds: crop transparent source margins
             // in memory, then fit the original proportions into 52dp.
-            // The full 64dp row slot, native ListView and PNGs stay intact.
+            // The shared 68dp square row slot and original PNGs stay intact.
             int inset = dp((ROW_HEIGHT_DP - MENU_ICON_VISIBLE_DP) / 2f);
             views.artwork.setPadding(inset, inset, inset, inset);
             views.artwork.setTag(null);
