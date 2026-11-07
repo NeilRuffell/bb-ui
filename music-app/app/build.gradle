@@ -25,4 +25,8 @@ dependencies {
     def media3Version = '1.9.4'
     implementation "androidx.media3:media3-exoplayer:$media3Version"
     implementation "androidx.media3:media3-session:$media3Version"
+    // Durable, private SQLite catalog with Java annotation processing.
+    def roomVersion = '2.8.5'
+    implementation "androidx.room:room-runtime:$roomVersion"
+    annotationProcessor "androidx.room:room-compiler:$roomVersion"
 }
