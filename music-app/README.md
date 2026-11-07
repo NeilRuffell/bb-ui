@@ -19,7 +19,7 @@ Home screen, in order:
 3. Albums
 4. Genres
 5. Playlists (not implemented yet)
-6. Shuffle Songs (requires the future built-in playback engine)
+6. Shuffle Songs (first-party shuffled playback)
 7. Settings
 
 **Settings** currently has exactly one action: **Add folders**.
