@@ -104,7 +104,7 @@ def green_mask_normalized(arr):
     rgb=np.asarray(arr.convert("RGBA"))
     R,G,B=[rgb[:,:,i].astype(np.int16) for i in range(3)]
     a=rgb[:,:,3]
-    green=((G>R+20)&(G>B+12)&(G>60)&(a>32)).astype(np.uint8)
+    green=((G>R+20)&(G>B+1)&(G>60)&(a>32)).astype(np.uint8)
     yy,xx=np.where(green>0)
     if len(xx)<8:return None
     patch=green[yy.min():yy.max()+1,xx.min():xx.max()+1]
