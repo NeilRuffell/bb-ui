@@ -46,18 +46,21 @@ final class MusicListView extends ListView {
         final String subtitle;
         final boolean enabled;
         final boolean showArtwork;
+        // Non-zero only for verified original BBOS6 home-menu PNG resources.
+        final int menuIconRes;
         // Non-null only for track rows in an album detail page.
         final String trackNumber;
         final String artworkKey;
         final List<Uri> artworkCandidates;
 
         RowData(String title, String subtitle, boolean enabled,
-                boolean showArtwork, String trackNumber, String artworkKey,
-                List<Uri> artworkCandidates) {
+                boolean showArtwork, int menuIconRes, String trackNumber,
+                String artworkKey, List<Uri> artworkCandidates) {
             this.title = title;
             this.subtitle = subtitle;
             this.enabled = enabled;
             this.showArtwork = showArtwork;
+            this.menuIconRes = menuIconRes;
             this.trackNumber = trackNumber;
             this.artworkKey = artworkKey;
             this.artworkCandidates = artworkCandidates;
@@ -329,6 +332,20 @@ final class MusicListView extends ListView {
     }
 
     private void bindArtwork(RowViews views, RowData row) {
+        if (row.menuIconRes != 0) {
+            // Original BBOS6 menu art, not an album cover. Reusing the same
+            // 64dp ImageView avoids a second adapter/row implementation.
+            // CENTER_INSIDE preserves the original pixel art, including its
+            // transparent inset; changing scale type never changes row size.
+            views.artwork.setTag(null);
+            views.artwork.setVisibility(View.VISIBLE);
+            views.artwork.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+            views.artwork.setContentDescription(row.title + " icon");
+            views.artwork.setImageResource(row.menuIconRes);
+            return;
+        }
+        views.artwork.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        views.artwork.setContentDescription("Album artwork");
         if (!row.showArtwork) {
             views.artwork.setVisibility(View.GONE);
             views.artwork.setTag(null);
