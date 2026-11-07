@@ -65,17 +65,34 @@ adb -s 202512003630 logcat -d -s 'BB7-PullDown:V' 'OverviewProxyRecentsImpl:V' '
 
 The presentation model and keyboard/trackpad policy should not import Xposed types. Use a minimal Q25-specific Vector bridge for class/lifecycle adaptation.
 
-## Native icon-grid prototype (0.9.99)
+## Native icon-only grid (0.9.100; Q25 validation pending)
 
-Implemented on `feat/bbos6-recents-replacement`:
+Verified root cause from Q25 screenshot 2026-11-07: 0.9.99 arranged
+3x2 oversized Quickstep TaskViews but still painted their entire native
+card/thumb/header presentation. It was **not** an icon grid.
 
-- `QuickstepIconGridHook` is registered for the **existing Launcher3 process** through Vector. It modifies the existing native Quickstep `RecentsView` and its own `TaskView` children. There is no duplicate Overview window, activity, secondary task list or screenshot-based icon renderer.
-- Every icon and application name comes from the native `TaskContainer` / `IconAppChipView`. Quickstep retains task bindings, click-to-open and system task lifecycle.
-- Native TaskViews are arranged as a three-column by two-row icon grid, with further icon pages using the existing horizontal pager. Physical arrows target the same native TaskViews; Enter uses their native click action.
-- The existing native thumbnail **subview** inside each TaskView remains measured for Quickstep internals but is visually suppressed. It is *not* a separate Recents renderer or an underlying stock Overview screen. Future ROM work should replace that thumbnail subcomponent outright rather than suppress it.
-- `RecentsIconGridLayout` is framework-independent and has unit tests.
-- Because native Quickstep UI details are ROM-specific, activation is **opt-in** with `debug.bbui.recents.icons=true`, default false. Only one presentation is active at any time: native stock Quickstep when disabled, or the adapted native TaskViews when enabled. No new view host is mounted behind it.
-- This is an **untested prototype** and must not be treated as a verified on-device icon grid until Q25 visual and interaction checks pass.
+Corrected implementation:
+
+- Still **one native RecentsView** and the very same TaskViews, task IDs,
+  app launch actions, Quickstep lifecycle and keyboard focus. No second
+  window, overlay, detached icon selector or replicated task model.
+- **Replaces TaskView.draw(Canvas)** when the feature is enabled; paints
+  only the bound real app `Drawable` from each TaskContainer's
+  IconAppChipView plus a small blue focus indicator. The old thumbnail,
+  title chip, labels and oversized card are **not drawn at all**.
+- Native TaskView **hit bounds** are compact 4-column x 4-row icon cells;
+  16 tasks per page, later tasks using Quickstep's own horizontal pager.
+- The native Clear All button is hidden in icon-only mode and gets no
+  additional blank page. Native task clicking remains owned by Quickstep.
+- `RecentsIconGridLayout` independently computes geometry and keyboard
+  movement. Local Gradle unit tests cover 4x4 placement and page breaks.
+- Opt-in flag `debug.bbui.recents.icons=true` (off by default); normal
+  Quickstep remains available when disabled. Reboot returns to default.
+- **No CI**: automatic GitHub Actions triggers are disabled on this branch;
+  commits use `[skip ci]`. Build and test with local Gradle/ADB only.
+
+This release has not yet been validated on the Q25. The screenshot documents
+the previous defect; it does not prove the new output until installed.
 
 ### Device test (single consolidated check)
 
