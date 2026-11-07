@@ -1053,9 +1053,11 @@ final class TwoColumnPanel extends FrameLayout {
     /**
      * Selected BBOS6 playback button: fixed dark-blue gradient sampled from
      * the supplied screenshot, away from the white playback icon.
-     * Preserve the existing border, corners and independent seek-pill style.
+     * Fill the entire button rectangle with no stroke or rounded corners.
+     * Parent foreground draws the double separators above this selection.
+     * The independent seek-pill selection style remains unchanged.
      */
-    private GradientDrawable expandedMediaSelection(int radius, int border) {
+    private GradientDrawable expandedMediaSelection() {
         GradientDrawable selected = new GradientDrawable(
                 GradientDrawable.Orientation.TOP_BOTTOM,
                 new int[] {
@@ -1071,8 +1073,6 @@ final class TwoColumnPanel extends FrameLayout {
                         0xff1055a5, //  90%
                         0xff1055a5  // 100%
                 });
-        selected.setCornerRadius(radius);
-        selected.setStroke(border, BB7Theme.BLUE_BORDER);
         return selected;
     }
 
@@ -1110,7 +1110,7 @@ final class TwoColumnPanel extends FrameLayout {
                     && !mediaSeekSelected && !mediaModeSelected
                     && selectedMediaButton == i;
             ImageView button = mediaButtons[i];
-            button.setBackground(selected ? expandedMediaSelection(dp(3), dp(1)) : null);
+            button.setBackground(selected ? expandedMediaSelection() : null);
             button.setColorFilter(selected ? Color.WHITE : EXPANDED_MEDIA_PALETTE.headingText);
             button.setAlpha(enabled ? 1f : 0.35f);
         }
