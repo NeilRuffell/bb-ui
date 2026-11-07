@@ -56,11 +56,12 @@ final class MusicListView extends ListView {
         final String trackNumber;
         final String artworkKey;
         final List<Uri> artworkCandidates;
+        final boolean showRemoveButton;
 
         RowData(String title, String subtitle, boolean enabled,
                 boolean showArtwork, boolean albumFallback, int menuIconRes,
                 String trackNumber, String artworkKey,
-                List<Uri> artworkCandidates) {
+                List<Uri> artworkCandidates, boolean showRemoveButton) {
             this.title = title;
             this.subtitle = subtitle;
             this.enabled = enabled;
@@ -70,6 +71,7 @@ final class MusicListView extends ListView {
             this.trackNumber = trackNumber;
             this.artworkKey = artworkKey;
             this.artworkCandidates = artworkCandidates;
+            this.showRemoveButton = showRemoveButton;
         }
     }
 
@@ -95,22 +97,25 @@ final class MusicListView extends ListView {
         final TextView trackNumber;
         final TextView label;
         final TextView count;
+        final TextView removeAction;
 
         RowViews(LinearLayout root, ImageView artwork, Drawable noArtwork,
-                TextView trackNumber, TextView label, TextView count) {
+                TextView trackNumber, TextView label, TextView count,
+                TextView removeAction) {
             this.root = root;
             this.artwork = artwork;
             this.noArtwork = noArtwork;
             this.trackNumber = trackNumber;
             this.label = label;
             this.count = count;
+            this.removeAction = removeAction;
         }
     }
 
     private final DataSource data;
     private final BaseAdapter adapter;
     private final MusicListArtworkLoader artworkLoader;
-    // Only six original BBOS6 menu PNGs are decoded and trimmed, once each.
+    // Original BBOS6 menu PNGs are decoded and trimmed, once each.
     private final SparseArray<Bitmap> menuIconCache = new SparseArray<>();
     private final int canvasColor;
     private final int rowColor;
@@ -301,8 +306,7 @@ final class MusicListView extends ListView {
         textColumn.setOrientation(LinearLayout.VERTICAL);
         textColumn.setGravity(Gravity.CENTER_VERTICAL);
         row.addView(textColumn, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT));
+                0, ViewGroup.LayoutParams.MATCH_PARENT, 1f));
 
         TextView title = new TextView(getContext());
         title.setTextSize(15);
@@ -322,7 +326,30 @@ final class MusicListView extends ListView {
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT));
 
-        row.setTag(new RowViews(row, art, placeholder, number, title, count));
+        // Folder rows reuse the shared native ListView selection. Their
+        // right-side touch control is deliberately not a focusable item:
+        // keyboard/trackpad Enter on the row opens the same confirmation.
+        TextView remove = new TextView(getContext());
+        remove.setText("Remove");
+        remove.setTextSize(13);
+        remove.setTextColor(Color.WHITE);
+        remove.setGravity(Gravity.CENTER);
+        remove.setFocusable(false);
+        remove.setClickable(true);
+        remove.setVisibility(View.GONE);
+        GradientDrawable removeBackground = new GradientDrawable(
+                GradientDrawable.Orientation.TOP_BOTTOM,
+                new int[]{0xff4b4e53, 0xff292c31});
+        removeBackground.setCornerRadius(dp(4));
+        removeBackground.setStroke(dp(1), 0xff5a5d63);
+        remove.setBackground(removeBackground);
+        LinearLayout.LayoutParams removeLayout =
+                new LinearLayout.LayoutParams(dp(76), dp(36));
+        removeLayout.setMargins(dp(4), 0, dp(10), 0);
+        row.addView(remove, removeLayout);
+
+        row.setTag(new RowViews(row, art, placeholder, number, title, count,
+                remove));
         return row;
     }
 
@@ -334,11 +361,21 @@ final class MusicListView extends ListView {
         String detail = row.subtitle;
         views.count.setVisibility(detail == null ? View.GONE : View.VISIBLE);
         views.count.setText(detail == null ? "" : detail);
+        views.removeAction.setVisibility(
+                row.showRemoveButton ? View.VISIBLE : View.GONE);
+        if (row.showRemoveButton) {
+            views.removeAction.setContentDescription("Remove " + row.title);
+            views.removeAction.setOnClickListener(view -> data.activate(position));
+        } else {
+            // A recycled folder row must never remove a later music item.
+            views.removeAction.setOnClickListener(null);
+        }
         String spoken = row.trackNumber == null ? row.title
                 : ("--".equals(row.trackNumber) ? "Track number unavailable, "
                 : "Track " + row.trackNumber + ", ") + row.title;
-        views.root.setContentDescription(
-                detail == null ? spoken : spoken + ", " + detail);
+        views.root.setContentDescription((detail == null ? spoken
+                : spoken + ", " + detail)
+                + (row.showRemoveButton ? ", Remove available" : ""));
         bindArtwork(views, row);
         styleRow(views, position);
     }

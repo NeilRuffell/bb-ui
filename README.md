@@ -25,6 +25,12 @@ independent rollback settings.
 
 - [Design philosophy and architecture](docs/DESIGN_PHILOSOPHY.md) —
   what Android owns, what BB UI changes, and how we avoid redundant systems.
+- [BBOS6 icon reference index](assets/bbos6/icon-index.csv) —
+  searchable names and keywords for identified original numbered icons.
+  **Every newly verified icon identification or mapping must update this
+  index in the same change**, across BB UI and BB Music; preserve the
+  original numbered filenames. See [AGENTS.md](AGENTS.md) for the
+  repository-wide maintenance rule.
 - [Native shade migration](docs/NATIVE_SHADE_MIGRATION.md) —
   implementation, Q25 evidence, limitations and ROM migration steps.
 - [Shade and trackpad navigation](SHADE_NAVIGATION.md).

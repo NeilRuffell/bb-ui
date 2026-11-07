@@ -1,6 +1,7 @@
 package dev.q25.bbmusic;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.Intent;
 import android.graphics.Color;
 import android.text.Editable;
@@ -10,6 +11,7 @@ import android.net.Uri;
 import android.provider.DocumentsContract;
 import android.os.Bundle;
 import android.util.Log;
+import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
@@ -20,6 +22,7 @@ import android.window.OnBackInvokedDispatcher;
 import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
+import android.widget.TextView;
 import android.widget.Toast;
 
 import java.util.ArrayDeque;
@@ -53,6 +56,7 @@ public final class MusicActivity extends Activity {
     private static final int ROW_GROUP = 2;
     private static final int ROW_MESSAGE = 3;
     private static final int ROW_SETTING = 4;
+    private static final int ROW_FOLDER = 5;
     private static final String[] MENU = {
             "All Songs",
             "Artists",
@@ -68,7 +72,9 @@ public final class MusicActivity extends Activity {
     private MusicAlbumHeaderView albumHeader;
     private EditText searchInput;
     private MusicSearchBarView searchBar;
+    private TextView noSearchResults;
     private Page rootPage;
+    private Page settingsPage;
     private List<MenuRow> visibleRows;
     private boolean searchOpen;
     private int searchOriginalPosition;
@@ -97,36 +103,46 @@ public final class MusicActivity extends Activity {
         final int groupCategory;
         final List<LocalMusicSource.Song> songs;
         final LocalMusicSource.Song song;
+        final Uri folderTree;
+        final String folderLocation;
 
         MenuRow(String title, int kind, int menuIndex, int groupCategory,
-                List<LocalMusicSource.Song> songs, LocalMusicSource.Song song) {
+                List<LocalMusicSource.Song> songs, LocalMusicSource.Song song,
+                Uri folderTree, String folderLocation) {
             this.title = title;
             this.kind = kind;
             this.menuIndex = menuIndex;
             this.groupCategory = groupCategory;
             this.songs = songs;
             this.song = song;
+            this.folderTree = folderTree;
+            this.folderLocation = folderLocation;
         }
 
         static MenuRow root(String name, int index) {
-            return new MenuRow(name, ROW_MENU, index, -1, null, null);
+            return new MenuRow(name, ROW_MENU, index, -1, null, null, null, null);
         }
 
         static MenuRow group(String name, int category,
                 List<LocalMusicSource.Song> songs) {
-            return new MenuRow(name, ROW_GROUP, -1, category, songs, null);
+            return new MenuRow(name, ROW_GROUP, -1, category, songs, null, null, null);
         }
 
         static MenuRow song(LocalMusicSource.Song song) {
-            return new MenuRow(song.title, ROW_SONG, -1, -1, null, song);
+            return new MenuRow(song.title, ROW_SONG, -1, -1, null, song, null, null);
         }
 
         static MenuRow message(String message) {
-            return new MenuRow(message, ROW_MESSAGE, -1, -1, null, null);
+            return new MenuRow(message, ROW_MESSAGE, -1, -1, null, null, null, null);
         }
 
         static MenuRow setting(String title) {
-            return new MenuRow(title, ROW_SETTING, -1, -1, null, null);
+            return new MenuRow(title, ROW_SETTING, -1, -1, null, null, null, null);
+        }
+
+        static MenuRow folder(String name, String location, Uri tree) {
+            return new MenuRow(name, ROW_FOLDER, -1, -1,
+                    null, null, tree, location);
         }
     }
 
@@ -251,6 +267,19 @@ public final class MusicActivity extends Activity {
         libraryShell.addView(searchBar, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 dp(MusicSearchBarView.heightDp())));
+        // Empty search feedback is not a ListView row: it never receives
+        // the row selector, participates in navigation, or adds a divider.
+        noSearchResults = new TextView(this);
+        noSearchResults.setText("No search results found");
+        noSearchResults.setTextSize(15);
+        noSearchResults.setTextColor(Color.WHITE);
+        noSearchResults.setGravity(Gravity.CENTER);
+        noSearchResults.setPadding(dp(16), dp(20), dp(16), dp(20));
+        noSearchResults.setFocusable(false);
+        noSearchResults.setVisibility(View.GONE);
+        libraryShell.addView(noSearchResults, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT));
         libraryShell.addView(list, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
         safeViewport.addView(libraryShell, new FrameLayout.LayoutParams(
@@ -294,16 +323,18 @@ public final class MusicActivity extends Activity {
                 ? null : albumArtworkSources.get(albumKey);
         boolean albumFallback = row.kind == ROW_GROUP && row.groupCategory == 2;
         return new MusicListView.RowData(
-                row.title, childCountLabel(row), row.kind != ROW_MESSAGE,
-                hasArtwork, albumFallback, menuIconForRow(row), trackNumber,
+                row.title, row.kind == ROW_FOLDER
+                        ? row.folderLocation : childCountLabel(row),
+                row.kind != ROW_MESSAGE, hasArtwork, albumFallback,
+                menuIconForRow(row), trackNumber,
                 albumKey == null ? null : "album:" + albumKey,
-                candidates);
+                candidates, row.kind == ROW_FOLDER);
     }
 
     /**
-     * Exact 64px BBOS6 menu icon bitmaps identified from supplied screenshots.
+     * Original BBOS6 menu icons identified from supplied screenshots.
      * The source PNGs remain in /assets/bbos6/icons/ and are reused as-is.
-     * No icon is assigned to Settings without a verified BBOS6 reference.
+     * Settings uses the verified BBOS6 Options wrench icon (3412.png).
      */
     private static int menuIconForRow(MenuRow row) {
         if (row.kind != ROW_MENU) return 0;
@@ -314,7 +345,8 @@ public final class MusicActivity extends Activity {
             case 3: return R.drawable.bbos6_menu_genres;         // 348.png
             case 4: return R.drawable.bbos6_menu_playlists;      // 337.png
             case 5: return R.drawable.bbos6_menu_shuffle_songs; // 339.png
-            default: return 0; // Settings was not in the BBOS6 reference.
+            case 6: return R.drawable.bbos6_menu_settings;      // 3412.png
+            default: return 0;
         }
     }
 
@@ -391,11 +423,7 @@ public final class MusicActivity extends Activity {
             // Playlist storage is not implemented, hence no playlist children.
             return "0 Items";
         }
-        if (row.menuIndex == 6) {
-            // Settings has one implemented child: Add folders.
-            return "1 Item";
-        }
-        // Shuffle Songs is an action, not a container.
+        // Shuffle Songs and Settings have no child-count subtitle.
         return null;
     }
 
@@ -438,12 +466,13 @@ public final class MusicActivity extends Activity {
             } else if (row.menuIndex == 5) {
                 shuffleAllSongs();
             } else if (row.menuIndex == 6) {
-                ArrayList<MenuRow> settings = new ArrayList<>();
-                settings.add(MenuRow.setting("Add folders"));
-                navigateTo(new Page("Settings", settings));
+                settingsPage = new Page("Settings", buildSettingsRows());
+                navigateTo(settingsPage);
             }
         } else if (row.kind == ROW_SETTING) {
             showFolderPicker();
+        } else if (row.kind == ROW_FOLDER) {
+            confirmFolderRemoval(row);
         } else if (row.kind == ROW_GROUP) {
             List<LocalMusicSource.Song> groupSongs = new ArrayList<>(row.songs);
             if (row.groupCategory == 2) {
@@ -466,6 +495,95 @@ public final class MusicActivity extends Activity {
                 openNowPlaying();
                 playback.playSongs(queue, startIndex, false);
             }
+        }
+    }
+
+    /** Rebuild the Settings menu from the same authorized tree allowlist as scans. */
+    private ArrayList<MenuRow> buildSettingsRows() {
+        ArrayList<MenuRow> rows = new ArrayList<>();
+        rows.add(MenuRow.setting("Add folders"));
+        Set<String> authorized = new HashSet<>();
+        for (Uri tree : MusicFolders.selectedTrees(this)) {
+            authorized.add(tree.toString());
+        }
+        for (Uri tree : MusicFolders.savedTrees(this)) {
+            String location = MusicFolders.documentId(tree);
+            if (!authorized.contains(tree.toString())) {
+                location = "Access unavailable - " + location;
+            }
+            rows.add(MenuRow.folder(MusicFolders.displayName(this, tree),
+                    location, tree));
+        }
+        return rows;
+    }
+
+    private void refreshSettingsRows() {
+        if (settingsPage == null) return;
+        settingsPage.rows.clear();
+        settingsPage.rows.addAll(buildSettingsRows());
+        if (currentPage != settingsPage) return;
+        if (searchOpen) {
+            updateSearchResults();
+            return;
+        }
+        int selected = Math.max(0, Math.min(list.getSelectedItemPosition(),
+                settingsPage.rows.size() - 1));
+        View selectedView = list.getSelectedView();
+        int top = selectedView == null ? 0 : selectedView.getTop();
+        visibleRows = settingsPage.rows;
+        list.notifyRowsChanged();
+        list.post(() -> {
+            if (currentPage != settingsPage || searchOpen
+                    || isFinishing() || isDestroyed()) return;
+            list.requestFocus();
+            list.setSelectionFromTop(selected, top);
+            list.refreshSelection();
+        });
+    }
+
+    private void confirmFolderRemoval(MenuRow row) {
+        if (row.folderTree == null) return;
+        new AlertDialog.Builder(this)
+                .setTitle("Remove music folder?")
+                .setMessage("Remove \"" + row.title
+                        + "\" from the music library?\n\n"
+                        + "The files on your device will not be deleted.")
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Remove",
+                        (dialog, which) -> removeMusicFolder(row.folderTree))
+                .show();
+    }
+
+    private void removeMusicFolder(Uri tree) {
+        try {
+            if (!MusicFolders.remove(this, tree)) {
+                refreshSettingsRows();
+                Toast.makeText(this, "Folder already removed",
+                        Toast.LENGTH_SHORT).show();
+                return;
+            }
+            // Drop in-flight scans and cached song/artwork data from the old
+            // allowlist before scanning the remaining authorized trees.
+            localSource.invalidate();
+            loading = false;
+            pendingMenu = -1;
+            pendingShuffleStart = false;
+            localSongs = null;
+            albumArtworkSources = Collections.emptyMap();
+            list.clearArtworkCache();
+            refreshSettingsRows();
+            if (MusicFolders.selectedTrees(this).isEmpty()) {
+                localSongs = Collections.emptyList();
+                updateLocalCategoryCounts();
+            } else {
+                startLocalScan(false);
+            }
+            Toast.makeText(this, "Music folder removed",
+                    Toast.LENGTH_SHORT).show();
+        } catch (IllegalStateException exception) {
+            Log.w(TAG, "Cannot remove selected music folder", exception);
+            Toast.makeText(this, "Unable to remove music folder",
+                    Toast.LENGTH_LONG).show();
         }
     }
 
@@ -559,11 +677,15 @@ public final class MusicActivity extends Activity {
             return;
         }
         try {
+            boolean authorizedBefore =
+                    MusicFolders.selectedTrees(this).contains(selectedTree);
             // Persist read permission only; BB Music never modifies files.
             getContentResolver().takePersistableUriPermission(selectedTree,
                     Intent.FLAG_GRANT_READ_URI_PERMISSION);
             boolean added = MusicFolders.add(this, selectedTree);
-            if (added) {
+            boolean accessRestored = !authorizedBefore
+                    && MusicFolders.selectedTrees(this).contains(selectedTree);
+            if (added || accessRestored) {
                 // Invalidate old lists and stop accepting any pending scan.
                 // New scans can read only the updated authorized allowlist.
                 localSource.invalidate();
@@ -576,7 +698,9 @@ public final class MusicActivity extends Activity {
                 Log.i(TAG, "Selected music folder added; total="
                         + MusicFolders.selectedTrees(this).size());
             }
+            refreshSettingsRows();
             Toast.makeText(this, added ? "Music folder added"
+                    : accessRestored ? "Music folder access restored"
                     : "Folder already selected", Toast.LENGTH_SHORT).show();
         } catch (SecurityException | IllegalStateException exception) {
             Log.w(TAG, "Cannot persist selected folder", exception);
@@ -775,6 +899,7 @@ public final class MusicActivity extends Activity {
         if (!searchOpen) return;
         searchOpen = false;
         searchBar.setVisibility(View.GONE);
+        noSearchResults.setVisibility(View.GONE);
         searchInput.setText("");
         visibleRows = currentPage.rows;
         list.notifyRowsChanged();
@@ -822,9 +947,10 @@ public final class MusicActivity extends Activity {
                     }
                 }
             }
-            if (matches.isEmpty()) matches.add(MenuRow.message("No matches"));
             visibleRows = matches;
         }
+        noSearchResults.setVisibility(!term.isEmpty() && visibleRows.isEmpty()
+                ? View.VISIBLE : View.GONE);
         list.notifyRowsChanged();
         list.setSelectionFromTop(0, 0);
         list.refreshSelection();

@@ -27,9 +27,16 @@ Home screen, in order:
 6. Shuffle Songs (first-party shuffled playback)
 7. Settings
 
-**Settings** currently has exactly one action: **Add folders**.
+**Settings** provides **Add folders** and a live list of each authorized
+music folder, with a per-folder **Remove** control. Removing a folder does
+not delete the files on the device.
 
 ### Original BBOS6 music menu icons
+
+**Canonical icon reference:** [`assets/bbos6/icon-index.csv`](../assets/bbos6/icon-index.csv).
+For every newly identified original BBOS6 icon, update that index in the
+same change. The repository-wide rule is documented in [`AGENTS.md`](../AGENTS.md).
+Do not rename original numbered PNGs or guess icon identities.
 
 The first six home-menu rows now render the **original PNGs** from the
 repository-wide `assets/bbos6/icons/` collection. They were matched
@@ -44,6 +51,7 @@ OS 6 Music home menu supplied for this project:
 | Genres | `348.png` | `bbos6_menu_genres.png` |
 | Playlists | `337.png` | `bbos6_menu_playlists.png` |
 | Shuffle Songs | `339.png` | `bbos6_menu_shuffle_songs.png` |
+| Settings (Options wrench) | `3412.png` | `bbos6_menu_settings.png` |
 
 Android requires referenced PNGs to be present in application resource
 directories, so the exact original binary blobs are reused under
@@ -63,15 +71,19 @@ bitmaps are reused by the shared list adapter. When a recycled row changes
 from a home-menu icon to album artwork, its temporary 6dp inset is cleared;
 album covers retain their full edge-to-edge 64dp presentation.
 
-Only entries whose icons were present in the screenshot were mapped.
-**Settings** remains text-only because the supplied references do not
-identify its matching BlackBerry 6 icon. Album artwork on songs, albums,
-artists and genres remains independent of these static home-menu icons.
+The initial six icons were identified from the Music menu reference.
+**Settings** now uses the original BBOS6 **Options** wrench from
+`3412.png`, identified and confirmed against the supplied screenshot;
+its PNG is packaged without modification. Album artwork on songs,
+albums, artists and genres remains independent of these static home-menu icons.
 
 **Missing album covers:** Original BBOS6 `543.png` is packaged as
-`bbos6_album_no_art.png` and displayed when an **Albums** category entry
-or an open album's information header has no embedded cover. Other library
-artwork fallbacks and original audio files are unchanged.
+`bbos6_album_no_art.png` and displayed when an **Albums** category entry,
+an open album's information header, or the **Now Playing** artwork area
+has no embedded cover. Real embedded album art replaces this fallback in
+Now Playing when successfully decoded; each track change immediately
+resets the artwork area to the original fallback until the new cover loads.
+Other library artwork fallbacks and original audio files are unchanged.
 
 
 ### Shared list component
@@ -172,6 +184,14 @@ shows the original page entries again. Trackpad Up/Down still moves one
 list row; Enter opens the highlighted result. Standard Android Ctrl/Meta
 keyboard shortcuts are not intercepted.
 
+When a non-empty query has no matches, the search results adapter remains
+empty. A separate, non-focusable white text label reading
+**No search results found** appears horizontally centered at the top of
+the results area, beneath the search bar (and any album header). It is
+not a ListView item: no row selection gradient, divider, or activation.
+The label disappears as soon as results return, the query is cleared,
+or search closes. The scan-in-progress message remains unchanged.
+
 The search operates solely on the in-memory catalog returned from
 `MusicFolders.selectedTrees`; typing never scans other folders,
 queries MediaStore, uses the network, or requests additional permissions.
@@ -231,9 +251,9 @@ label and a smaller muted count underneath. All Songs displays the number
 of selected-folder audio tracks (e.g. `1 Song`, `2 Songs`); Artists, Albums
 and Genres display distinct category entries (`1 Item`, `2 Items`).
 Artist/album/genre groups display their direct number of songs when opened.
-Settings displays `1 Item` (Add folders); Playlists displays `0 Items`
-until the app supports playlists. Shuffle Songs is an action and has no
-child count.
+Settings has no child-count subtitle on the home menu, while retaining
+its Add folders entry. Playlists displays `0 Items` until the app supports
+playlists. Shuffle Songs is an action and has no child count.
 
 When the app opens, it loads counts from the user-selected folder trees
 only. With no folders selected the counters are zero **and no storage scan
@@ -280,11 +300,32 @@ the `Download` directory itself. Choose a folder such as `Music`, or
 individual subfolders. The selected folder includes its subfolders.
 Android's DocumentsProvider must actually expose the folders for SAF access.
 
-**Current UI limitation:** There is no Remove folders or Manage folders
-command yet because the user requested only Add folders. To reset all saved
-folders before a removal UI exists, Android Settings > Apps > BB Music >
-Storage > Clear storage will reset the app's preferences (and other app
-data). Do not imply deleting an audio folder itself.
+### Manage selected folders
+
+The Settings page retains **Add folders** as its first row. Beneath it,
+one regular 64dp list row appears for each **saved** selected SAF folder,
+with its document-provider display name, the tree document ID as a
+distinguishing subtitle, and a right-side **Remove** button. Folders whose
+Android read permission is no longer held remain listed with an
+**Access unavailable** subtitle so they can be removed or re-authorized. Settings
+uses the existing shared `MusicListView`, selection gradient, touch
+scrolling, physical keyboard and one-row trackpad Up/Down navigation.
+Tapping Remove, tapping a folder row, or pressing Enter/trackpad on a
+highlighted folder row opens a **Remove / Cancel confirmation**.
+
+Confirming removal deletes only that tree's saved allowlist entry and
+releases this app's persisted read grant. It **never deletes, moves or
+modifies files on the device**. The removed folder disappears from Settings;
+in-progress scans are invalidated, old library metadata and artwork caches
+are cleared, and the remaining authorized folders are scanned again.
+Removing the final folder leaves an empty selected-folder library. Back
+retains normal page navigation, and Settings refreshes after Add folders
+returns from the Android folder picker. Re-selecting a saved folder that had
+lost its read grant restores authorization and triggers a new library scan.
+The scanner still reads **only** the intersection of saved folders and live
+read grants. If a document provider cannot return a friendly folder name,
+the UI derives a label from its tree document ID.
+
 
 ## Native playback and the BB UI Now Playing port
 
@@ -314,6 +355,9 @@ The Now Playing screen is a standalone presentation port of BB UI master
   enter seek-edit mode; another press exits. Touch-dragging works directly.
 - An independent `MusicArtworkLoader` reads embedded album artwork only
   from the selected track's existing document URI on a background thread.
+  If decoding returns no cover, Now Playing displays the same original
+  BBOS6 `543.png` album-art fallback as the album list/header, instead
+  of an `Artwork unavailable` text label.
 
 Media3 owns audio focus, noisy-headset handling and the media-session
 notification, including background playback. The Activity disconnects its
@@ -354,55 +398,74 @@ adb -s 202512003630 install -r app/build/outputs/apk/debug/app-debug.apk
 6. Browse Artists, Albums and Genres, including physical trackpad navigation
    and Back. The blue selection and status-bar boundaries should remain
    correct.
-7. Restart BB Music to confirm both folder grants persist.
-8. Confirm main-menu counters show the selected-folder track count, distinct
+7. In Settings, confirm both folders appear with readable titles, location
+   subtitles and separate Remove buttons. Touch a button, then Cancel:
+   neither folder may disappear. Use trackpad Up/Down and Enter on a folder
+   row; the same confirmation must open.
+8. Confirm Remove on one folder. Only its row must disappear; the other
+   remains available. Reopen All Songs: tracks from the removed folder must
+   no longer be present, while remaining-folder tracks still appear. Files
+   in the removed folder must remain untouched. Remove the last folder and
+   verify the library is empty; Add folders remains available.
+9. Re-add a removed folder and restart BB Music to confirm the remaining
+   folder grants and Settings entries persist. If a saved folder loses its
+   permission, Settings should still list it as Access unavailable. Re-add
+   that folder to restore access or use Remove to discard the saved entry.
+10. Confirm main-menu counters show the selected-folder track count, distinct
    artists/albums/genres and their singular/plural labels. Group rows show
    their direct number of child songs.
-9. Confirm counts finish updating without resetting trackpad selection or
+11. Confirm counts finish updating without resetting trackpad selection or
    changing touch scroll position.
-10. Select a track: Now Playing opens and first-party audio starts.
-11. Check Play/Pause, Previous/Next, duration, drag-to-seek and trackpad
-    two-stage seek mode. Verify album art when embedded artwork exists.
-12. Check Shuffle, Repeat All, Repeat One and Off, using touch and trackpad.
-13. Back should return to the same music list without pausing playback.
-14. Background the app and use system notification/headset media controls.
-15. Start Shuffle Songs from the home menu, and verify the shuffled queue.
-16. Confirm tracks from unselected folders do not appear or enter a queue.
-17. Verify song and album rows display their own album cover; artist and
+12. Select a track: Now Playing opens and first-party audio starts.
+13. Check Play/Pause, Previous/Next, duration, drag-to-seek and trackpad
+    two-stage seek mode. Verify album art when embedded artwork exists,
+    and the original BBOS6 `543.png` cover when it does not. Switch between
+    tracks with and without embedded art and confirm the previous track's
+    cover never remains visible or replaces the fallback late.
+14. Check Shuffle, Repeat All, Repeat One and Off, using touch and trackpad.
+15. Back should return to the same music list without pausing playback.
+16. Background the app and use system notification/headset media controls.
+17. Start Shuffle Songs from the home menu, and verify the shuffled queue.
+18. Confirm tracks from unselected folders do not appear or enter a queue.
+19. Verify song and album rows display their own album cover; artist and
     genre rows select the first album in alphabetical album-title order.
-18. Scroll quickly with touch, then select rows using the Q25 trackpad:
+20. Scroll quickly with touch, then select rows using the Q25 trackpad:
     artwork must not be cross-assigned by recycled ListView rows.
     After the shared-list refactor, repeat this on the home menu, Settings,
     All Songs, Artists, Albums, Genres and their nested song pages; Back must
     still restore the previous selection and scroll position.
-19. Confirm coverless albums show a placeholder and that folder selection,
+21. Confirm coverless albums show a placeholder and that folder selection,
     existing counts, previous navigation, status bar and Now Playing
     remain functional.
-20. On the home menu type a song title, artist, album or genre directly
+22. On the home menu type a song title, artist, album or genre directly
     using the Q25 keyboard: a search field must appear and show matching
     selected-folder songs with the correct artwork.
-21. Type on the Artists, Albums, Genres and nested song lists. Verify
+23. Type on the Artists, Albums, Genres and nested song lists. Verify
     only the current page is filtered; all search results retain the
     regular 64dp borderless blue selector and trackpad navigation.
-22. Edit with Backspace, including an empty query. Press Back once to
-    dismiss search and restore the original list selection/scroll; a
-    second Back must navigate to the parent page.
-23. Play a song from filtered results, press Back, and verify search
+24. Enter a query with no matches on the main and nested pages.
+    Confirm the empty adapter leaves no selectable rows and shows
+    horizontally centered `No search results found` below the search bar,
+    without the blue selection gradient or a row divider. Backspace to
+    recover matches or clear the query; the message must disappear.
+    Press Back once to dismiss search and restore the original list
+    selection/scroll; a second Back must navigate to the parent page.
+25. Play a song from filtered results, press Back, and verify search
     results return intact. Ensure typing on Now Playing does not open
     the library search and the background player is unaffected.
     Compare the search field against the BBOS6 reference: full-width top
     `#5A5D63` rule, dark gray vertical panel gradient and rounded white
     inset. Verify the field begins empty (no placeholder) and typed
     characters remain readable on white.
-24. Open Albums and select an album. Check the 88dp artwork touches the
+26. Open Albums and select an album. Check the 88dp artwork touches the
     left screen edge and begins immediately beneath the status bar,
     without white space. Its title, artist, genre and song count should
     appear alongside the cover.
-25. Enter the song list with trackpad Up/Down and Enter. Check selected
+27. Enter the song list with trackpad Up/Down and Enter. Check selected
     tracks, playback queues, instant search and Back navigation behave
     unchanged. Artist, genre, home and Settings pages must not show an
     album header. Coverless albums must show the normal placeholder.
-26. In an album song list, verify each row's left edge shows the tagged
+28. In an album song list, verify each row's left edge shows the tagged
     track number rather than album artwork. Missing/zero track tags show
     `--`. Verify all other song lists retain artwork, row selection
     gradients have no stroke, and rapid scrolling never mixes row types.
