@@ -1,8 +1,9 @@
 package dev.q25.bbmusic;
 
-import android.Manifest;
 import android.app.Activity;
-import android.content.pm.PackageManager;
+import android.content.Intent;
+import android.net.Uri;
+import android.provider.DocumentsContract;
 import android.content.res.Configuration;
 import android.graphics.Color;
 import android.graphics.drawable.ColorDrawable;
@@ -47,18 +48,20 @@ import java.util.Map;
  */
 public final class MusicActivity extends Activity {
     private static final String TAG = "BBMusic";
-    private static final int READ_AUDIO_REQUEST = 6101;
+    private static final int ADD_FOLDER_REQUEST = 6102;
     private static final int ROW_MENU = 0;
     private static final int ROW_SONG = 1;
     private static final int ROW_GROUP = 2;
     private static final int ROW_MESSAGE = 3;
+    private static final int ROW_SETTING = 4;
     private static final String[] MENU = {
             "All Songs",
             "Artists",
             "Albums",
             "Genres",
             "Playlists",
-            "Shuffle Songs"
+            "Shuffle Songs",
+            "Settings"
     };
 
     // BB UI's QS palette and selected-state gradient are replicated locally:
@@ -122,6 +125,10 @@ public final class MusicActivity extends Activity {
 
         static MenuRow message(String message) {
             return new MenuRow(message, ROW_MESSAGE, -1, -1, null, null);
+        }
+
+        static MenuRow setting(String title) {
+            return new MenuRow(title, ROW_SETTING, -1, -1, null, null);
         }
     }
 
@@ -192,6 +199,10 @@ public final class MusicActivity extends Activity {
 
             @Override public Object getItem(int position) {
                 return currentPage.rows.get(position);
+            }
+
+            @Override public boolean isEnabled(int position) {
+                return currentPage.rows.get(position).kind != ROW_MESSAGE;
             }
 
             @Override public long getItemId(int position) {
@@ -317,10 +328,16 @@ public final class MusicActivity extends Activity {
             } else if (row.menuIndex == 4) {
                 Toast.makeText(this, "Playlists are not implemented yet",
                         Toast.LENGTH_SHORT).show();
-            } else {
+            } else if (row.menuIndex == 5) {
                 Toast.makeText(this, "Playback is not implemented yet",
                         Toast.LENGTH_SHORT).show();
+            } else if (row.menuIndex == 6) {
+                ArrayList<MenuRow> settings = new ArrayList<>();
+                settings.add(MenuRow.setting("Add folders"));
+                navigateTo(new Page("Settings", settings));
             }
+        } else if (row.kind == ROW_SETTING) {
+            showFolderPicker();
         } else if (row.kind == ROW_GROUP) {
             List<LocalMusicSource.Song> groupSongs = new ArrayList<>(row.songs);
             if (row.groupCategory == 2) {
@@ -336,24 +353,77 @@ public final class MusicActivity extends Activity {
         }
     }
 
+    private void showFolderPicker() {
+        // Folder choice is made by Android's trusted document picker. Only
+        // the explicitly selected tree, not device-wide storage, is granted.
+        Intent picker = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
+        picker.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
+                | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+        picker.putExtra(Intent.EXTRA_LOCAL_ONLY, true);
+        try {
+            startActivityForResult(picker, ADD_FOLDER_REQUEST);
+        } catch (RuntimeException exception) {
+            Log.w(TAG, "Cannot open Android folder picker", exception);
+            Toast.makeText(this, "Folder picker unavailable", Toast.LENGTH_LONG).show();
+        }
+    }
+
+    @Override
+    @SuppressWarnings("deprecation")
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode != ADD_FOLDER_REQUEST || resultCode != RESULT_OK
+                || data == null || data.getData() == null) return;
+        Uri selectedTree = data.getData();
+        if (!DocumentsContract.isTreeUri(selectedTree)) {
+            Toast.makeText(this, "Invalid folder selection",
+                    Toast.LENGTH_LONG).show();
+            return;
+        }
+        try {
+            // Persist read permission only; BB Music never modifies files.
+            getContentResolver().takePersistableUriPermission(selectedTree,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            boolean added = MusicFolders.add(this, selectedTree);
+            if (added) {
+                // Invalidate old lists and stop accepting any pending scan.
+                // New scans can read only the updated authorized allowlist.
+                localSource.invalidate();
+                localSongs = null;
+                loading = false;
+                pendingMenu = -1;
+                Log.i(TAG, "Selected music folder added; total="
+                        + MusicFolders.selectedTrees(this).size());
+            }
+            Toast.makeText(this, added ? "Music folder added"
+                    : "Folder already selected", Toast.LENGTH_SHORT).show();
+        } catch (SecurityException | IllegalStateException exception) {
+            Log.w(TAG, "Cannot persist selected folder", exception);
+            Toast.makeText(this, "Unable to save folder access",
+                    Toast.LENGTH_LONG).show();
+        }
+    }
+
     private void openLocalCategory(int menuIndex) {
         pendingMenu = menuIndex;
-        if (checkSelfPermission(Manifest.permission.READ_MEDIA_AUDIO)
-                != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(new String[] {Manifest.permission.READ_MEDIA_AUDIO},
-                    READ_AUDIO_REQUEST);
+        if (MusicFolders.selectedTrees(this).isEmpty()) {
+            pendingMenu = -1;
+            ArrayList<MenuRow> message = new ArrayList<>();
+            message.add(MenuRow.message("No folders added. Use Settings > Add folders"));
+            navigateTo(new Page(MENU[menuIndex], message));
             return;
         }
         if (localSongs != null) {
             showLocalCategory(menuIndex);
         } else if (!loading) {
             loading = true;
-            Toast.makeText(this, "Reading device music...", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "Reading selected music folders...",
+                    Toast.LENGTH_SHORT).show();
             localSource.load(new LocalMusicSource.Listener() {
                 @Override public void onLoaded(List<LocalMusicSource.Song> songs) {
                     loading = false;
                     localSongs = songs;
-                    Log.i(TAG, "Local music library ready: " + songs.size() + " songs");
+                    Log.i(TAG, "Selected-folder music ready: " + songs.size() + " tracks");
                     int menu = pendingMenu;
                     pendingMenu = -1;
                     if (menu >= 0 && backStack.isEmpty()) showLocalCategory(menu);
@@ -365,21 +435,6 @@ public final class MusicActivity extends Activity {
                     Toast.makeText(MusicActivity.this, reason, Toast.LENGTH_LONG).show();
                 }
             });
-        }
-    }
-
-    @Override
-    public void onRequestPermissionsResult(int requestCode, String[] permissions,
-            int[] grantResults) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
-        if (requestCode != READ_AUDIO_REQUEST) return;
-        if (grantResults.length > 0
-                && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-            if (pendingMenu >= 0) openLocalCategory(pendingMenu);
-        } else {
-            pendingMenu = -1;
-            Toast.makeText(this, "Music permission is required for device songs",
-                    Toast.LENGTH_LONG).show();
         }
     }
 
