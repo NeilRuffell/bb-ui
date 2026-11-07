@@ -1,38 +1,61 @@
 # BB Music — standalone Android application
 
-BB Music is an ordinary, independent Android APK (`dev.q25.bbmusic`),
-built separately from the BB UI Vector/LSPosed module. It does **not** require
-BB UI, Vector, LSPosed, root, SystemUI privileges or a custom ROM.
+BB Music is an independent Android APK (`dev.q25.bbmusic`) that builds and
+runs without BB UI, Vector, LSPosed, root, SystemUI privileges or a custom ROM.
+It has its own Gradle project and launcher.
 
-This project has its own Gradle settings, build files, manifest, application
-ID and launcher. The existing BB UI module is not a build dependency.
+## Implementation status
 
-## Current state
+**UI:** The first prototype was discarded. `MusicActivity` now contains
+only a native Android `ListView` with an empty `BaseAdapter`. Its setup
+mirrors `BB6NativeQsPanel`: the ListView owns native touch scrolling,
+one-item D-pad/trackpad selection, and recycling. No menus, headers, music
+rows, transport bar or UI styling beyond the empty dark canvas are defined.
+The user will direct UI construction one element at a time.
 
-The first prototype UI was explicitly discarded. The launchable
-`MusicActivity` is intentionally an **empty black screen**, pending
-user-guided construction of the BlackBerry OS 6-style interface. No browse
-list, navigation, transport bar or other previously prototyped presentation
-remains.
+**Sources:** `SymfoniumSource.java` remains an optional source adapter. It
+uses public `MediaBrowser` and `MediaController` APIs and retains the
+read-only catalog support established by the Q25 diagnostic. `MusicActivity`
+does **not** automatically connect to Symfonium. The app can be opened
+without it installed.
 
-The tested Symfonium integration is being retained separately in
-`SymfoniumSource.java`. It uses only ordinary Android public APIs:
+**Native player:** Not yet implemented. The required architecture is
+first-party local playback using AndroidX Media3 ExoPlayer in a
+`MediaSessionService`, so playback can continue in the background.
+A local audio-library adapter will use Android `MediaStore`.
+This is necessary to make BB Music a functional player with **no other music
+app**. Do not describe the current empty UI as a working independent player.
 
-- `MediaBrowser`: connect, retrieve browseable media and paginated results.
-- `MediaController`: request playback and observe native playback metadata.
-- `SymfoniumSource.Listener`: return data to whichever UI is built next.
+**Cloud:** Direct OneDrive support is feasible through Microsoft Graph
+with Microsoft account authorization, selected-folder enumeration, media
+indexing, metadata caching and range-capable downloads. It is **not**
+implemented. Symfonium can still be a user-selected provider for its
+existing OneDrive-indexed catalog, but is never the mandatory player.
 
-This source has no visual components. Its playback requests have not been
-verified on the Q25 under the new application ID.
+## Architecture target
 
-The previous experimental BB UI diagnostic established that a non-SystemUI
-app process can connect to Symfonium and browse albums, artists, albums'
-individual tracks, folders and genres. Pagination and advertised search
-support were also observed. Playlists returned an empty result.
+```text
+BB Music APK (dev.q25.bbmusic)
+  MusicActivity
+    Android ListView + BaseAdapter — user-directed BBOS6 UI
+             |
+         Music library / controller (to be implemented)
+             |
+        +----+------------------------------+
+        |                                   |
+  Built-in library/playback              Optional source
+  MediaStore (planned)                   SymfoniumSource (retained)
+  Media3 MediaSessionService (planned)   MediaBrowser/Controller
+  OneDrive/Graph (later)                 Symfonium app if installed
+```
 
-## Build and install
+The user interface must never need Vector or the BB UI APK at runtime.
+Existing BB UI playback visuals can be ported into the standalone project's
+resources and classes later, without linking to SystemUI code.
 
-With global Gradle, JDK 17 and Android SDK 35:
+## Build
+
+Requires Android SDK platform 35, JDK 17, and globally installed Gradle.
 
 ```sh
 cd ~/Projects/bb-ui
@@ -44,29 +67,14 @@ gradle :app:assembleDebug
 adb -s 202512003630 install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
-Open **BB Music** from the Android launcher. The screen is intentionally
-blank. The connection status is available in logcat:
+Launch **BB Music**. It currently shows an intentionally empty black
+ListView. No Symfonium connection or playback is initiated.
 
-```sh
-adb -s 202512003630 logcat -d -s 'BBMusic:I' 'BBMusic-Source:I' '*:S'
-```
+## Source verification to date
 
-## Architecture contract
-
-```text
-BB Music APK (dev.q25.bbmusic)
-  MusicActivity — empty UI host awaiting guided design
-  SymfoniumSource — MediaBrowser / MediaController adapter
-       |
-       v
-  Symfonium's MediaBrowserService
-       |
-       v
-  Symfonium's indexed OneDrive library and audio playback
-
-BB UI APK (dev.q25.trackpad) — separate; no dependency
-```
-
-The UI will be rebuilt incrementally based on the Quick Settings list's
-native Android `ListView` and `BaseAdapter` architecture where requested.
-Do not copy Xposed hooks, SystemUI ownership or shade lifecycle into BB Music.
+On Q25, Symfonium 15.1.0 exposed a browsable `auto_root` under
+`app.symfonik.music.player/app.symfonik.core.playback.service.PlayerService`.
+Independent non-SystemUI diagnostics enumerated artists, albums, individual
+track IDs, genres, folders, and subsequent album pages; search was advertised.
+Playlists returned a `No results` placeholder. Actual playback commands,
+cover-art access from the new APK and direct OneDrive access remain untested.
