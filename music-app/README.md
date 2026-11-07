@@ -172,6 +172,14 @@ shows the original page entries again. Trackpad Up/Down still moves one
 list row; Enter opens the highlighted result. Standard Android Ctrl/Meta
 keyboard shortcuts are not intercepted.
 
+When a non-empty query has no matches, the search results adapter remains
+empty. A separate, non-focusable white text label reading
+**No search results found** appears horizontally centered at the top of
+the results area, beneath the search bar (and any album header). It is
+not a ListView item: no row selection gradient, divider, or activation.
+The label disappears as soon as results return, the query is cleared,
+or search closes. The scan-in-progress message remains unchanged.
+
 The search operates solely on the in-memory catalog returned from
 `MusicFolders.selectedTrees`; typing never scans other folders,
 queries MediaStore, uses the network, or requests additional permissions.
@@ -384,9 +392,13 @@ adb -s 202512003630 install -r app/build/outputs/apk/debug/app-debug.apk
 21. Type on the Artists, Albums, Genres and nested song lists. Verify
     only the current page is filtered; all search results retain the
     regular 64dp borderless blue selector and trackpad navigation.
-22. Edit with Backspace, including an empty query. Press Back once to
-    dismiss search and restore the original list selection/scroll; a
-    second Back must navigate to the parent page.
+22. Enter a query with no matches on the main and nested pages.
+    Confirm the empty adapter leaves no selectable rows and shows
+    horizontally centered `No search results found` below the search bar,
+    without the blue selection gradient or a row divider. Backspace to
+    recover matches or clear the query; the message must disappear.
+    Press Back once to dismiss search and restore the original list
+    selection/scroll; a second Back must navigate to the parent page.
 23. Play a song from filtered results, press Back, and verify search
     results return intact. Ensure typing on Now Playing does not open
     the library search and the background player is unaffected.
