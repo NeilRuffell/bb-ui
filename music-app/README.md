@@ -24,6 +24,23 @@ Home screen, in order:
 
 **Settings** currently has exactly one action: **Add folders**.
 
+**Child-item counters:** The main menu and browsable category entries use
+two-line 55dp ListView rows, matching the BBOS6 Music example: a primary
+label and a smaller muted count underneath. All Songs displays the number
+of selected-folder audio tracks (e.g. `1 Song`, `2 Songs`); Artists, Albums
+and Genres display distinct category entries (`1 Item`, `2 Items`).
+Artist/album/genre groups display their direct number of songs when opened.
+Settings displays `1 Item` (Add folders); Playlists displays `0 Items`
+until the app supports playlists. Shuffle Songs is an action and has no
+child count.
+
+When the app opens, it loads counts from the user-selected folder trees
+only. With no folders selected the counters are zero **and no storage scan
+occurs**. While a scan runs, counters read `Scanning...`, and scan failures
+show `Unavailable` instead of a false zero. Adding a folder invalidates the
+previous snapshot and refreshes counts. Count updates rebind visible rows
+without adapter invalidation, preserving trackpad selection and scroll offset.
+
 ## Selected-folder-only device library
 
 **Privacy/access contract:** BB Music must **not scan any music outside the
@@ -107,7 +124,12 @@ adb -s 202512003630 install -r app/build/outputs/apk/debug/app-debug.apk
    and Back. The blue selection and status-bar boundaries should remain
    correct.
 7. Restart BB Music to confirm both folder grants persist.
-8. Selecting an individual track still reports playback not implemented.
+8. Confirm main-menu counters show the selected-folder track count, distinct
+   artists/albums/genres and their proper singular/plural labels. The artist,
+   album and genre group rows should display the number of child songs.
+9. Confirm counts finish updating without moving the selected trackpad row
+   or altering touch scroll position.
+10. Selecting an individual track still reports playback not implemented.
 
 For relevant logs:
 
