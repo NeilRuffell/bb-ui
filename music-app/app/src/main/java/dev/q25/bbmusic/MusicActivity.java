@@ -28,11 +28,9 @@ import android.widget.Toast;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -43,7 +41,7 @@ import java.util.Map;
  * without importing or depending on BB UI, Vector or SystemUI.
  *
  * Local music is read from Android MediaStore after the ordinary Android 13+
- * READ_MEDIA_AUDIO permission prompt. Symfonium is never required or started.
+ * SAF folder selection. Symfonium is never required or started.
  * The UI uses the same recycled ListView row on every browse page.
  */
 public final class MusicActivity extends Activity {
@@ -341,12 +339,12 @@ public final class MusicActivity extends Activity {
         } else if (row.kind == ROW_GROUP) {
             List<LocalMusicSource.Song> groupSongs = new ArrayList<>(row.songs);
             if (row.groupCategory == 2) {
-                // Android's TRACK column includes disc/track ordering.
+                // Tagged track numbers provide album ordering where available.
                 groupSongs.sort(Comparator.comparingInt(song -> song.trackNumber));
             }
             navigateTo(new Page(row.title, songRows(groupSongs)));
         } else if (row.kind == ROW_SONG) {
-            // MediaStore provided row.song.uri for our future native player.
+            // The selected document tree provided this URI for our native player.
             Log.i(TAG, "Local track selected, media id=" + row.song.id);
             Toast.makeText(this, "Playback is not implemented yet",
                     Toast.LENGTH_SHORT).show();
@@ -409,7 +407,7 @@ public final class MusicActivity extends Activity {
         if (MusicFolders.selectedTrees(this).isEmpty()) {
             pendingMenu = -1;
             ArrayList<MenuRow> message = new ArrayList<>();
-            message.add(MenuRow.message("No folders added. Use Settings > Add folders"));
+            message.add(MenuRow.message("No folders selected"));
             navigateTo(new Page(MENU[menuIndex], message));
             return;
         }
