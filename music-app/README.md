@@ -26,14 +26,14 @@ not navigate or shuffle because those actions are not yet designed.
 No custom scrolling behavior, other music menus, or transport controls
 are included.
 
-**System bars:** The app targets SDK 35, which enforces edge-to-edge windows
-on Android 15+. `MusicActivity` wraps the ListView in a clipped FrameLayout
-whose padding is set from `WindowInsets.Type.statusBars()`,
-`navigationBars()` and `displayCutout()` on API 35+. This keeps every menu
-row, focus highlight and its scroll viewport out of the persistent status-bar
-and navigation-bar regions. On Android 13–14 the framework's conventional
-non-edge-to-edge content placement remains in effect. No hardcoded Q25 bar
-height, fullscreen flag, or temporary edge-to-edge opt-out is used.
+**System bars:** BB Music targets SDK 35 and retains a persistent native
+status bar. The first custom `WindowInsets` listener/window-controller change
+was reported to crash on device. Until the exception is captured, it has been
+replaced with a simpler outer `FrameLayout.setFitsSystemWindows(true)` that
+reserves system-window insets for the inner ListView. No hardcoded status bar
+height or custom scrolling behavior is used. Confirm the result on Q25; if
+the app still crashes, collect the Android crash stack trace rather than
+guessing the exception.
 
 **Sources:** `SymfoniumSource.java` remains an optional source adapter. It
 uses public `MediaBrowser` and `MediaController` APIs and retains the
