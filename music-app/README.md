@@ -436,7 +436,12 @@ grant additional storage access and does not affect the Room catalog.
 The Now Playing screen is a standalone presentation port of BB UI master
 `TwoColumnPanel.java` and `UnifiedShadeHost.java`, preserving:
 
-- 40dp mode bar with Shuffle/Repeat, enabled state and selection styling.
+- 40dp mode bar with the Shuffle icon at left (replacing the "Media" label)
+  and Repeat at right. The Shuffle control uses original BBOS6 PNGs from
+  `assets/bbos6/icons/`: normal `488.png`, enabled `486.png`,
+  enabled-and-focused `487.png`, and unavailable `485.png`.
+  The icons are packaged as `bbos6_shuffle_*.png` drawables and indexed in
+  `assets/bbos6/icon-index.csv`; touch and trackpad controls are unchanged.
 - Full-height half-radial artwork/metadata background and 50/50 art/text split.
 - 30dp seek strip, shared dark gradient and 2dp/silver divider system,
   BBOS6 white played rail and glossy 56dp seek capsule.

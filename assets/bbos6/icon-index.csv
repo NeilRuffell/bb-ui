@@ -6,5 +6,9 @@ filename,name,keywords,android_resource
 348.png,Genres,music genres categories,bbos6_menu_genres
 350.png,All Songs,music songs tracks library,bbos6_menu_all_songs
 351.png,Albums,music albums collection,bbos6_menu_albums
+485.png,Shuffle Unavailable,music now playing shuffle disabled unavailable,bbos6_shuffle_unavailable
+486.png,Shuffle Enabled,music now playing shuffle enabled on,bbos6_shuffle_enabled
+487.png,Shuffle Enabled 1,music now playing shuffle enabled focused selected variant,bbos6_shuffle_enabled_focused
+488.png,Shuffle Normal,music now playing shuffle normal off,bbos6_shuffle_normal
 543.png,Missing Album Art,music album missing artwork placeholder,bbos6_album_no_art
 3412.png,Options,blackberry options settings wrench preferences,bbos6_menu_settings
