@@ -2,42 +2,27 @@ package dev.q25.bb7pulldown;
 
 import dev.q25.trackpad.theme.BB7Theme;
 
-import android.animation.Animator;
-import android.animation.AnimatorListenerAdapter;
-import android.animation.ValueAnimator;
 import android.content.Context;
 import android.graphics.Color;
-import android.graphics.Rect;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.LayerDrawable;
 import android.graphics.drawable.Drawable;
 import android.view.Gravity;
 import android.widget.TextView;
 import android.view.View;
-import android.view.MotionEvent;
 import android.view.KeyEvent;
-import android.view.animation.DecelerateInterpolator;
-import java.util.function.IntConsumer;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 
 /**
- * One system-owned overlay window, one date header and two retained content
- * pages. Page switches change visibility, never WindowManager ownership or
- * the root's translation/entrance animation.
+ * One SystemUI-owned shade host with two retained pages and optional media
+ * header. The BB-button popup lives in its own transient window.
  */
 final class UnifiedShadeHost extends FrameLayout {
     static final int NOTIFICATIONS = ShadeStatusNavigation.NOTIFICATIONS;
     static final int QUICK_SETTINGS = ShadeStatusNavigation.QUICK_SETTINGS;
 
-    private final ShadeDateHeader dateHeader;
-    private final View headerPlaceholder;
-    private final boolean externalHeader;
-    private final java.util.function.Consumer<Boolean> onExternalHeaderVisibility;
     private final FrameLayout contentViewport;
-    private ValueAnimator contentReveal;
-    private boolean selectorRevealPrepared;
-    private boolean selectorHandoffActive;
     private final LinearLayout mediaModeHeader;
     private final TextView mediaShuffle;
     private final TextView mediaRepeat;
@@ -47,83 +32,22 @@ final class UnifiedShadeHost extends FrameLayout {
     private final BB6NativeQsPanel connections;
     private final ShadeUiController navigation;
     private final Runnable closeShade;
-    private final IntConsumer onHeaderPageSelected;
-    private float headerTouchDownY;
-    private float headerTouchDownX;
-    private boolean headerTouchMoved;
-    private boolean headerSwipeClosed;
-
     UnifiedShadeHost(Context context, TwoColumnPanel notifications,
             BB6NativeQsPanel connections, ShadeUiController navigation,
-            int initialPage, Runnable closeShade, IntConsumer onHeaderPageSelected,
-            ShadeDateHeader existingSelectorHeader,
-            java.util.function.Consumer<Boolean> onExternalHeaderVisibility) {
+            int initialPage, Runnable closeShade) {
         super(context);
         this.notifications = notifications;
         this.connections = connections;
         this.navigation = navigation;
         this.closeShade = closeShade;
-        this.onHeaderPageSelected = onHeaderPageSelected;
-        this.externalHeader = existingSelectorHeader != null;
-        // Enter already selected this exact visible header. The constructor
-        // must NOT clear its highlight while building the shade's content.
-        selectorHandoffActive = externalHeader;
-        this.onExternalHeaderVisibility = onExternalHeaderVisibility;
 
         LinearLayout layout = new LinearLayout(context);
         layout.setOrientation(LinearLayout.VERTICAL);
         addView(layout, new FrameLayout.LayoutParams(
                 LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
 
-        // The compact selector keeps the ORIGINAL header in its ORIGINAL
-        // WindowManager window throughout the expanded shade lifetime.
-        // The full shade reserves matching geometry rather than reparenting,
-        // removing, recreating or redrawing that visible view.
-        dateHeader = existingSelectorHeader != null
-                ? existingSelectorHeader : new ShadeDateHeader(context);
-        headerPlaceholder = externalHeader ? new View(context) : null;
-        // Normal gesture-open shade owns its own header touch routing. The
-        // already-mounted selector retains its existing touch handler.
-        if (!externalHeader) dateHeader.setOnTouchListener((view, event) -> {
-            switch (event.getActionMasked()) {
-                case MotionEvent.ACTION_DOWN:
-                    headerTouchDownY = event.getRawY();
-                    headerTouchDownX = event.getRawX();
-                    headerSwipeClosed = false;
-                    headerTouchMoved = false;
-                    return true;
-                case MotionEvent.ACTION_MOVE:
-                    if (Math.abs(event.getRawY() - headerTouchDownY) >= dp(12)
-                            || Math.abs(event.getRawX() - headerTouchDownX) >= dp(12)) {
-                        headerTouchMoved = true;
-                    }
-                    if (!headerSwipeClosed
-                            && headerTouchDownY - event.getRawY() >= dp(65)) {
-                        headerSwipeClosed = true;
-                        closeShade.run();
-                    }
-                    return true;
-                case MotionEvent.ACTION_UP:
-                    if (!headerSwipeClosed && !headerTouchMoved) {
-                        int zone = ShadeHeaderSegmentPolicy.zoneAt(event.getX(), view.getWidth());
-                        if (zone != ShadeStatusNavigation.NONE) onHeaderPageSelected.accept(zone);
-                    }
-                    headerSwipeClosed = false;
-                    headerTouchMoved = false;
-                    return true;
-                case MotionEvent.ACTION_CANCEL:
-                    headerSwipeClosed = false;
-                    headerTouchMoved = false;
-                    return true;
-                default:
-                    return true;
-            }
-        });
-        layout.addView(externalHeader ? headerPlaceholder : dateHeader,
-                ShadeDateHeader.layoutParams(context));
-
-        // BBOS6 media header replaces the taller date bar only while expanded.
-        // This host owns both headers; no stock SystemUI view is modified.
+        // No full-width navigation bar or selector placeholder.
+        // The notification/QS content begins below the native status bar.
         mediaModeHeader = new LinearLayout(context);
         mediaModeHeader.setOrientation(LinearLayout.HORIZONTAL);
         mediaModeHeader.setGravity(Gravity.CENTER_VERTICAL);
@@ -167,8 +91,7 @@ final class UnifiedShadeHost extends FrameLayout {
         mediaModeHeader.addView(mediaRepeat, new LinearLayout.LayoutParams(
                 LayoutParams.WRAP_CONTENT, dp(28)));
 
-        // Only the content viewport moves/reveals on selector confirmation.
-        // The header sits above it as an unaffected sibling.
+        // Both pages remain mounted while the BB popup is transient.
         contentViewport = new FrameLayout(context);
         contentViewport.setClipChildren(true);
         contentViewport.setClipToPadding(true);
@@ -189,72 +112,6 @@ final class UnifiedShadeHost extends FrameLayout {
         setPage(initialPage);
     }
 
-    /**
-     * Selection from the compact header uses the same header instance.
-     * Reveal just the area below it, leaving its position fixed throughout.
-     * Ordinary status-bar touch swipes continue using the native window slide.
-     */
-    void beginSelectorHandoff(int selectedPage) {
-        selectorHandoffActive = true;
-        dateHeader.setFocusedZone(selectedPage);
-        updateHeaderVisibility();
-    }
-
-    void completeSelectorHandoff() {
-        selectorHandoffActive = false;
-        dateHeader.setFocusedZone(navigation.focusedZone());
-        updateHeaderVisibility();
-    }
-
-    void prepareSelectorReveal() {
-        selectorRevealPrepared = true;
-        contentViewport.setClipBounds(new Rect(0, 0, 0, 0));
-        contentViewport.setImportantForAccessibility(
-                View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
-    }
-
-    void animateSelectorReveal(Runnable completed) {
-        if (!selectorRevealPrepared) {
-            completed.run();
-            return;
-        }
-        contentViewport.post(() -> {
-            if (!selectorRevealPrepared || !isAttachedToWindow()) return;
-            int width = contentViewport.getWidth();
-            int height = contentViewport.getHeight();
-            if (width <= 0 || height <= 0) {
-                finishSelectorReveal();
-                completed.run();
-                return;
-            }
-            ValueAnimator animation = ValueAnimator.ofInt(0, height);
-            contentReveal = animation;
-            animation.setDuration(220);
-            animation.setInterpolator(new DecelerateInterpolator(1.4f));
-            animation.addUpdateListener(frame -> contentViewport.setClipBounds(
-                    new Rect(0, 0, width, (Integer) frame.getAnimatedValue())));
-            animation.addListener(new AnimatorListenerAdapter() {
-                @Override public void onAnimationEnd(Animator finished) {
-                    if (contentReveal != finished) return;
-                    finishSelectorReveal();
-                    completed.run();
-                }
-            });
-            animation.start();
-        });
-    }
-
-    void finishSelectorReveal() {
-        selectorRevealPrepared = false;
-        ValueAnimator animation = contentReveal;
-        contentReveal = null;
-        if (animation != null) animation.cancel();
-        contentViewport.setClipBounds(null);
-        contentViewport.setImportantForAccessibility(
-                View.IMPORTANT_FOR_ACCESSIBILITY_AUTO);
-        updateHeaderVisibility();
-    }
-
     void setPage(int next) {
         if (next != NOTIFICATIONS && next != QUICK_SETTINGS) {
             throw new IllegalArgumentException("Unknown shade page");
@@ -263,13 +120,7 @@ final class UnifiedShadeHost extends FrameLayout {
         notifications.setVisibility(next == NOTIFICATIONS ? View.VISIBLE : View.GONE);
         connections.setVisibility(next == QUICK_SETTINGS ? View.VISIBLE : View.GONE);
         connections.setActive(next == QUICK_SETTINGS);
-        updateHeaderVisibility();
-        updateHeaderFocus(navigation.focusedZone());
-    }
-
-    void updateHeaderFocus(int zone) {
-        if (!selectorHandoffActive) dateHeader.setFocusedZone(zone);
-        updateHeaderVisibility();
+        updateMediaHeaderVisibility();
     }
 
     private static TextView modeButton(Context context) {
@@ -307,7 +158,7 @@ final class UnifiedShadeHost extends FrameLayout {
                     entry.repeatMode != MediaModePolicy.REPEAT_NONE,
                     modeSelected && selectedMode == MediaModePolicy.REPEAT);
         }
-        updateHeaderVisibility();
+        updateMediaHeaderVisibility();
     }
 
     private void styleMode(TextView view, boolean enabled, boolean selected) {
@@ -328,27 +179,10 @@ final class UnifiedShadeHost extends FrameLayout {
         view.setAlpha(enabled || selected ? 1f : 0.78f);
     }
 
-    private void updateHeaderVisibility() {
-        // Show navigation segments when selected even if the compact media
-        // header normally replaces them. Restore it on focus return.
-        boolean showMedia = mediaExpanded && displayedPage == NOTIFICATIONS
-                && !navigation.isStatusBarFocused()
-                && !selectorRevealPrepared && !selectorHandoffActive;
-        if (externalHeader) {
-            headerPlaceholder.setVisibility(showMedia ? View.GONE : View.VISIBLE);
-            dateHeader.setVisibility(showMedia ? View.GONE : View.VISIBLE);
-            if (onExternalHeaderVisibility != null) {
-                onExternalHeaderVisibility.accept(!showMedia);
-            }
-        } else {
-            dateHeader.setVisibility(showMedia ? View.GONE : View.VISIBLE);
-        }
+    private void updateMediaHeaderVisibility() {
+        // An independent popup never changes the media panel's geometry.
+        boolean showMedia = mediaExpanded && displayedPage == NOTIFICATIONS;
         mediaModeHeader.setVisibility(showMedia ? View.VISIBLE : View.GONE);
-    }
-
-    int externalHeaderHeight() {
-        return externalHeader
-                ? ShadeDateHeader.layoutParams(getContext()).height : 0;
     }
 
     int page() {

@@ -7,20 +7,16 @@ import static org.junit.Assert.assertTrue;
 import android.view.KeyEvent;
 import org.junit.Test;
 
-/** Tests the reusable session owner with no SystemUI, WindowManager, or Xposed. */
+/** Reusable session state tests, independent of SystemUI or WindowManager. */
 public final class ShadeUiControllerTest {
     private static final class FakeHost implements ShadeUiController.Listener {
-        ShadeUiController navigation = new ShadeUiController(this);
-        int exits;
-        int recents;
-        int contentFocus;
+        final ShadeUiController navigation = new ShadeUiController(this);
+        int popupDismissals;
         int opened;
         int switched;
         int focusZone = ShadeStatusNavigation.NONE;
 
-        @Override public void onStatusFocusChanged(int zone) {
-            focusZone = zone;
-        }
+        @Override public void onStatusFocusChanged(int zone) { focusZone = zone; }
 
         @Override public void onShowPage(int page) {
             if (navigation.activePage() == ShadeStatusNavigation.NONE) {
@@ -33,152 +29,91 @@ public final class ShadeUiControllerTest {
             navigation.focusContent();
         }
 
-        @Override public void onFocusShadeContent() {
-            contentFocus++;
-            navigation.focusContent();
-        }
-
         @Override public void onExit() {
-            exits++;
-            // The real adapter animates before tearing down the shade.
-            navigation.onShadeClosed();
-        }
-
-        @Override public void onNativeRecents() {
-            recents++;
-            navigation.leaveStandaloneStatusBar();
+            popupDismissals++;
+            if (navigation.activePage() == ShadeStatusNavigation.NONE) {
+                navigation.leaveStandaloneStatusBar();
+            } else {
+                navigation.focusContent();
+            }
         }
     }
 
-    private static void key(FakeHost fake, int code) {
-        assertTrue(fake.navigation.handleKey(code, KeyEvent.ACTION_DOWN));
-        assertTrue(fake.navigation.handleKey(code, KeyEvent.ACTION_UP));
+    private static void key(FakeHost f, int code) {
+        assertTrue(f.navigation.handleKey(code, KeyEvent.ACTION_DOWN));
+        assertTrue(f.navigation.handleKey(code, KeyEvent.ACTION_UP));
     }
 
-    @Test public void bbButtonShowsHeaderBeforeAnyShadeOpens() {
-        FakeHost host = new FakeHost();
-        host.navigation.enterStandaloneStatusBar();
-        assertEquals(0, host.opened);
-        assertEquals(ShadeStatusNavigation.NONE, host.navigation.activePage());
-        assertEquals(ShadeStatusNavigation.NOTIFICATIONS, host.focusZone);
-        key(host, KeyEvent.KEYCODE_DPAD_RIGHT);
-        assertEquals(ShadeStatusNavigation.QUICK_SETTINGS, host.focusZone);
-        assertEquals(0, host.opened);
-        key(host, KeyEvent.KEYCODE_DPAD_CENTER);
-        assertEquals(1, host.opened);
-        assertEquals(ShadeStatusNavigation.QUICK_SETTINGS, host.navigation.activePage());
-        assertEquals(ShadeStatusNavigation.NONE, host.navigation.focusedZone());
+    @Test public void bbDisplaysPopupButDoesNotOpenShade() {
+        FakeHost f = new FakeHost();
+        f.navigation.enterStandaloneStatusBar();
+        assertEquals(ShadeStatusNavigation.NOTIFICATIONS, f.focusZone);
+        assertEquals(0, f.opened);
+        key(f, KeyEvent.KEYCODE_DPAD_DOWN);
+        assertEquals(ShadeStatusNavigation.QUICK_SETTINGS, f.focusZone);
+        key(f, KeyEvent.KEYCODE_ENTER);
+        assertEquals(1, f.opened);
+        assertEquals(ShadeStatusNavigation.QUICK_SETTINGS, f.navigation.activePage());
+        assertFalse(f.navigation.isStatusBarFocused());
     }
 
-    @Test public void touchSelectionReusesHeaderFocusAndActivation() {
-        FakeHost host = new FakeHost();
-        host.navigation.enterStandaloneStatusBar();
-        host.navigation.selectStandaloneHeaderZone(ShadeStatusNavigation.QUICK_SETTINGS);
-        assertEquals(ShadeStatusNavigation.QUICK_SETTINGS, host.focusZone);
-        assertEquals(0, host.opened);
-        key(host, KeyEvent.KEYCODE_ENTER);
-        assertEquals(1, host.opened);
-        assertEquals(ShadeStatusNavigation.QUICK_SETTINGS, host.navigation.activePage());
+    @Test public void touchSelectsRowWithoutImmediateActivation() {
+        FakeHost f = new FakeHost();
+        f.navigation.enterStandaloneStatusBar();
+        f.navigation.selectPopupZone(ShadeStatusNavigation.QUICK_SETTINGS);
+        assertEquals(0, f.opened);
+        key(f, KeyEvent.KEYCODE_ENTER);
+        assertEquals(ShadeStatusNavigation.QUICK_SETTINGS, f.navigation.activePage());
     }
 
-    @Test public void standaloneTouchCannotStealFocusFromOpenShadeOrIdle() {
-        FakeHost host = new FakeHost();
-        host.navigation.selectStandaloneHeaderZone(ShadeStatusNavigation.QUICK_SETTINGS);
-        assertFalse(host.navigation.isStatusBarFocused());
-        host.navigation.onShadeOpened(ShadeStatusNavigation.NOTIFICATIONS);
-        host.navigation.selectStandaloneHeaderZone(ShadeStatusNavigation.QUICK_SETTINGS);
-        assertFalse(host.navigation.isStatusBarFocused());
-        assertEquals(ShadeStatusNavigation.NOTIFICATIONS, host.navigation.activePage());
+    @Test public void popupCannotBeSelectedUnlessFocused() {
+        FakeHost f = new FakeHost();
+        f.navigation.selectPopupZone(ShadeStatusNavigation.QUICK_SETTINGS);
+        assertFalse(f.navigation.isStatusBarFocused());
+        f.navigation.onShadeOpened(ShadeStatusNavigation.NOTIFICATIONS);
+        f.navigation.selectPopupZone(ShadeStatusNavigation.QUICK_SETTINGS);
+        assertFalse(f.navigation.isStatusBarFocused());
     }
 
-    @Test public void backFromStandaloneStatusBarExitsWithoutOpeningShade() {
-        FakeHost host = new FakeHost();
-        host.navigation.enterStandaloneStatusBar();
-        assertEquals(ShadeStatusNavigation.NOTIFICATIONS, host.focusZone);
-        key(host, KeyEvent.KEYCODE_BACK);
-        assertEquals(1, host.exits);
-        assertEquals(0, host.contentFocus);
-        assertEquals(0, host.opened);
-        assertEquals(ShadeStatusNavigation.NONE, host.navigation.focusedZone());
+    @Test public void backDismissesStandalonePopupWithoutOpeningShade() {
+        FakeHost f = new FakeHost();
+        f.navigation.enterStandaloneStatusBar();
+        key(f, KeyEvent.KEYCODE_BACK);
+        assertEquals(1, f.popupDismissals);
+        assertEquals(0, f.opened);
+        assertEquals(ShadeStatusNavigation.NONE, f.navigation.activePage());
     }
 
-    @Test public void statusBarThenShadeThenUpThenBackClosesEntireShade() {
-        FakeHost host = new FakeHost();
-        host.navigation.enterStandaloneStatusBar();
-        key(host, KeyEvent.KEYCODE_ENTER);
-        assertEquals(1, host.opened);
-        assertEquals(ShadeStatusNavigation.NOTIFICATIONS, host.navigation.activePage());
-        host.navigation.focusStatusBarFromPage(ShadeStatusNavigation.NOTIFICATIONS);
-        assertEquals(ShadeStatusNavigation.NOTIFICATIONS, host.focusZone);
-        key(host, KeyEvent.KEYCODE_BACK);
-        assertEquals(1, host.exits);
-        assertEquals(0, host.contentFocus);
-        assertEquals(ShadeStatusNavigation.NONE, host.navigation.activePage());
-        assertEquals(ShadeStatusNavigation.NONE, host.navigation.focusedZone());
+    @Test public void reopenedPopupBackPreservesExpandedShade() {
+        FakeHost f = new FakeHost();
+        f.navigation.onShadeOpened(ShadeStatusNavigation.NOTIFICATIONS);
+        f.navigation.focusStatusBarFromPage(ShadeStatusNavigation.NOTIFICATIONS);
+        key(f, KeyEvent.KEYCODE_BACK);
+        assertEquals(1, f.popupDismissals);
+        assertEquals(ShadeStatusNavigation.NOTIFICATIONS, f.navigation.activePage());
+        assertFalse(f.navigation.isStatusBarFocused());
     }
 
-    @Test public void quickSettingsBackFromStatusBarExitsNotFirstRadioRow() {
-        FakeHost host = new FakeHost();
-        host.navigation.onShadeOpened(ShadeStatusNavigation.QUICK_SETTINGS);
-        host.navigation.focusStatusBarFromPage(ShadeStatusNavigation.QUICK_SETTINGS);
-        assertEquals(ShadeStatusNavigation.QUICK_SETTINGS, host.focusZone);
-        key(host, KeyEvent.KEYCODE_BACK);
-        assertEquals(1, host.exits);
-        assertEquals(0, host.contentFocus);
-        assertEquals(ShadeStatusNavigation.NONE, host.navigation.focusedZone());
+    @Test public void popupSwitchesRetainedShadePage() {
+        FakeHost f = new FakeHost();
+        f.navigation.onShadeOpened(ShadeStatusNavigation.NOTIFICATIONS);
+        f.navigation.focusStatusBarFromPage(ShadeStatusNavigation.NOTIFICATIONS);
+        key(f, KeyEvent.KEYCODE_DPAD_DOWN);
+        key(f, KeyEvent.KEYCODE_ENTER);
+        assertEquals(1, f.switched);
+        assertEquals(0, f.popupDismissals);
+        assertEquals(ShadeStatusNavigation.QUICK_SETTINGS, f.navigation.activePage());
+        f.navigation.focusStatusBarFromPage(ShadeStatusNavigation.QUICK_SETTINGS);
+        key(f, KeyEvent.KEYCODE_DPAD_UP);
+        key(f, KeyEvent.KEYCODE_ENTER);
+        assertEquals(2, f.switched);
+        assertEquals(ShadeStatusNavigation.NOTIFICATIONS, f.navigation.activePage());
     }
 
-    @Test public void downFromShadeStatusBarReturnsToPageContent() {
-        FakeHost host = new FakeHost();
-        host.navigation.onShadeOpened(ShadeStatusNavigation.QUICK_SETTINGS);
-        host.navigation.focusStatusBarFromPage(ShadeStatusNavigation.QUICK_SETTINGS);
-        key(host, KeyEvent.KEYCODE_DPAD_DOWN);
-        assertEquals(1, host.contentFocus);
-        assertEquals(0, host.exits);
-        assertEquals(0, host.recents);
-        assertEquals(ShadeStatusNavigation.QUICK_SETTINGS, host.navigation.activePage());
-    }
-
-    @Test public void downFromStandaloneStatusBarStillOpensNativeRecents() {
-        FakeHost host = new FakeHost();
-        host.navigation.enterStandaloneStatusBar();
-        key(host, KeyEvent.KEYCODE_DPAD_DOWN);
-        assertEquals(1, host.recents);
-        assertEquals(0, host.contentFocus);
-        assertEquals(0, host.exits);
-    }
-
-    @Test public void switchingPagesDoesNotExitShadeAndFocusStartsInContent() {
-        FakeHost host = new FakeHost();
-        host.navigation.onShadeOpened(ShadeStatusNavigation.NOTIFICATIONS);
-        host.navigation.focusStatusBarFromPage(ShadeStatusNavigation.NOTIFICATIONS);
-        key(host, KeyEvent.KEYCODE_DPAD_RIGHT);
-        assertEquals(ShadeStatusNavigation.QUICK_SETTINGS, host.focusZone);
-        key(host, KeyEvent.KEYCODE_ENTER);
-        assertEquals(1, host.switched);
-        assertEquals(0, host.exits);
-        assertEquals(ShadeStatusNavigation.QUICK_SETTINGS, host.navigation.activePage());
-        assertFalse(host.navigation.isStatusBarFocused());
-        host.navigation.focusStatusBarFromPage(ShadeStatusNavigation.QUICK_SETTINGS);
-        key(host, KeyEvent.KEYCODE_DPAD_LEFT);
-        key(host, KeyEvent.KEYCODE_ENTER);
-        assertEquals(2, host.switched);
-        assertEquals(ShadeStatusNavigation.NOTIFICATIONS, host.navigation.activePage());
-    }
-
-    @Test public void inactivePageCannotCaptureStatusBarFocus() {
-        FakeHost host = new FakeHost();
-        host.navigation.onShadeOpened(ShadeStatusNavigation.QUICK_SETTINGS);
-        host.navigation.focusStatusBarFromPage(ShadeStatusNavigation.NOTIFICATIONS);
-        assertFalse(host.navigation.isStatusBarFocused());
-        host.navigation.focusStatusBarFromPage(ShadeStatusNavigation.QUICK_SETTINGS);
-        assertTrue(host.navigation.isStatusBarFocused());
-    }
-
-    @Test public void contentNavigationKeysAreNotConsumedByController() {
-        FakeHost host = new FakeHost();
-        host.navigation.onShadeOpened(ShadeStatusNavigation.NOTIFICATIONS);
-        assertFalse(host.navigation.handleKey(KeyEvent.KEYCODE_BACK, KeyEvent.ACTION_UP));
-        assertFalse(host.navigation.handleKey(KeyEvent.KEYCODE_DEL, KeyEvent.ACTION_UP));
+    @Test public void shadeContentsKeepTheirOwnKeyHandlers() {
+        FakeHost f = new FakeHost();
+        f.navigation.onShadeOpened(ShadeStatusNavigation.QUICK_SETTINGS);
+        assertFalse(f.navigation.handleKey(KeyEvent.KEYCODE_BACK, KeyEvent.ACTION_UP));
+        assertFalse(f.navigation.handleKey(KeyEvent.KEYCODE_DEL, KeyEvent.ACTION_UP));
     }
 }
