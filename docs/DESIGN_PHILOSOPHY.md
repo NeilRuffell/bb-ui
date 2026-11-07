@@ -134,11 +134,13 @@ delivery method, not the final ROM architecture.
 The previous `NativeRecentsGridHook` portrait task-card adapter was deleted in
 `feat/bbos6-recents-replacement`. Quickstep's native `RecentsView` remains
 the **only** Recents renderer. A separate opt-in
-`QuickstepIconGridHook` now adapts the **existing** native TaskViews to show
-native application icons and labels, arranged as a pageable grid. It adds no
-second Overview window or task-view collection. Native thumbnail subviews
-remain measured but are not painted in this icon-only mode; these must be
-replaced outright when the renderer is ported into the ROM. With the
+`QuickstepIconGridHook` now adapts the **existing** native TaskViews to paint **only** native
+application icons, arranged in a 4x4 pageable grid. The TaskView native
+paint pass is intercepted; no thumbnail, card, app-chip pill, or title is
+painted and no second Overview window or task-view collection exists.
+Native thumbnail subviews still belong to Quickstep's bound task lifecycle,
+but they do not render; the eventual ROM port should remove those views
+from the icon-only presentation outright. With the
 experimental flag disabled, only stock Quickstep operates. The menu continues
 to forward Switch Application to the same native Recents command. Q25
 verification is pending. Vector handles the temporary integration; a future
