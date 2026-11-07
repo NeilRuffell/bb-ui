@@ -178,6 +178,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
             return;
         }
         installRecentsInterception(lp.classLoader);
+        installNativeRecentsDiagnostics(lp.classLoader);
         installNativeShadeState(lp.classLoader);
         SystemUiNotificationObserver.install(lp.classLoader);
         NativeQuickSettingsTiles.install(lp.classLoader);
@@ -266,6 +267,47 @@ public final class PullDownHook implements IXposedHookLoadPackage {
         }
     }
 
+    /**
+     * Read-only tracing of the native CommandQueue -> Recents -> Quickstep
+     * route. Queue invocation is asynchronous; a successful call to
+     * toggleRecentApps does not prove a callback or connected launcher.
+     */
+    private static void installNativeRecentsDiagnostics(ClassLoader loader) {
+        traceNativeRecentsCallback(loader, "com.android.systemui.recents.Recents");
+        traceNativeRecentsCallback(loader,
+                "com.android.systemui.recents.OverviewProxyRecentsImpl");
+    }
+
+    private static void traceNativeRecentsCallback(ClassLoader loader, String className) {
+        Class<?> cls = XposedHelpers.findClassIfExists(className, loader);
+        if (cls == null) {
+            Log.i(TAG, "Native Recents callback class unavailable: " + className);
+            return;
+        }
+        try {
+            int count = XposedBridge.hookAllMethods(cls, "toggleRecentApps",
+                    new XC_MethodHook() {
+                @Override protected void beforeHookedMethod(MethodHookParam param) {
+                    Log.i(TAG, "Native Recents callback reached: " + className);
+                    if (!className.endsWith("OverviewProxyRecentsImpl")) return;
+                    try {
+                        Object service = XposedHelpers.getObjectField(
+                                param.thisObject, "mOverviewProxyService");
+                        Object proxy = service == null ? null
+                                : XposedHelpers.callMethod(service, "getProxy");
+                        Log.i(TAG, "Native Quickstep proxy connected=" + (proxy != null));
+                    } catch (Throwable error) {
+                        Log.w(TAG, "Unable to inspect native Quickstep proxy", error);
+                    }
+                }
+            }).size();
+            Log.i(TAG, "Native Recents trace attached: " + className
+                    + " methods=" + count);
+        } catch (Throwable error) {
+            Log.w(TAG, "Native Recents tracing unavailable: " + className, error);
+        }
+    }
+
     /** Close only the exact foreground application task captured at popup open. */
     private static void closeForegroundApplication() {
         ForegroundTaskActions.Target target = popupTaskTarget;
@@ -294,22 +336,26 @@ public final class PullDownHook implements IXposedHookLoadPackage {
             }
             return;
         }
-        forwardingNativeRecents.set(Boolean.TRUE);
-        try {
-            // The native toggle is the actual command intercepted for the BB
-            // key. The old showRecentApps(false) call could return normally
-            // even when Quickstep did not enter Overview; do not use it.
-            XposedHelpers.callMethod(queue, "toggleRecentApps");
-            Log.i(TAG, "Switch Application forwarded to native Quickstep toggle");
-        } catch (Throwable error) {
-            Log.e(TAG, "Native Quickstep toggle failed", error);
-            if (context != null) {
-                Toast.makeText(context, "Unable to open applications",
-                        Toast.LENGTH_SHORT).show();
+        // Complete the popup's current Enter/trackpad input dispatch before
+        // Quickstep transitions. This posts to the main looper, never a timer.
+        new Handler(Looper.getMainLooper()).post(() -> {
+            forwardingNativeRecents.set(Boolean.TRUE);
+            try {
+                // Forward the same native command Android uses for Recents.
+                // Log callback and Quickstep connection separately; this
+                // method only schedules CommandQueue's asynchronous message.
+                XposedHelpers.callMethod(queue, "toggleRecentApps");
+                Log.i(TAG, "Switch Application native toggle queued");
+            } catch (Throwable error) {
+                Log.e(TAG, "Native Quickstep toggle failed", error);
+                if (context != null) {
+                    Toast.makeText(context, "Unable to open applications",
+                            Toast.LENGTH_SHORT).show();
+                }
+            } finally {
+                forwardingNativeRecents.remove();
             }
-        } finally {
-            forwardingNativeRecents.remove();
-        }
+        });
     }
 
     private static void dismissStatusFocus() {
