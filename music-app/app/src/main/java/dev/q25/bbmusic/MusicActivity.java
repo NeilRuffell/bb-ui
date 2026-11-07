@@ -5,16 +5,21 @@ import android.content.res.Configuration;
 import android.graphics.Color;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.GradientDrawable;
+import android.os.Build;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
+import android.view.WindowInsets;
+import android.view.WindowInsetsController;
+import android.graphics.Insets;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.AbsListView;
 import android.widget.AdapterView;
 import android.widget.BaseAdapter;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.TextView;
@@ -139,7 +144,36 @@ public final class MusicActivity extends Activity {
             }
         });
 
-        setContentView(list);
+        // SDK 35+ enforces edge-to-edge on Android 15+. Keep the entire
+        // ListView (including focus gradients and scrolling viewport) inside
+        // a system-bar-safe FrameLayout. The system status bar remains visible.
+        FrameLayout safeViewport = new FrameLayout(this);
+        safeViewport.setBackgroundColor(canvasColor);
+        safeViewport.setClipChildren(true);
+        safeViewport.setClipToPadding(true);
+        safeViewport.addView(list, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT));
+
+        if (Build.VERSION.SDK_INT >= 35) {
+            safeViewport.setOnApplyWindowInsetsListener((view, insets) -> {
+                Insets safe = insets.getInsets(WindowInsets.Type.statusBars()
+                        | WindowInsets.Type.navigationBars()
+                        | WindowInsets.Type.displayCutout());
+                // Insets are supplied in pixels by Android; never assume a
+                // particular Q25 status-bar height or hardcode a margin.
+                view.setPadding(safe.left, safe.top, safe.right, safe.bottom);
+                return insets;
+            });
+        }
+        WindowInsetsController barsController = getWindow().getInsetsController();
+        if (barsController != null) {
+            barsController.setSystemBarsAppearance(
+                    dark ? 0 : WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS,
+                    WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS);
+        }
+        setContentView(safeViewport);
+        if (Build.VERSION.SDK_INT >= 35) safeViewport.requestApplyInsets();
 
         // Keep native list navigation in charge: no custom scroll amounts.
         list.post(() -> {
