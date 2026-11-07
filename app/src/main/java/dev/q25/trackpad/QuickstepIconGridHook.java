@@ -69,6 +69,8 @@ public final class QuickstepIconGridHook implements IXposedHookLoadPackage {
         boolean swiping;
         boolean hadDown;
         boolean logged;
+        int lastDrawableCount = -1;
+        int diagnosticCount;
     }
 
     @Override public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lp) {
@@ -287,6 +289,8 @@ public final class QuickstepIconGridHook implements IXposedHookLoadPackage {
                     + " tasks, 4x4 icon slots, native cards NOT painted");
         }
 
+        int drawn = 0;
+        int bound = 0;
         int pageOffset = state.page * grid.pageWidth;
         int first = state.page * RecentsIconGridLayout.PAGE_SIZE;
         int end = Math.min(all.size(), first + RecentsIconGridLayout.PAGE_SIZE);
@@ -295,6 +299,7 @@ public final class QuickstepIconGridHook implements IXposedHookLoadPackage {
         for (int index = first; index < end; index++) {
             View task = all.get(index);
             int number = Math.min(4, iconCount(task));
+            if (number > 0) bound++;
             if (number == 0) continue;
             int columns = number == 1 ? 1 : 2;
             int rows = (number + columns - 1) / columns;
@@ -333,10 +338,90 @@ public final class QuickstepIconGridHook implements IXposedHookLoadPackage {
                 try {
                     icon.setBounds(left, top, left + iconSize, top + iconSize);
                     icon.draw(canvas);
+                    drawn++;
                 } finally {
                     icon.setBounds(restore);
                 }
             }
+        }
+        // Bounded diagnostics identify the real failing lookup path. They do
+        // not modify the native task data or replace the presentation again.
+        if (state.diagnosticCount < 4
+                && (state.diagnosticCount == 0
+                || drawn != state.lastDrawableCount)) {
+            state.diagnosticCount++;
+            state.lastDrawableCount = drawn;
+            Log.i(TAG, "GRID-DIAG root=" + root.getWidth() + "x"
+                    + root.getHeight() + " density="
+                    + root.getResources().getDisplayMetrics().density
+                    + " cell=" + grid.cellWidth + "x" + grid.cellHeight
+                    + " tasks=" + all.size() + " page=" + state.page
+                    + " boundTasksOnPage=" + bound + " iconsPainted=" + drawn);
+            for (int i = first; i < Math.min(end, first + 8); i++) {
+                Log.i(TAG, "ICON-DIAG " + i + " " + diagnoseIcon(all.get(i)));
+            }
+        }
+    }
+
+    private static String diagnoseIcon(View task) {
+        StringBuilder detail = new StringBuilder("class=")
+                .append(task.getClass().getSimpleName());
+        try {
+            Object value = XposedHelpers.callMethod(task, "getTaskContainers");
+            if (!(value instanceof List)) return detail + " containersType="
+                    + (value == null ? "null" : value.getClass().getName());
+            List<?> containers = (List<?>) value;
+            detail.append(" containers=").append(containers.size());
+            if (containers.isEmpty()) return detail.toString();
+            Object nativeContainer = containers.get(0);
+            detail.append(" nativeContainer=")
+                    .append(nativeContainer.getClass().getSimpleName());
+            Object chip = XposedHelpers.callMethod(nativeContainer, "getIconView");
+            detail.append(" chip=").append(chip == null ? "null"
+                    : chip.getClass().getSimpleName());
+            if (chip != null) {
+                Object icon = XposedHelpers.callMethod(chip, "getDrawable");
+                detail.append(" nativeDrawable=")
+                        .append(icon == null ? "null"
+                                : icon.getClass().getSimpleName());
+            }
+            Object nativeTask = XposedHelpers.callMethod(nativeContainer, "getTask");
+            detail.append(" nativeTask=")
+                    .append(nativeTask == null ? "null"
+                            : nativeTask.getClass().getSimpleName());
+            if (nativeTask == null) return detail.toString();
+            Object key = XposedHelpers.getObjectField(nativeTask, "key");
+            detail.append(" key=").append(key == null ? "null"
+                    : key.getClass().getSimpleName());
+            if (key != null) {
+                Object intent = XposedHelpers.getObjectField(key, "baseIntent");
+                detail.append(" baseIntent=")
+                        .append(intent == null ? "null"
+                                : intent.getClass().getSimpleName());
+                if (intent instanceof Intent) {
+                    Intent base = (Intent) intent;
+                    String pkg = base.getComponent() == null
+                            ? base.getPackage() : base.getComponent().getPackageName();
+                    detail.append(" package=").append(pkg);
+                    if (pkg != null) {
+                        try {
+                            Drawable fallback = task.getContext().getPackageManager()
+                                    .getApplicationIcon(pkg);
+                            detail.append(" packageIcon=")
+                                    .append(fallback == null ? "null"
+                                            : fallback.getClass().getSimpleName());
+                        } catch (Throwable error) {
+                            detail.append(" packageIconError=")
+                                    .append(error.getClass().getSimpleName())
+                                    .append(":").append(error.getMessage());
+                        }
+                    }
+                }
+            }
+            return detail.toString();
+        } catch (Throwable error) {
+            return detail + " FAIL=" + error.getClass().getName()
+                    + ":" + error.getMessage();
         }
     }
 
