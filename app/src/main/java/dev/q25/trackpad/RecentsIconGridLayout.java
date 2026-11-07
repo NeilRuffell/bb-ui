@@ -4,12 +4,12 @@ package dev.q25.trackpad;
  * Layout policy for the single native Quickstep RecentsView. No Android,
  * Xposed or task-service dependency; suitable for a direct ROM port.
  *
- * The pager uses native horizontal page offsets, with six icon TaskViews
+ * The pager uses native horizontal page offsets, with sixteen icon TaskViews
  * on each page. No overlay, secondary view tree or duplicate task model.
  */
 final class RecentsIconGridLayout {
-    static final int COLUMNS = 3;
-    static final int ROWS = 2;
+    static final int COLUMNS = 4;
+    static final int ROWS = 4;
     static final int PAGE_SIZE = COLUMNS * ROWS;
 
     final int pageWidth;
@@ -34,13 +34,16 @@ final class RecentsIconGridLayout {
     static RecentsIconGridLayout calculate(int width, int height,
             float density, int statusBarOverlap, int taskCount) {
         if (width <= 0 || height <= 0 || density <= 0 || taskCount < 0) return null;
-        int spacing = Math.max(2, Math.round(10 * density));
-        int topPadding = Math.max(0, statusBarOverlap) + Math.round(16 * density);
+        // Square-ish icon hit targets rather than full-screen thumbnail cards.
+        // The native task is still one cell, retaining its original task ID
+        // and click action. Extra tasks continue on the native pager.
+        int spacing = Math.max(2, Math.round(8 * density));
+        int topPadding = Math.max(0, statusBarOverlap) + Math.round(18 * density);
         int tileWidth = (width - spacing * (COLUMNS + 1)) / COLUMNS;
-        int tileHeight = Math.min(Math.round(116 * density),
+        int tileHeight = Math.min(tileWidth,
                 (height - topPadding - spacing * (ROWS + 1)) / ROWS);
-        if (tileWidth < Math.round(56 * density)
-                || tileHeight < Math.round(72 * density)) return null;
+        if (tileWidth < Math.round(40 * density)
+                || tileHeight < Math.round(40 * density)) return null;
         return new RecentsIconGridLayout(width, tileWidth, tileHeight,
                 spacing, topPadding, taskCount);
     }
@@ -87,7 +90,7 @@ final class RecentsIconGridLayout {
             default: return current;
         }
         if (candidate < 0 || candidate >= tasks) return current;
-        // Directional navigation respects three columns, including page edges.
+        // Directional navigation respects four columns, including page edges.
         if (direction == 2 && current % COLUMNS == 0) return current;
         if (direction == 3 && current % COLUMNS == COLUMNS - 1) return current;
         return candidate;
