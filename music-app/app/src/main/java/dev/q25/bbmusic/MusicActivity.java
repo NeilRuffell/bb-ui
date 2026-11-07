@@ -294,9 +294,27 @@ public final class MusicActivity extends Activity {
                 ? null : albumArtworkSources.get(albumKey);
         return new MusicListView.RowData(
                 row.title, childCountLabel(row), row.kind != ROW_MESSAGE,
-                hasArtwork, trackNumber,
+                hasArtwork, menuIconForRow(row), trackNumber,
                 albumKey == null ? null : "album:" + albumKey,
                 candidates);
+    }
+
+    /**
+     * Exact 64px BBOS6 menu icon bitmaps identified from supplied screenshots.
+     * The source PNGs remain in /assets/bbos6/icons/ and are reused as-is.
+     * No icon is assigned to Settings without a verified BBOS6 reference.
+     */
+    private static int menuIconForRow(MenuRow row) {
+        if (row.kind != ROW_MENU) return 0;
+        switch (row.menuIndex) {
+            case 0: return R.drawable.bbos6_menu_all_songs;      // 350.png
+            case 1: return R.drawable.bbos6_menu_artists;        // 345.png
+            case 2: return R.drawable.bbos6_menu_albums;         // 351.png
+            case 3: return R.drawable.bbos6_menu_genres;         // 348.png
+            case 4: return R.drawable.bbos6_menu_playlists;      // 337.png
+            case 5: return R.drawable.bbos6_menu_shuffle_songs; // 339.png
+            default: return 0; // Settings was not in the BBOS6 reference.
+        }
     }
 
     private String albumKeyForRow(MenuRow row) {
