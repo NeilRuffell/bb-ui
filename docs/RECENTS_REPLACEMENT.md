@@ -65,6 +65,46 @@ adb -s 202512003630 logcat -d -s 'BB7-PullDown:V' 'OverviewProxyRecentsImpl:V' '
 
 The presentation model and keyboard/trackpad policy should not import Xposed types. Use a minimal Q25-specific Vector bridge for class/lifecycle adaptation.
 
+## Native icon-grid prototype (0.9.99)
+
+Implemented on `feat/bbos6-recents-replacement`:
+
+- `QuickstepIconGridHook` is registered for the **existing Launcher3 process** through Vector. It modifies the existing native Quickstep `RecentsView` and its own `TaskView` children. There is no duplicate Overview window, activity, secondary task list or screenshot-based icon renderer.
+- Every icon and application name comes from the native `TaskContainer` / `IconAppChipView`. Quickstep retains task bindings, click-to-open and system task lifecycle.
+- Native TaskViews are arranged as a three-column by two-row icon grid, with further icon pages using the existing horizontal pager. Physical arrows target the same native TaskViews; Enter uses their native click action.
+- The existing native thumbnail **subview** inside each TaskView remains measured for Quickstep internals but is visually suppressed. It is *not* a separate Recents renderer or an underlying stock Overview screen. Future ROM work should replace that thumbnail subcomponent outright rather than suppress it.
+- `RecentsIconGridLayout` is framework-independent and has unit tests.
+- Because native Quickstep UI details are ROM-specific, activation is **opt-in** with `debug.bbui.recents.icons=true`, default false. Only one presentation is active at any time: native stock Quickstep when disabled, or the adapted native TaskViews when enabled. No new view host is mounted behind it.
+- This is an **untested prototype** and must not be treated as a verified on-device icon grid until Q25 visual and interaction checks pass.
+
+### Device test (single consolidated check)
+
+```sh
+cd ~/Projects/bb-ui
+git fetch origin
+git switch feat/bbos6-recents-replacement
+git pull --ff-only
+gradle :app:assembleDebug :app:testDebugUnitTest && \
+adb -s 202512003630 install -r app/build/outputs/apk/debug/app-debug.apk && \
+adb -s 202512003630 reboot
+```
+
+After Android has rebooted and Launcher3/Vector is loaded:
+
+```sh
+adb -s 202512003630 shell setprop debug.bbui.recents.icons true
+```
+
+BlackBerry button → Switch Application should use the **same** native Quickstep Overview, now presented as an icon grid. Check multiple tasks, arrows/trackpad, Enter, Back, touch launch, Home, and reopen. The first result can indicate that Q25 Quickstep layout or icons differ from the upstream source; do not merge without validation.
+
+If stock Recents appears instead of icons or layout is abnormal, gather *only*:
+
+```sh
+adb -s 202512003630 logcat -d -s 'BBUI-RecentsIcons:V' '*:S' | tail -80
+```
+
+Rollback: `adb -s 202512003630 reboot` resets the temporary property, returning to stock Quickstep. This reboot also reconstructs any styled native TaskViews; setting the property false without a restart is not a complete view-teardown mechanism.
+
 ## Next implementation checkpoint
 
 1. Inspect the actual installed Q25 Quickstep layout and task APIs. Determine where native Recents renders cards, handles focus and opens/dismisses tasks. Confirm whether a true single-renderer replacement is possible from Vector.
