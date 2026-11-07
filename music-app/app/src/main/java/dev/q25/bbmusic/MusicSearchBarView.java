@@ -2,10 +2,11 @@ package dev.q25.bbmusic;
 
 import android.content.Context;
 import android.graphics.Color;
+import android.graphics.drawable.ColorDrawable;
+import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.LayerDrawable;
 import android.view.Gravity;
-import android.view.View;
 import android.widget.EditText;
 import android.widget.FrameLayout;
 
@@ -34,7 +35,14 @@ final class MusicSearchBarView extends FrameLayout {
                 GradientDrawable.Orientation.TOP_BOTTOM,
                 new int[] {TOP_GRADIENT, BOTTOM_GRADIENT});
         panel.setDither(true);
-        setBackground(panel);
+        LayerDrawable chrome = new LayerDrawable(new Drawable[] {
+                panel, new ColorDrawable(TOP_BORDER)
+        });
+        chrome.setLayerHeight(1, dp(1));
+        chrome.setLayerGravity(1, Gravity.TOP | Gravity.FILL_HORIZONTAL);
+        // Drawing the rule in the background, rather than as a child,
+        // guarantees it is at the true top edge outside the content inset.
+        setBackground(chrome);
         setPadding(dp(6), dp(6), dp(6), dp(5));
 
         // Screenshot: an approximately 31dp-tall, near-white field with
@@ -70,12 +78,7 @@ final class MusicSearchBarView extends FrameLayout {
                 LayoutParams.MATCH_PARENT,
                 Gravity.CENTER));
 
-        View topRule = new View(context);
-        topRule.setBackgroundColor(TOP_BORDER);
-        FrameLayout.LayoutParams ruleLayout = new FrameLayout.LayoutParams(
-                LayoutParams.MATCH_PARENT, dp(1), Gravity.TOP);
-        // The inset field and its text are unaffected by the overlay rule.
-        addView(topRule, ruleLayout);
+
     }
 
     static int heightDp() {
