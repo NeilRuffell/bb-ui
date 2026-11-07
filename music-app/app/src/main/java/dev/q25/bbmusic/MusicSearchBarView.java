@@ -51,17 +51,21 @@ final class MusicSearchBarView extends FrameLayout {
         GradientDrawable rim = new GradientDrawable(
                 GradientDrawable.Orientation.TOP_BOTTOM,
                 new int[] {0xff4e555b, 0xff6b7074});
-        rim.setCornerRadius(dp(5));
+        rim.setCornerRadius(dp(4));
 
         GradientDrawable inset = new GradientDrawable(
                 GradientDrawable.Orientation.TOP_BOTTOM,
                 new int[] {
-                        0xffd4d5d6, 0xffe7e7e7, 0xfff7f7f7, Color.WHITE
+                        0xffd6d7d6, 0xffe7e7e7, 0xffefefef,
+                        0xfff7f7f7, Color.WHITE, Color.WHITE
                 });
+        // The reference's inset highlight reaches white within the
+        // first ~5dp of the field, rather than fading over its full height.
         inset.setColors(new int[] {
-                0xffd4d5d6, 0xffe7e7e7, 0xfff7f7f7, Color.WHITE
-        }, new float[] {0f, 0.10f, 0.22f, 1f});
-        inset.setCornerRadius(dp(4));
+                0xffd6d7d6, 0xffe7e7e7, 0xffefefef,
+                0xfff7f7f7, Color.WHITE, Color.WHITE
+        }, new float[] {0f, 0.04f, 0.08f, 0.12f, 0.18f, 1f});
+        inset.setCornerRadius(dp(3));
 
         LayerDrawable field = new LayerDrawable(
                 new android.graphics.drawable.Drawable[] {rim, inset});
