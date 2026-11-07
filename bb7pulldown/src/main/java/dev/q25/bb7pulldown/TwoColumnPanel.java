@@ -697,8 +697,11 @@ final class TwoColumnPanel extends FrameLayout {
         updateCollapsedMediaStatuses(currentMediaSession());
         mediaIndex.setVisibility(open ? View.GONE
                 : mediaSessions.size() > 1 ? View.VISIBLE : View.GONE);
-        mediaRow.setPadding(dp(open ? 10 : 9), dp(3),
-                dp(open ? 10 : 9), dp(3));
+        // Expanded playback buttons must touch both screen edges and the
+        // full toolbar height. Padding belongs inside each icon view only.
+        // Preserve the original outer inset on the collapsed media strip.
+        mediaRow.setPadding(open ? 0 : dp(9), open ? 0 : dp(3),
+                open ? 0 : dp(9), open ? 0 : dp(3));
         // Foreground lines overlay the shared gradient and focused button,
         // without consuming layout width or affecting click/trackpad routing.
         mediaRow.setForeground(open ? expandedMediaTransportSeparators : null);
