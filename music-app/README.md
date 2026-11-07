@@ -24,6 +24,44 @@ Home screen, in order:
 
 **Settings** currently has exactly one action: **Add folders**.
 
+### Artwork in music browse lists
+
+Songs, Artists, Albums and Genres now display 44dp album-cover thumbnails
+beside the existing title/count pair in the same 55dp `ListView` rows.
+Home-menu entries and Settings are left unchanged.
+
+The cover-selection rules are **BB Music project rules**, not a verified
+claim about the proprietary BlackBerry OS 6 selection algorithm:
+
+- **Songs:** Artwork for that song's album.
+- **Artists:** Artwork of the artist's first album sorted alphabetically
+  by album title (case-insensitive, deterministic ties).
+- **Albums:** Artwork for the displayed album itself.
+- **Genres:** Artwork of the first album sorted alphabetically within
+  the genre (same deterministic tie-breaks).
+
+All tracks in an album share the same cached cover. For an album, tracks are
+checked in track-number/title order until an embedded cover is found;
+if none has embedded art, the row shows a small music-note placeholder.
+For Artists and Genres, **do not substitute another album** if the first
+alphabetical album has no embedded artwork.
+
+`MusicListArtworkLoader` reads embedded artwork using
+`MediaMetadataRetriever`, accepts only `content://` song URIs returned
+from the **user-selected SAF folder trees**, and does not query MediaStore,
+scan unselected folders, access the network, or use Symfonium. Thumbnails
+are decoded off the UI thread with two workers, bounded to approximately
+160px per side, memory cached at 12 MiB and deduplicated by album.
+When a row is recycled, its artwork binding key prevents earlier
+asynchronous results from being displayed on the wrong entry.
+
+**Current limitation:** External artwork files such as `folder.jpg` or
+`cover.png` are not searched; the feature reads **embedded audio artwork**
+only. The source repo and historical BlackBerry 6 documentation available
+during implementation do not establish a verifiable proprietary selection
+algorithm for artist/genre representative artwork.
+
+
 **Child-item counters:** The main menu and browsable category entries use
 two-line 55dp ListView rows, matching the BBOS6 Music example: a primary
 label and a smaller muted count underneath. All Songs displays the number
@@ -167,6 +205,13 @@ adb -s 202512003630 install -r app/build/outputs/apk/debug/app-debug.apk
 14. Background the app and use system notification/headset media controls.
 15. Start Shuffle Songs from the home menu, and verify the shuffled queue.
 16. Confirm tracks from unselected folders do not appear or enter a queue.
+17. Verify song and album rows display their own album cover; artist and
+    genre rows select the first album in alphabetical album-title order.
+18. Scroll quickly with touch, then select rows using the Q25 trackpad:
+    artwork must not be cross-assigned by recycled ListView rows.
+19. Confirm coverless albums show a placeholder and that folder selection,
+    existing counts, previous navigation, status bar and Now Playing
+    remain functional.
 
 For relevant logs:
 
