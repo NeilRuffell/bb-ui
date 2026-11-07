@@ -51,12 +51,15 @@ Vector/LSPosed, a custom ROM, or another music app.
 
 ### Album detail header (BBOS6 Music)
 
-Opening an entry on the **Albums** page displays a 72dp-tall black
+Opening an entry on the **Albums** page displays an 88dp-tall black
 album header above its song list, based on the supplied BBOS6 screenshot.
 
-- Album artwork occupies a 72dp square, aligned exactly to the left and
+- Album artwork occupies an 88dp square, aligned exactly to the left and
   top of the content area; there is no extra padding against the Android
   status-bar inset or the left screen edge.
+- A full-width **1dp separator in `#515251`** sits immediately below the
+  88dp header content. The header's total height, including this separator,
+  is 89dp. The separator is not an inset and does not overlap the artwork.
 - To its right are the album title, artist, a genre line in parentheses
   (or `(Unknown)` if no genre tag was found), and the album's singular or
   plural song count.
@@ -319,7 +322,7 @@ adb -s 202512003630 install -r app/build/outputs/apk/debug/app-debug.apk
 23. Play a song from filtered results, press Back, and verify search
     results return intact. Ensure typing on Now Playing does not open
     the library search and the background player is unaffected.
-24. Open Albums and select an album. Check the 72dp artwork touches the
+24. Open Albums and select an album. Check the 88dp artwork touches the
     left screen edge and begins immediately beneath the status bar,
     without white space. Its title, artist, genre and song count should
     appear alongside the cover.
