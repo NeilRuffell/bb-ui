@@ -570,6 +570,8 @@ public final class MusicActivity extends Activity {
             // Drop in-flight scans and cached song/artwork data from the old
             // allowlist before scanning the remaining authorized trees.
             localSource.invalidate();
+            localSource.forgetRemovedTree(tree,
+                    MusicFolders.selectedTrees(this).isEmpty());
             loading = false;
             pendingMenu = -1;
             pendingShuffleStart = false;
