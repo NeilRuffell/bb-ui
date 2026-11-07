@@ -2,6 +2,7 @@ package dev.q25.bbmusic;
 
 import android.content.Context;
 import android.graphics.Color;
+import android.graphics.drawable.Drawable;
 import android.net.Uri;
 import android.text.TextUtils;
 import android.view.Gravity;
@@ -29,13 +30,13 @@ final class MusicAlbumHeaderView extends LinearLayout {
     private final TextView artist;
     private final TextView genre;
     private final TextView count;
-    private final MusicCoverPlaceholderDrawable noCover =
-            new MusicCoverPlaceholderDrawable();
+    private final Drawable noCover;
     private int bindingGeneration;
 
     MusicAlbumHeaderView(Context context, MusicListView list) {
         super(context);
         this.list = list;
+        noCover = context.getDrawable(R.drawable.bbos6_album_no_art);
         setOrientation(VERTICAL);
         setPadding(0, 0, 0, 0);
         setBackgroundColor(Color.BLACK);
