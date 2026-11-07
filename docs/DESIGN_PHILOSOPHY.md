@@ -131,21 +131,24 @@ delivery method, not the final ROM architecture.
 
 ## Recents migration boundary
 
-The previous `NativeRecentsGridHook` portrait task-card adapter was deleted in
-`feat/bbos6-recents-replacement`. Quickstep's native `RecentsView` remains
-the **only** Recents renderer. A separate opt-in
-`QuickstepIconGridHook` now adapts the **existing** native TaskViews to paint **only** native
-application icons, arranged in a 4x4 pageable grid. The TaskView native
-paint pass is intercepted; no thumbnail, card, app-chip pill, or title is
-painted and no second Overview window or task-view collection exists.
-Native thumbnail subviews still belong to Quickstep's bound task lifecycle,
-but they do not render; the eventual ROM port should remove those views
-from the icon-only presentation outright. With the
-experimental flag disabled, only stock Quickstep operates. The menu continues
-to forward Switch Application to the same native Recents command. Q25
-verification is pending. Vector handles the temporary integration; a future
-ROM port moves that bridge into native Launcher3/Quickstep source. See
-[the Recents plan](RECENTS_REPLACEMENT.md).
+The previous `NativeRecentsGridHook` portrait task-card adapter was deleted
+in `feat/bbos6-recents-replacement`. Quickstep's native `RecentsView`
+remains the **only** Overview host and Quickstep remains the system task owner.
+`QuickstepIconGridHook` intercepts **RecentsView's top-level draw(Canvas)**
+and supplies BBUI's own presentation. It does not call native draw or
+dispatchDraw: **no Quickstep tile, thumbnail, header, chip, label, card or
+stock focus visual is rendered**. The native TaskView objects survive
+only as headless Quickstep task-data and launch-action handles; they are not
+another presenter. No second Activity, overlay, parallel task list or
+alternative Overview window is constructed.
+
+All touch hit-testing, swipe paging, keyboard selection and focus highlighting
+come from the BBUI 4x4 icon grid, not the native carousel. The eventual
+LineageOS source integration can remove the now-unnecessary native task
+child-view inflation and bind directly to the same Quickstep task model.
+Until that ROM integration, the Vector hook is opt-in and Q25 validation
+is pending. The BB key continues to route Switch Application through the
+native SystemUI Recents command. See [Recents plan](RECENTS_REPLACEMENT.md).
 
 ## Development status and next steps
 
