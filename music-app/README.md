@@ -26,8 +26,10 @@ Home screen, in order:
 
 ### Artwork in music browse lists
 
-Songs, Artists, Albums and Genres now display 44dp album-cover thumbnails
-beside the existing title/count pair in the same 55dp `ListView` rows.
+Songs, Artists, Albums and Genres now display 55dp square album covers
+flush with the left, top and bottom edges of the 55dp `ListView` selection
+bounds, with zero artwork or row padding. Text labels keep their own internal
+inset. The existing selected-row gradient stays full-width.
 Home-menu entries and Settings are left unchanged.
 
 The cover-selection rules are **BB Music project rules**, not a verified
