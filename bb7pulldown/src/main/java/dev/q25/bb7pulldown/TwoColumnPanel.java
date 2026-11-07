@@ -85,6 +85,9 @@ final class TwoColumnPanel extends FrameLayout {
     // of Android UI_MODE_NIGHT. The collapsed strip retains the global theme.
     private static final BB7Theme.Palette EXPANDED_MEDIA_PALETTE = BB7Theme.Palette.DARK;
     private final BB7Theme.Palette palette;
+    // One retained drawable spans the entire expanded playback-controls row.
+    // The individual buttons only overlay their focused selection state.
+    private final GradientDrawable expandedMediaTransportBackground = new GradientDrawable();
     private final CloseListener onClose;
     private final ShadeUiController navigation;
     private final OpenNotificationListener onOpenNotification;
@@ -173,6 +176,20 @@ final class TwoColumnPanel extends FrameLayout {
             ShadeUiController navigation, MediaControlListener mediaControl) {
         super(context);
         palette = BB7Theme.palette(context);
+        // Reconstructed from the supplied BBOS6 Music screenshot (toolbar
+        // approximately y=300..359): the upper half darkens much faster.
+        // Explicit offsets preserve that shape at any Android screen density.
+        expandedMediaTransportBackground.setOrientation(
+                GradientDrawable.Orientation.TOP_BOTTOM);
+        expandedMediaTransportBackground.setColors(
+                new int[] {
+                        0xff6b7173, // 0%: bright charcoal at top
+                        0xff5a5d63, // 17%
+                        0xff42454a, // 34%
+                        0xff313839, // 51%
+                        0xff212021  // 100%: near-black lower edge
+                },
+                new float[] {0f, 0.17f, 0.34f, 0.51f, 1f});
         Log.i(TAG, "BB7 shade palette: " + (palette == BB7Theme.Palette.DARK ? "dark" : "light"));
         onClose = close;
         onOpenNotification = openNotification;
@@ -980,10 +997,12 @@ final class TwoColumnPanel extends FrameLayout {
         boolean focused = mediaRow.isFocused();
         mediaRow.setBackground(focused && !mediaControlsOpen
                 ? BB7Theme.selected(getContext(), dp(2), dp(1))
-                : new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
-                        mediaControlsOpen || palette == BB7Theme.Palette.DARK
-                                ? new int[] {0xff2f4053, 0xff1e2c3b}
-                                : new int[] {0xffecf1f7, 0xffd8e2ec}));
+                : mediaControlsOpen
+                        ? expandedMediaTransportBackground
+                        : new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+                                palette == BB7Theme.Palette.DARK
+                                        ? new int[] {0xff2f4053, 0xff1e2c3b}
+                                        : new int[] {0xffecf1f7, 0xffd8e2ec}));
         mediaNowPlaying.setTextColor(focused && !mediaControlsOpen
                 ? Color.WHITE : palette.title);
         mediaIndex.setTextColor(focused && !mediaControlsOpen
