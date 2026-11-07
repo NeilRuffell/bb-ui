@@ -89,9 +89,26 @@ genre; the proprietary BBOS6 screenshot does not establish what its
 
 While a music list or main menu is visible, **simply type** on the Q25's
 physical keyboard. No search button, menu command or trackpad click is needed.
-The first printable character reveals a compact, black 44dp search field
-above the same existing `MusicListView`. Further typing filters results
-immediately. Shift and ALT characters work through Android key mapping.
+The first printable character reveals a **54dp BBOS6 search bar** above
+the same existing `MusicListView`. Further typing filters results immediately.
+Shift and ALT characters work through Android key mapping.
+
+`MusicSearchBarView.java` provides screenshot-matched search chrome while
+reusing the existing native `EditText` and input handler:
+
+- **1dp top separator:** `#5A5D63` at the outer top edge.
+- **Panel gradient:** vertical, `#4B4E53` (top) to `#292C31` (bottom).
+- **Input field:** inset approximately 6dp horizontally and 6dp above,
+  white with a 5dp rounded dark outer rim and a gray-to-white inset
+  highlight/shadow that reaches pure white within the first ~5dp.
+  Approximately 43dp tall.
+- **Typed text:** dark charcoal inside the white field, approximately
+  12dp internal horizontal inset.
+- No hint or `Search` description appears; the Q25 physical keyboard
+  makes search discoverable without prompting. No on-screen keyboard opens.
+
+This is purely visual: search matching, Back, trackpad focus, row
+dimensions, album artwork and selected-folder restrictions do not change.
 
 - **Music home:** Search the previously indexed **selected-folder songs**
   across song title, artist, album and genre. The results are playable songs;
@@ -328,6 +345,10 @@ adb -s 202512003630 install -r app/build/outputs/apk/debug/app-debug.apk
 23. Play a song from filtered results, press Back, and verify search
     results return intact. Ensure typing on Now Playing does not open
     the library search and the background player is unaffected.
+    Compare the search field against the BBOS6 reference: full-width top
+    `#5A5D63` rule, dark gray vertical panel gradient and rounded white
+    inset. Verify the field begins empty (no placeholder) and typed
+    characters remain readable on white.
 24. Open Albums and select an album. Check the 88dp artwork touches the
     left screen edge and begins immediately beneath the status bar,
     without white space. Its title, artist, genre and song count should

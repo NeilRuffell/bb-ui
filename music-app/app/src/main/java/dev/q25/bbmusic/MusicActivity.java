@@ -67,6 +67,7 @@ public final class MusicActivity extends Activity {
     private LinearLayout libraryShell;
     private MusicAlbumHeaderView albumHeader;
     private EditText searchInput;
+    private MusicSearchBarView searchBar;
     private Page rootPage;
     private List<MenuRow> visibleRows;
     private boolean searchOpen;
@@ -228,15 +229,10 @@ public final class MusicActivity extends Activity {
         searchInput = new EditText(this);
         searchInput.setSingleLine(true);
         searchInput.setTextSize(16);
-        searchInput.setTextColor(Color.WHITE);
-        searchInput.setHintTextColor(0xff929292);
         searchInput.setInputType(InputType.TYPE_CLASS_TEXT
                 | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
         searchInput.setImeOptions(EditorInfo.IME_ACTION_DONE);
         searchInput.setShowSoftInputOnFocus(false);
-        searchInput.setPadding(dp(16), 0, dp(16), 0);
-        searchInput.setBackgroundColor(Color.BLACK);
-        searchInput.setVisibility(View.GONE);
         searchInput.addTextChangedListener(new TextWatcher() {
             @Override public void beforeTextChanged(CharSequence value,
                     int start, int count, int after) { }
@@ -248,8 +244,13 @@ public final class MusicActivity extends Activity {
                 if (searchOpen) updateSearchResults();
             }
         });
-        libraryShell.addView(searchInput, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(44)));
+        // BBOS6 visual chrome around the same native search input. The
+        // EditText, its TextWatcher and all keyboard logic remain intact.
+        searchBar = new MusicSearchBarView(this, searchInput);
+        searchBar.setVisibility(View.GONE);
+        libraryShell.addView(searchBar, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                dp(MusicSearchBarView.heightDp())));
         libraryShell.addView(list, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
         safeViewport.addView(libraryShell, new FrameLayout.LayoutParams(
@@ -745,7 +746,7 @@ public final class MusicActivity extends Activity {
         searchOpen = true;
         // A new text search supersedes an unfinished menu navigation.
         pendingMenu = -1;
-        searchInput.setVisibility(View.VISIBLE);
+        searchBar.setVisibility(View.VISIBLE);
         ensureBackCallback();
         // Leave focus on the native ListView: blue selection, hardware
         // arrows, and Enter continue to work on search results.
@@ -754,7 +755,7 @@ public final class MusicActivity extends Activity {
     private void closeSearch(boolean restorePosition) {
         if (!searchOpen) return;
         searchOpen = false;
-        searchInput.setVisibility(View.GONE);
+        searchBar.setVisibility(View.GONE);
         searchInput.setText("");
         visibleRows = currentPage.rows;
         list.notifyRowsChanged();
