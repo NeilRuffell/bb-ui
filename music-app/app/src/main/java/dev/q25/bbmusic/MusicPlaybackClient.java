@@ -7,6 +7,7 @@ import android.util.Log;
 import androidx.media3.common.MediaItem;
 import androidx.media3.common.MediaMetadata;
 import androidx.media3.common.Player;
+import androidx.media3.common.PlaybackException;
 import androidx.media3.session.MediaController;
 import androidx.media3.session.SessionToken;
 
@@ -41,6 +42,11 @@ final class MusicPlaybackClient {
     private final Player.Listener playerListener = new Player.Listener() {
         @Override public void onEvents(Player player, Player.Events events) {
             if (connected) listener.onPlaybackChanged();
+        }
+
+        @Override public void onPlayerError(PlaybackException error) {
+            Log.e(TAG, "Selected-folder audio playback failed", error);
+            if (connected) listener.onPlaybackError("Cannot play this audio file");
         }
     };
 
