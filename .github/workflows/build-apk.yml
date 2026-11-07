@@ -9,6 +9,11 @@ on:
 permissions:
   contents: read
 
+# Only the latest push on each branch needs a full Android build.
+concurrency:
+  group: build-apk-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
