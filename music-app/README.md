@@ -49,6 +49,38 @@ lifecycle and releases it when the Activity is destroyed.
 The current standalone implementation still does not depend on BB UI,
 Vector/LSPosed, a custom ROM, or another music app.
 
+### Physical keyboard instant search
+
+While a music list or main menu is visible, **simply type** on the Q25's
+physical keyboard. No search button, menu command or trackpad click is needed.
+The first printable character reveals a compact, black 44dp search field
+above the same existing `MusicListView`. Further typing filters results
+immediately. Shift and ALT characters work through Android key mapping.
+
+- **Music home:** Search the previously indexed **selected-folder songs**
+  across song title, artist, album and genre. The results are playable songs;
+  the original seven-entry home menu is unchanged when search is dismissed.
+- **All Songs / nested song lists:** Filter that list's songs by song title,
+  artist, album or genre.
+- **Artists / Albums / Genres:** Filter only the currently displayed
+  artist/album/genre entries by their visible name.
+- **Settings:** Filter the existing Settings entries by label.
+
+**Back** closes the active search first and restores the previous unfiltered
+selection and scroll position; a second Back performs normal page navigation.
+Back from Now Playing returns to the filtered search results if playback
+was started during a search. Backspace edits the query; an empty query
+shows the original page entries again. Trackpad Up/Down still moves one
+list row; Enter opens the highlighted result. Standard Android Ctrl/Meta
+keyboard shortcuts are not intercepted.
+
+The search operates solely on the in-memory catalog returned from
+`MusicFolders.selectedTrees`; typing never scans other folders,
+queries MediaStore, uses the network, or requests additional permissions.
+If a selected-folder scan is underway when search starts, the view
+displays a scan-in-progress message and refreshes when it finishes.
+The search field does not automatically invoke a touch keyboard.
+
 ### Artwork in music browse lists
 
 The shared row height is **64dp**, increased from 55dp to better match the
@@ -248,6 +280,18 @@ adb -s 202512003630 install -r app/build/outputs/apk/debug/app-debug.apk
 19. Confirm coverless albums show a placeholder and that folder selection,
     existing counts, previous navigation, status bar and Now Playing
     remain functional.
+20. On the home menu type a song title, artist, album or genre directly
+    using the Q25 keyboard: a search field must appear and show matching
+    selected-folder songs with the correct artwork.
+21. Type on the Artists, Albums, Genres and nested song lists. Verify
+    only the current page is filtered; all search results retain the
+    regular 64dp borderless blue selector and trackpad navigation.
+22. Edit with Backspace, including an empty query. Press Back once to
+    dismiss search and restore the original list selection/scroll; a
+    second Back must navigate to the parent page.
+23. Play a song from filtered results, press Back, and verify search
+    results return intact. Ensure typing on Now Playing does not open
+    the library search and the background player is unaffected.
 
 For relevant logs:
 
