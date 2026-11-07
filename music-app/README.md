@@ -85,19 +85,49 @@ folders before a removal UI exists, Android Settings > Apps > BB Music >
 Storage > Clear storage will reset the app's preferences (and other app
 data). Do not imply deleting an audio folder itself.
 
-## Native playback and cloud sources (future phases)
+## Native playback and the BB UI Now Playing port
 
-The local catalog currently indexes audio files, not their playback.
-A self-contained player will use AndroidX Media3 ExoPlayer inside a
-`MediaSessionService` to play the stored document URIs, support background
-playback, transport commands, and the BBOS6 Now Playing screen. This does
-not require any third-party music application.
+BB Music now includes its own `MusicPlaybackService` with AndroidX
+Media3 1.11.1 ExoPlayer and a MediaSessionService. The independent
+`MusicPlaybackClient` controls it from the Activity. Neither Symfonium
+nor the BB UI Vector module is needed for local playback.
 
-`SymfoniumSource.java` provides an optional Android
-`MediaBrowser`/`MediaController` adapter. A prior Q25 diagnostic
-connected to Symfonium 15.1.0 and browsed its catalog. Optional direct
-OneDrive access would require Microsoft Graph authentication, indexing,
-caching and download support; none is implemented here.
+Selecting a local track creates a queue from its current song list and
+opens Now Playing. The queue's source URIs are the `content://` documents
+obtained from **only the selected SAF folder trees**. Back returns to the
+previous library page without stopping playback. The root **Shuffle Songs**
+action starts a shuffled queue of selected-folder music.
+
+The Now Playing screen is a standalone presentation port of BB UI master
+`TwoColumnPanel.java` and `UnifiedShadeHost.java`, preserving:
+
+- 40dp mode bar with Shuffle/Repeat, enabled state and selection styling.
+- Full-height half-radial artwork/metadata background and 50/50 art/text split.
+- 30dp seek strip, shared dark gradient and 2dp/silver divider system,
+  BBOS6 white played rail and glossy 56dp seek capsule.
+- 62dp edge-to-edge three-button Previous / Play-Pause / Next toolbar;
+  charcoal gradient, exact button symbols, double gradient separators
+  and fixed dark-blue selected-button gradient.
+- Trackpad navigation: toolbar Up -> seek -> Shuffle/Repeat; Down returns.
+  Seek only changes with Left/Right **after** pressing Enter/trackpad to
+  enter seek-edit mode; another press exits. Touch-dragging works directly.
+- An independent `MusicArtworkLoader` reads embedded album artwork only
+  from the selected track's existing document URI on a background thread.
+
+Media3 owns audio focus, noisy-headset handling and the media-session
+notification, including background playback. The Activity disconnects its
+controller on Stop, but does not stop the service. Standard Android media
+buttons and system controls can operate the MediaSession.
+
+**Status:** The implementation is committed but not yet compiled or run on
+the Q25. The device build will download the new Media3 dependencies.
+The shade's original code is unchanged; this is a copied presentation,
+not a runtime dependency. There is no automatic music-service resumption
+after reboot yet, and no separate playback mini-bar in the library.
+
+`SymfoniumSource.java` remains an unused, optional adapter. Direct OneDrive
+Microsoft Graph authentication, cloud indexing and downloads are future
+features and are not required for local playback.
 
 ## Build and test on Q25
 
@@ -125,11 +155,18 @@ adb -s 202512003630 install -r app/build/outputs/apk/debug/app-debug.apk
    correct.
 7. Restart BB Music to confirm both folder grants persist.
 8. Confirm main-menu counters show the selected-folder track count, distinct
-   artists/albums/genres and their proper singular/plural labels. The artist,
-   album and genre group rows should display the number of child songs.
-9. Confirm counts finish updating without moving the selected trackpad row
-   or altering touch scroll position.
-10. Selecting an individual track still reports playback not implemented.
+   artists/albums/genres and their singular/plural labels. Group rows show
+   their direct number of child songs.
+9. Confirm counts finish updating without resetting trackpad selection or
+   changing touch scroll position.
+10. Select a track: Now Playing opens and first-party audio starts.
+11. Check Play/Pause, Previous/Next, duration, drag-to-seek and trackpad
+    two-stage seek mode. Verify album art when embedded artwork exists.
+12. Check Shuffle, Repeat All, Repeat One and Off, using touch and trackpad.
+13. Back should return to the same music list without pausing playback.
+14. Background the app and use system notification/headset media controls.
+15. Start Shuffle Songs from the home menu, and verify the shuffled queue.
+16. Confirm tracks from unselected folders do not appear or enter a queue.
 
 For relevant logs:
 
@@ -155,8 +192,9 @@ BB Music APK (dev.q25.bbmusic)
     Audio metadata -> songs/artists/albums/genres
         |
         v
-  Native Media3 playback (not implemented yet)
+  Native Media3 playback -> MediaSessionService + ExoPlayer (implemented)
 
+  Now Playing view — ported BB UI visuals and trackpad seek model
   SymfoniumSource — optional/unused until explicitly selected
 
 BB UI APK (dev.q25.trackpad) — separate, no runtime/build dependency
