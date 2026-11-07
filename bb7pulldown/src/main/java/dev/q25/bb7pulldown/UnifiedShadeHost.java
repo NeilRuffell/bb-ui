@@ -143,8 +143,9 @@ final class UnifiedShadeHost extends FrameLayout {
         mediaModeChrome.setLayerGravity(2, Gravity.BOTTOM | Gravity.FILL_HORIZONTAL);
         mediaModeHeader.setBackground(mediaModeChrome);
         mediaModeHeader.setVisibility(View.GONE);
+        // BBOS6 shuffle/repeat header is taller than the compact seek strip.
         layout.addView(mediaModeHeader, new LinearLayout.LayoutParams(
-                LayoutParams.MATCH_PARENT, dp(32)));
+                LayoutParams.MATCH_PARENT, dp(40)));
 
         TextView heading = new TextView(context);
         heading.setText("Media");

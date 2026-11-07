@@ -388,8 +388,10 @@ final class TwoColumnPanel extends FrameLayout {
                 renderMediaProgress();
             }
         });
+        // Compact BBOS6 seek strip: keep the drawable and touch area centered
+        // within the 30dp row, matching the reference player proportions.
         mediaSeekRow.addView(mediaSeekBar, new LinearLayout.LayoutParams(
-                0, dp(48), 1f));
+                0, dp(30), 1f));
 
         mediaDuration = text("--:--", 14, EXPANDED_MEDIA_PALETTE.muted);
         mediaDuration.setGravity(Gravity.CENTER_VERTICAL | Gravity.RIGHT);
@@ -398,7 +400,7 @@ final class TwoColumnPanel extends FrameLayout {
         // Insert ahead of the transport row; artwork is prepended afterwards.
         // Final expanded order: artwork, seekbar, transport controls.
         mediaContainer.addView(mediaSeekRow, 0, new LinearLayout.LayoutParams(
-                LayoutParams.MATCH_PARENT, dp(48)));
+                LayoutParams.MATCH_PARENT, dp(30)));
 
         // Expanded-only artwork and metadata: artwork on the left, track info
         // centered vertically on the right. The collapsed 46dp row is unchanged.
