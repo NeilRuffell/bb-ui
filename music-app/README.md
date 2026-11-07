@@ -13,7 +13,7 @@ BB Music's library is always dark: its shared list background, outer
 viewport and unfocused row backgrounds are pure black (`#000000`) in both
 Android light and dark modes. Titles remain white, counts muted, and row
 separators dark gray. **The original full-width, square-cornered blue focus
-gradient and border are unchanged**, including the existing color-selection
+gradient is unchanged but has no outline or stroke**, including the color-selection
 logic. The outer `FrameLayout.setFitsSystemWindows(true)` keeps the list
 below system bars.
 
