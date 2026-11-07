@@ -10,13 +10,15 @@ Android on the Zinwa Q25. The current test build is a single **Vector/LSPosed
 APK** that integrates with LineageOS SystemUI. The long-term target is a
 native LineageOS SystemUI implementation.
 
-**Current APK version:** `0.9.99-bbos6-native-recents-icons-prototype`
-(versionCode 129). The native shade integration and its slide animation
+**Current APK version:** `0.9.100-bbos6-recents-icons-only`
+(versionCode 130). The native shade integration and its slide animation
 remain **opt-in** while the remaining presentation work continues.
 
-This branch restores stock Quickstep Recents while the exclusive BBOS6
-icon-grid renderer is developed. The previous two-column Recents hooks are
-**deleted**, not merely disabled; see the [Recents replacement plan](docs/RECENTS_REPLACEMENT.md).
+This branch uses the **existing native Quickstep TaskViews** for a 4x4 grid
+of application icons only. The native TaskView draw pass is replaced: no task
+thumbnails, cards, header pills or labels are painted. The previous two-column
+Recents hook was **deleted**, not merely disabled. The new icon-only view
+is opt-in for Q25 testing. See [Recents replacement plan](docs/RECENTS_REPLACEMENT.md).
 
 The BBOS6 shade now supports downward/upward slide animations and
 finger-following drag-to-open/close, while retaining keyboard/trackpad
