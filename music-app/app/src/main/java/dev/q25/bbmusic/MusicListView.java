@@ -3,12 +3,14 @@ package dev.q25.bbmusic;
 import android.content.Context;
 import android.content.res.Configuration;
 import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.text.TextUtils;
+import android.util.SparseArray;
 import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.View;
@@ -69,6 +71,10 @@ final class MusicListView extends ListView {
 
     // Shared height for the selection row and its edge-to-edge square artwork.
     private static final int ROW_HEIGHT_DP = 64;
+    // Menu PNGs have different pixel dimensions and transparent borders.
+    // Normalize the alpha-bounded artwork into this shared visible square.
+    private static final int MENU_ICON_VISIBLE_DP = 52;
+    private static final int MENU_ICON_ALPHA_THRESHOLD = 16;
     private static final int[] LIGHT_SELECTION = {
             0xff088eef, 0xff088aef, 0xff0886ef, 0xff0882ef, 0xff087de7,
             0xff0879e7, 0xff1075e7, 0xff1071e7, 0xff106dde, 0xff1069de,
@@ -100,6 +106,8 @@ final class MusicListView extends ListView {
     private final DataSource data;
     private final BaseAdapter adapter;
     private final MusicListArtworkLoader artworkLoader;
+    // Only six original BBOS6 menu PNGs are decoded and trimmed, once each.
+    private final SparseArray<Bitmap> menuIconCache = new SparseArray<>();
     private final int canvasColor;
     private final int rowColor;
     private final int titleColor;
@@ -333,17 +341,21 @@ final class MusicListView extends ListView {
 
     private void bindArtwork(RowViews views, RowData row) {
         if (row.menuIconRes != 0) {
-            // Original BBOS6 menu art, not an album cover. Reusing the same
-            // 64dp ImageView avoids a second adapter/row implementation.
-            // CENTER_INSIDE preserves the original pixel art, including its
-            // transparent inset; changing scale type never changes row size.
+            // Uniform visible-art bounds: crop transparent source margins
+            // in memory, then fit the original proportions into 52dp.
+            // The full 64dp row slot, native ListView and PNGs stay intact.
+            int inset = dp((ROW_HEIGHT_DP - MENU_ICON_VISIBLE_DP) / 2f);
+            views.artwork.setPadding(inset, inset, inset, inset);
             views.artwork.setTag(null);
             views.artwork.setVisibility(View.VISIBLE);
             views.artwork.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
             views.artwork.setContentDescription(row.title + " icon");
-            views.artwork.setImageResource(row.menuIconRes);
+            views.artwork.setImageBitmap(menuIconBitmap(row.menuIconRes));
             return;
         }
+        // Recycled rows must restore edge-to-edge album art: the menu-only
+        // inset must never bleed into song, artist, album or genre covers.
+        views.artwork.setPadding(0, 0, 0, 0);
         views.artwork.setScaleType(ImageView.ScaleType.CENTER_CROP);
         views.artwork.setContentDescription("Album artwork");
         if (!row.showArtwork) {
@@ -370,6 +382,48 @@ final class MusicListView extends ListView {
             if (image == null) views.artwork.setImageDrawable(views.noArtwork);
             else views.artwork.setImageBitmap(image);
         });
+    }
+
+    /**
+     * Decode each original (drawable-nodpi) icon once and trim only pixels
+     * that are essentially transparent. The bitmap is never stretched,
+     * recolored, written back to the repository, or cropped at display time.
+     *
+     * This handles both 65px and 75px original files with the same
+     * visible-art scaling while preserving their individual aspect ratios.
+     */
+    private Bitmap menuIconBitmap(int resourceId) {
+        Bitmap cached = menuIconCache.get(resourceId);
+        if (cached != null) return cached;
+
+        BitmapFactory.Options options = new BitmapFactory.Options();
+        options.inScaled = false; // Preserve the exact source pixel geometry.
+        Bitmap original = BitmapFactory.decodeResource(
+                getResources(), resourceId, options);
+        if (original == null) return null;
+
+        int left = original.getWidth();
+        int top = original.getHeight();
+        int right = -1;
+        int bottom = -1;
+        for (int y = 0; y < original.getHeight(); y++) {
+            for (int x = 0; x < original.getWidth(); x++) {
+                if (Color.alpha(original.getPixel(x, y))
+                        <= MENU_ICON_ALPHA_THRESHOLD) continue;
+                if (x < left) left = x;
+                if (x > right) right = x;
+                if (y < top) top = y;
+                if (y > bottom) bottom = y;
+            }
+        }
+
+        Bitmap cropped = right >= left && bottom >= top
+                ? Bitmap.createBitmap(original, left, top,
+                        right - left + 1, bottom - top + 1)
+                : original;
+        if (cropped != original) original.recycle();
+        menuIconCache.put(resourceId, cropped);
+        return cropped;
     }
 
     private void styleVisibleRows() {
