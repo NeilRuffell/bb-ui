@@ -200,6 +200,12 @@ final class MusicListView extends ListView {
         styleVisibleRows();
     }
 
+    /** Share the row thumbnail cache with album-detail page headers. */
+    void loadAlbumArtwork(String key, List<Uri> albumTracks,
+            MusicListArtworkLoader.Listener listener) {
+        artworkLoader.request(key, albumTracks, listener);
+    }
+
     void clearArtworkCache() {
         artworkLoader.clear();
     }
