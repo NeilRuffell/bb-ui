@@ -292,9 +292,10 @@ public final class MusicActivity extends Activity {
         String albumKey = hasArtwork ? albumKeyForRow(row) : null;
         List<Uri> candidates = albumKey == null
                 ? null : albumArtworkSources.get(albumKey);
+        boolean albumFallback = row.kind == ROW_GROUP && row.groupCategory == 2;
         return new MusicListView.RowData(
                 row.title, childCountLabel(row), row.kind != ROW_MESSAGE,
-                hasArtwork, menuIconForRow(row), trackNumber,
+                hasArtwork, albumFallback, menuIconForRow(row), trackNumber,
                 albumKey == null ? null : "album:" + albumKey,
                 candidates);
     }
