@@ -29,6 +29,34 @@ Home screen, in order:
 
 **Settings** currently has exactly one action: **Add folders**.
 
+### Original BBOS6 music menu icons
+
+The first six home-menu rows now render the **original PNGs** from the
+repository-wide `assets/bbos6/icons/` collection. They were matched
+visually and by image comparison against screenshots of the BlackBerry
+OS 6 Music home menu supplied for this project:
+
+| Menu entry | Original asset | Android packaged resource |
+| --- | --- | --- |
+| All Songs | `350.png` | `bbos6_menu_all_songs.png` |
+| Artists | `345.png` | `bbos6_menu_artists.png` |
+| Albums | `351.png` | `bbos6_menu_albums.png` |
+| Genres | `348.png` | `bbos6_menu_genres.png` |
+| Playlists | `337.png` | `bbos6_menu_playlists.png` |
+| Shuffle Songs | `339.png` | `bbos6_menu_shuffle_songs.png` |
+
+Android requires referenced PNGs to be present in application resource
+directories, so the exact original binary blobs are reused under
+`music-app/app/src/main/res/drawable-nodpi/`. No artwork is redrawn or
+modified. `MusicActivity.menuIconForRow` owns the menu-to-resource mapping;
+`MusicListView` uses its existing left image slot to draw the selected
+resource, so it does not introduce a second adapter or custom scrolling.
+
+Only entries whose icons were present in the screenshot were mapped.
+**Settings** remains text-only because the supplied references do not
+identify its matching BlackBerry 6 icon. Album artwork on songs, albums,
+artists and genres remains independent of these static home-menu icons.
+
 ### Shared list component
 
 The list implementation is extracted into `MusicListView.java`. This class
