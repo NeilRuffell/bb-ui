@@ -1,95 +1,81 @@
-# BlackBerry-button page menu — vertical bottom-left popup
+# BlackBerry-button application menu (bottom-left popup)
 
-Implementation branch: `feat/bb-bottom-left-vertical-menu`.
-Based on `master` commit `4c0d46c8c6947b758935b67ee5676158c7e14710`.
+## Layout and interaction
 
-## Interaction contract
+The BB hardware key opens a transient, 224dp-wide vertical menu at the
+bottom-left. The menu preserves the BB-style gradient, blue focus highlight,
+48dp rows, and touch/trackpad input.
 
-The BlackBerry hardware key opens a compact, **transient** two-row popup at
-the bottom-left of the display, above navigation-bar insets:
+Visual order:
 
-1. **Notifications** (initial focus when no shade is open)
-2. **Quick Settings**
+1. **Close Application** (shown only for an eligible foreground app)
+2. **Switch Application** (opens the existing native Quickstep Recents UI)
+3. **Notifications**
+4. **Quick Settings**
 
-The popup uses a 224dp width, two 48dp rows, and BB theme gradient/highlight.
-Up and Down choose the corresponding row, with bounded selection. Enter,
-trackpad click, or direct row tap opens the selected page. Back or another
-BlackBerry-key press dismisses only the popup. Left and Right are not popup
-selection commands. The previous **BB -> Down -> native Recents** shortcut
-is retired because Down is now used for page selection.
+Notifications is initially highlighted from Home/ordinary applications, to
+retain the existing first-BB/Enter shortcut. When a shade is open, its current
+page is initially highlighted. Up/Down moves by one visible row; Enter,
+trackpad click or touch activates the highlighted row. Back or a second BB
+press dismisses the menu. Left/Right do not select another row.
 
-No shade opens merely from displaying the popup. The popup is a separate
-SystemUI-owned status-bar subpanel and is destroyed after a successful page
-activation. It is never reparented into the shade and no duplicate menu is
-allocated on subsequent keypresses.
+**Close Application** is never offered on Home, SystemUI or where SystemUI
+lacks the privilege to remove a foreground task. The exact top task is
+captured before the menu opens; it must still be foreground at activation.
+The action asks the native ActivityTaskManager to remove that task. It does
+not force-stop a package or remove other Recents entries. Failed operations
+display a short error and are logged.
 
-When the notification/Quick Settings shade is already open, **only BB**
-reopens the same popup with the currently displayed page highlighted.
-Up from the first notification/media focus target or first unlocked QS row
-remains inside the shade and never opens the menu. This does not alter
-touch-driven swipe-up shade dismissal. Selecting either destination from
-the BB popup switches the retained pages in place, without rebuilding
-their View instances or replaying the shade entrance animation.
-Back from that popup returns focus to the current shade content, and does not
-close the expanded shade.
+**Switch Application** reuses the system's native Quickstep Recents with its
+existing BB UI grid presentation. The menu directly invokes the native
+CommandQueue show-recents path (and only falls back to a guarded toggle),
+preventing recursion into the BB-button interception hook. If a shade is
+open, it is dismissed before switching.
 
-## Shade ownership
+The BB key is the **only** way to open the popup. Trackpad Up from the first
+notification icon, media row, or first unlocked Quick Settings row stays
+within the shade. Native finger swipe-up dismiss remains unchanged.
+Selecting Notifications or Quick Settings switches existing retained pages
+without rebuilding the shade or replaying its opening animation.
 
-`ShadeUiController` owns selected page and popup focus. `PullDownHook`
-intercepts the existing native Recents command and attaches the popup only
-when requested. `ShadeDateHeader` retains its historical Java class name,
-but is now a **popup-only** vertical menu; `ShadeHeaderSegmentPolicy` tests
-vertical Y-coordinate rows.
+## Ownership and deferred features
 
-`UnifiedShadeHost` contains **no permanent navigation header, placeholder,
-or selector view**. Its Notifications and QS content starts below the native
-status bar. The separate 40dp media mode bar is preserved when media is
-expanded. `NativeShadeHostBridge` keeps its native status-band clipping and
-touch-drag handling but has no selector-specific clipping or reveal path.
+`ShadeStatusNavigation` owns focus and order; `ShadeUiController` owns
+shade session state. `ShadeDateHeader` is the menu-only presentation;
+`ShadeHeaderSegmentPolicy` handles hit testing with or without Close.
+`ForegroundTaskActions` guards task removal. `PullDownHook` owns
+system integration and popup lifetime.
 
-Both BB-confirmed shade openings and native status-bar swipe openings use
-the existing native full-window slide. The popup closes on successful mount,
-Back, second BB press, screen-off, and shade shutdown. Failure before mount
-keeps the original popup input surface available.
+`UnifiedShadeHost` contains **no** duplicate header or popup. The separate
+40dp media shuffle/repeat bar remains unchanged.
 
-## Test on Q25
+App-item context menus, app-specific Options/Help and BB long-press Recents
+are **not** part of this iteration.
 
-Build and install from the feature branch:
+## Build and test on Q25
 
 ```sh
 cd ~/Projects/bb-ui
 git fetch origin
-git switch feat/bb-bottom-left-vertical-menu || \
-  git switch --track origin/feat/bb-bottom-left-vertical-menu
+git switch feat/bb-application-actions-menu || \
+  git switch --track origin/feat/bb-application-actions-menu
 git pull --ff-only
 gradle :app:testDebugUnitTest :app:assembleDebug && \
 adb -s 202512003630 install -r app/build/outputs/apk/debug/app-debug.apk && \
 adb -s 202512003630 shell am crash com.android.systemui
 ```
 
-Acceptance:
-- BB opens only the bottom-left two-row popup; Notifications starts highlighted.
-- Down highlights Quick Settings; Up returns to Notifications; Enter opens
-  once. Direct tap activates the touched row. No horizontal selection remains.
-- Back or second BB press dismisses the popup without opening a shade.
-- From an open shade, BB reopens the popup. Selecting another page changes it
-  in place without a shade blink. Back closes the popup, not the shade.
-- Trackpad Up from the first notification app icon (with no media), the
-  media row, or the first unlocked QS row stays in the shade; it never
-  traverses to the BB popup. Up from the first icon still reaches the
-  media row if media is visible.
-- Native status-bar swipe-down and finger-drag close remain operational.
-- No reserved 49dp header above notification or QS content.
-- Expanded media still displays its independent 40dp shuffle/repeat header.
-- Screen-off, lockscreen, Home, and fast repeat BB presses leave no stray
-  focus windows, input interception, or stock Android QS leakage.
-- Run all app and `bb7pulldown` tests if supported by the local build.
+Test BB/Up/Enter on all four rows; check that Close disappears on Home,
+closes the current foreground task but not a background task, and that
+Switch opens BB UI's existing Recents. Also verify the original shade
+navigation, media toolbar, finger drag, Back and screen-off cleanup.
 
-Rollback without installing a different APK:
+Rollback without reinstall:
 
 ```sh
 adb -s 202512003630 shell setprop debug.bb7pulldown.enabled false
 adb -s 202512003630 shell am crash com.android.systemui
 ```
 
-This is feature-branch implementation, not Q25 runtime validation.
+Cross-app task removal and native Recents dispatch still require device
+validation; a successful build does not prove the firmware permits either.

@@ -18,6 +18,7 @@ import android.database.ContentObserver;
 import android.view.KeyEvent;
 import android.content.pm.PackageManager;
 import android.widget.FrameLayout;
+import android.widget.Toast;
 import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.Drawable;
@@ -99,6 +100,11 @@ public final class PullDownHook implements IXposedHookLoadPackage {
     private static boolean selectorTouchInProgress;
     private static BroadcastReceiver focusReceiver;
     private static Context focusReceiverContext;
+    // The system task selected before the popup grabs keyboard focus.
+    private static ForegroundTaskActions.Target popupTaskTarget;
+    // The original CommandQueue instance continues to own native Quickstep.
+    private static WeakReference<Object> nativeRecentsQueue = new WeakReference<>(null);
+    private static boolean bypassRecentsMenuInterception;
 
     /**
      * One navigation/session owner for the native status bar and both shade
@@ -129,6 +135,14 @@ public final class PullDownHook implements IXposedHookLoadPackage {
                     View anchor = focusWindow;
                     if (anchor == null) anchor = nativeStatusBar.get();
                     if (anchor != null) showShade(anchor.getContext(), page);
+                }
+
+                @Override public void onCloseApplication() {
+                    closeForegroundApplication();
+                }
+
+                @Override public void onSwitchApplication() {
+                    showNativeRecents();
                 }
 
                 @Override public void onExit() {
@@ -221,6 +235,10 @@ public final class PullDownHook implements IXposedHookLoadPackage {
             XposedBridge.hookAllMethods(queue, "toggleRecentApps", new XC_MethodHook() {
                 @Override protected void beforeHookedMethod(MethodHookParam param) {
                     if (!enabled()) return;
+                    // Menu's Switch Application uses this same queue without
+                    // recursively invoking the BB-key interception path.
+                    if (bypassRecentsMenuInterception) return;
+                    nativeRecentsQueue = new WeakReference<>(param.thisObject);
                     View bar = nativeStatusBar.get();
                     if (bar == null || locked(bar.getContext())) {
                         Log.w(TAG, "BB menu: native bar unavailable/locked; stock retained");
@@ -247,8 +265,57 @@ public final class PullDownHook implements IXposedHookLoadPackage {
         }
     }
 
+    /** Close only the exact foreground application task captured at popup open. */
+    private static void closeForegroundApplication() {
+        ForegroundTaskActions.Target target = popupTaskTarget;
+        View popupWindow = focusWindow;
+        Context context = popupWindow != null ? popupWindow.getContext() : null;
+        dismissStatusFocus();
+        if (context == null || !ForegroundTaskActions.closeCapturedApplication(context, target)) {
+            if (context != null) {
+                Toast.makeText(context, "Unable to close application", Toast.LENGTH_SHORT).show();
+            }
+        }
+    }
+
+    /** Reuse Quickstep's native Recents rather than creating another switcher. */
+    private static void showNativeRecents() {
+        Object queue = nativeRecentsQueue.get();
+        View source = focusWindow;
+        Context context = source != null ? source.getContext() : null;
+        dismissStatusFocus();
+        if (shadeHost != null) dismissShadeImmediately();
+        if (queue == null) {
+            Log.w(TAG, "Native Recents command queue no longer available");
+            if (context != null) {
+                Toast.makeText(context, "Unable to open applications",
+                        Toast.LENGTH_SHORT).show();
+            }
+            return;
+        }
+        try {
+            // Unlike toggleRecentApps, showRecentApps is not our BB-key hook.
+            XposedHelpers.callMethod(queue, "showRecentApps", false);
+        } catch (Throwable showError) {
+            Log.w(TAG, "showRecentApps unavailable; trying native toggle", showError);
+            bypassRecentsMenuInterception = true;
+            try {
+                XposedHelpers.callMethod(queue, "toggleRecentApps");
+            } catch (Throwable toggleError) {
+                Log.e(TAG, "Quickstep activation unavailable", toggleError);
+                if (context != null) {
+                    Toast.makeText(context, "Unable to open applications",
+                            Toast.LENGTH_SHORT).show();
+                }
+            } finally {
+                bypassRecentsMenuInterception = false;
+            }
+        }
+    }
+
     private static void dismissStatusFocus() {
         selectorTouchInProgress = false;
+        popupTaskTarget = null;
         NAVIGATION.leaveStandaloneStatusBar();
         unregisterSelectorScreenOffReceiver();
         View root = focusWindow;
@@ -331,6 +398,10 @@ public final class PullDownHook implements IXposedHookLoadPackage {
         if (openingOrClosing || focusWindow != null || locked(context)) return;
         WindowManager wm = (WindowManager) context.getSystemService(Context.WINDOW_SERVICE);
         if (wm == null) return;
+        ForegroundTaskActions.Target target = shadeHost == null
+                ? ForegroundTaskActions.currentApplication(context) : null;
+        boolean closeAvailable = target != null;
+        NAVIGATION.setCloseApplicationAvailable(closeAvailable);
         FrameLayout root = new FrameLayout(context) {
             @Override public boolean dispatchKeyEvent(KeyEvent event) {
                 if (NAVIGATION.handleKey(event)) return true;
@@ -340,9 +411,9 @@ public final class PullDownHook implements IXposedHookLoadPackage {
         root.setFocusable(true);
         root.setFocusableInTouchMode(true);
         root.setBackgroundColor(Color.TRANSPARENT);
-        ShadeDateHeader popup = new ShadeDateHeader(context);
+        ShadeDateHeader popup = new ShadeDateHeader(context, closeAvailable);
         int popupWidth = ShadeDateHeader.widthPx(context);
-        int popupHeight = ShadeDateHeader.heightPx(context);
+        int popupHeight = ShadeDateHeader.heightPx(context, closeAvailable);
         root.addView(popup, new FrameLayout.LayoutParams(popupWidth, popupHeight));
         final float[] touchDown = new float[2];
         final boolean[] moved = new boolean[1];
@@ -363,7 +434,8 @@ public final class PullDownHook implements IXposedHookLoadPackage {
             }
             if (action == MotionEvent.ACTION_UP && focusWindow == root
                     && !locked(context) && !moved[0]) {
-                int zone = ShadeHeaderSegmentPolicy.zoneAt(event.getY(), view.getHeight());
+                int zone = ShadeHeaderSegmentPolicy.zoneAt(
+                        event.getY(), view.getHeight(), closeAvailable);
                 if (zone != ShadeStatusNavigation.NONE) {
                     NAVIGATION.selectPopupZone(zone);
                     NAVIGATION.handleKey(KeyEvent.KEYCODE_ENTER, KeyEvent.ACTION_UP);
@@ -376,7 +448,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
                         | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
                 PixelFormat.TRANSLUCENT);
-        params.setTitle("BB UI bottom-left page menu");
+        params.setTitle("BB UI application menu");
         params.gravity = Gravity.BOTTOM | Gravity.START;
         params.x = dp(context, 4);
         params.y = dp(context, 8);
@@ -386,6 +458,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
             focusManager = wm;
             focusWindow = root;
             standaloneHeader = popup;
+            popupTaskTarget = target;
             registerSelectorScreenOffReceiver(context);
             if (shadeHost == null) NAVIGATION.enterStandaloneStatusBar();
             popup.setFocusedZone(NAVIGATION.focusedZone());
@@ -402,6 +475,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
             focusManager = null;
             focusWindow = null;
             standaloneHeader = null;
+            popupTaskTarget = null;
             if (shadeHost == null) NAVIGATION.leaveStandaloneStatusBar();
             Log.e(TAG, "Unable to present BB page popup", error);
         }

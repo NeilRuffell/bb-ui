@@ -14,6 +14,8 @@ public final class ShadeUiControllerTest {
         int popupDismissals;
         int opened;
         int switched;
+        int recents;
+        int closed;
         int focusZone = ShadeStatusNavigation.NONE;
 
         @Override public void onStatusFocusChanged(int zone) { focusZone = zone; }
@@ -28,6 +30,9 @@ public final class ShadeUiControllerTest {
             }
             navigation.focusContent();
         }
+
+        @Override public void onCloseApplication() { closed++; }
+        @Override public void onSwitchApplication() { recents++; }
 
         @Override public void onExit() {
             popupDismissals++;
@@ -115,6 +120,27 @@ public final class ShadeUiControllerTest {
         f.navigation.onShadeOpened(ShadeStatusNavigation.QUICK_SETTINGS);
         assertFalse(f.navigation.handleKey(KeyEvent.KEYCODE_BACK, KeyEvent.ACTION_UP));
         assertFalse(f.navigation.handleKey(KeyEvent.KEYCODE_DEL, KeyEvent.ACTION_UP));
+    }
+
+    @Test public void applicationMenuActionsAreIndependentOfShadePages() {
+        FakeHost host = new FakeHost();
+        host.navigation.setCloseApplicationAvailable(true);
+        host.navigation.enterStandaloneStatusBar();
+        key(host, KeyEvent.KEYCODE_DPAD_UP);
+        key(host, KeyEvent.KEYCODE_DPAD_UP);
+        assertEquals(ShadeStatusNavigation.CLOSE_APPLICATION, host.focusZone);
+        key(host, KeyEvent.KEYCODE_ENTER);
+        assertEquals(1, host.closed);
+        assertEquals(0, host.recents);
+        assertEquals(0, host.opened);
+        assertEquals(ShadeStatusNavigation.NONE, host.navigation.activePage());
+
+        host.navigation.enterStandaloneStatusBar();
+        key(host, KeyEvent.KEYCODE_DPAD_UP);
+        key(host, KeyEvent.KEYCODE_ENTER);
+        assertEquals(1, host.closed);
+        assertEquals(1, host.recents);
+        assertEquals(0, host.opened);
     }
 
     @Test public void upwardNavigationInEitherOpenShadeNeverOpensPopup() {
