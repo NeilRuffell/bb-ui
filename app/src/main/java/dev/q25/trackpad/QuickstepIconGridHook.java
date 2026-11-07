@@ -354,25 +354,18 @@ public final class QuickstepIconGridHook implements IXposedHookLoadPackage {
                 state.selected = page * RecentsIconGridLayout.PAGE_SIZE;
             }
         } else {
-            int col = selected % RecentsIconGridLayout.COLUMNS;
-            int destination = selected;
+            int direction;
             switch (code) {
-                case KeyEvent.KEYCODE_DPAD_UP:
-                    destination = selected - RecentsIconGridLayout.COLUMNS;
-                    break;
-                case KeyEvent.KEYCODE_DPAD_DOWN:
-                    destination = selected + RecentsIconGridLayout.COLUMNS;
-                    break;
-                case KeyEvent.KEYCODE_DPAD_LEFT:
-                    destination = col == 0 ? selected - 1 : selected - 1;
-                    break;
-                case KeyEvent.KEYCODE_DPAD_RIGHT:
-                    destination = selected + 1;
-                    break;
-                default:
-                    break;
+                case KeyEvent.KEYCODE_DPAD_UP: direction = 0; break;
+                case KeyEvent.KEYCODE_DPAD_DOWN: direction = 1; break;
+                case KeyEvent.KEYCODE_DPAD_LEFT: direction = 2; break;
+                case KeyEvent.KEYCODE_DPAD_RIGHT: direction = 3; break;
+                default: return true;
             }
-            if (destination >= 0 && destination < all.size()) {
+            // The grid owns its geometry. Native Quickstep carousel
+            // navigation, snaps and focus movement are NEVER used.
+            int destination = grid.nextIndex(selected, direction);
+            if (destination >= 0) {
                 state.selected = destination;
                 state.page = destination / RecentsIconGridLayout.PAGE_SIZE;
             }
