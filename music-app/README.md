@@ -244,9 +244,9 @@ label and a smaller muted count underneath. All Songs displays the number
 of selected-folder audio tracks (e.g. `1 Song`, `2 Songs`); Artists, Albums
 and Genres display distinct category entries (`1 Item`, `2 Items`).
 Artist/album/genre groups display their direct number of songs when opened.
-Settings displays `1 Item` (Add folders); Playlists displays `0 Items`
-until the app supports playlists. Shuffle Songs is an action and has no
-child count.
+Settings has no child-count subtitle on the home menu, while retaining
+its Add folders entry. Playlists displays `0 Items` until the app supports
+playlists. Shuffle Songs is an action and has no child count.
 
 When the app opens, it loads counts from the user-selected folder trees
 only. With no folders selected the counters are zero **and no storage scan
