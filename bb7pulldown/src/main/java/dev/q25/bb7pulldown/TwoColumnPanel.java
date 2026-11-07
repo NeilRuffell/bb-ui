@@ -1050,11 +1050,27 @@ final class TwoColumnPanel extends FrameLayout {
         };
     }
 
-    /** Fixed BBOS6 focus styling for expanded media; other surfaces stay themed. */
+    /**
+     * Selected BBOS6 playback button: fixed dark-blue gradient sampled from
+     * the supplied screenshot, away from the white playback icon.
+     * Preserve the existing border, corners and independent seek-pill style.
+     */
     private GradientDrawable expandedMediaSelection(int radius, int border) {
         GradientDrawable selected = new GradientDrawable(
                 GradientDrawable.Orientation.TOP_BOTTOM,
-                BB7SelectionGradientColors.colors(false));
+                new int[] {
+                        0xff0871ce, //   0%
+                        0xff0871ce, //  10%
+                        0xff086dc6, //  20%
+                        0xff086dc6, //  30%
+                        0xff0869bd, //  40%
+                        0xff0865bd, //  50%
+                        0xff0861b5, //  60%
+                        0xff105db5, //  70%
+                        0xff1059ad, //  80%
+                        0xff1055a5, //  90%
+                        0xff1055a5  // 100%
+                });
         selected.setCornerRadius(radius);
         selected.setStroke(border, BB7Theme.BLUE_BORDER);
         return selected;
