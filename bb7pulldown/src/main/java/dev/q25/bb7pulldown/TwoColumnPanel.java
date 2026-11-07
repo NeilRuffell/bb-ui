@@ -17,6 +17,8 @@ import android.graphics.ColorFilter;
 import android.graphics.Paint;
 import android.graphics.PixelFormat;
 import android.graphics.Rect;
+import android.graphics.LinearGradient;
+import android.graphics.Shader;
 import android.os.Bundle;
 import android.graphics.drawable.ClipDrawable;
 import android.graphics.drawable.ColorDrawable;
@@ -88,6 +90,7 @@ final class TwoColumnPanel extends FrameLayout {
     // One retained drawable spans the entire expanded playback-controls row.
     // The individual buttons only overlay their focused selection state.
     private final GradientDrawable expandedMediaTransportBackground = new GradientDrawable();
+    private final Drawable expandedMediaTransportSeparators;
     private final CloseListener onClose;
     private final ShadeUiController navigation;
     private final OpenNotificationListener onOpenNotification;
@@ -211,6 +214,7 @@ final class TwoColumnPanel extends FrameLayout {
 
         // One focusable row for all native media sessions, hidden when none exist.
         mediaRow = new LinearLayout(context);
+        expandedMediaTransportSeparators = mediaTransportSeparators();
         mediaRow.setOrientation(LinearLayout.HORIZONTAL);
         mediaRow.setGravity(Gravity.CENTER_VERTICAL);
         mediaRow.setPadding(dp(9), dp(3), dp(9), dp(3));
@@ -695,6 +699,9 @@ final class TwoColumnPanel extends FrameLayout {
                 : mediaSessions.size() > 1 ? View.VISIBLE : View.GONE);
         mediaRow.setPadding(dp(open ? 10 : 9), dp(3),
                 dp(open ? 10 : 9), dp(3));
+        // Foreground lines overlay the shared gradient and focused button,
+        // without consuming layout width or affecting click/trackpad routing.
+        mediaRow.setForeground(open ? expandedMediaTransportSeparators : null);
         mediaRow.setLayoutParams(new LinearLayout.LayoutParams(
                 LayoutParams.MATCH_PARENT, dp(open ? 62 : 46)));
         for (ImageView button : mediaButtons) {
@@ -981,6 +988,66 @@ final class TwoColumnPanel extends FrameLayout {
         LayerDrawable capsule = new LayerDrawable(new Drawable[] {shell, body});
         capsule.setLayerInset(1, dp(1), dp(1), dp(1), dp(1));
         return capsule;
+    }
+
+    /**
+     * BBOS6 transport dividers: a 1dp dark line immediately followed by a
+     * 1dp light line, both shading vertically with the toolbar. The sample
+     * screenshot has identical pairs at each button boundary. Drawing in
+     * the retained parent foreground preserves three existing hit targets.
+     */
+    private Drawable mediaTransportSeparators() {
+        return new Drawable() {
+            private final Paint dark = new Paint();
+            private final Paint light = new Paint();
+
+            @Override protected void onBoundsChange(Rect bounds) {
+                super.onBoundsChange(bounds);
+                if (bounds.isEmpty()) return;
+                float top = bounds.top;
+                float bottom = bounds.bottom;
+                float[] stops = {0f, 0.17f, 0.34f, 0.51f, 1f};
+                dark.setShader(new LinearGradient(0f, top, 0f, bottom,
+                        new int[] {
+                                0xff525152, 0xff313839, 0xff212829,
+                                0xff181c18, 0xff080808
+                        }, stops, Shader.TileMode.CLAMP));
+                light.setShader(new LinearGradient(0f, top, 0f, bottom,
+                        new int[] {
+                                0xffb5b2b5, 0xff9c9ea5, 0xff848684,
+                                0xff6b6d73, 0xff313831
+                        }, stops, Shader.TileMode.CLAMP));
+            }
+
+            @Override public void draw(Canvas canvas) {
+                Rect bounds = getBounds();
+                int width = dp(1);
+                // Use the real child positions, not estimated thirds, so
+                // separators stay aligned across screen sizes and densities.
+                for (int i = 0; i < mediaButtons.length - 1; i++) {
+                    int edge = mediaButtons[i].getRight();
+                    if (edge <= bounds.left || edge >= bounds.right) continue;
+                    canvas.drawRect(edge - width, bounds.top, edge, bounds.bottom, dark);
+                    canvas.drawRect(edge, bounds.top, edge + width, bounds.bottom, light);
+                }
+            }
+
+            @Override public void setAlpha(int alpha) {
+                dark.setAlpha(alpha);
+                light.setAlpha(alpha);
+                invalidateSelf();
+            }
+
+            @Override public void setColorFilter(ColorFilter filter) {
+                dark.setColorFilter(filter);
+                light.setColorFilter(filter);
+                invalidateSelf();
+            }
+
+            @Override public int getOpacity() {
+                return PixelFormat.TRANSLUCENT;
+            }
+        };
     }
 
     /** Fixed BBOS6 focus styling for expanded media; other surfaces stay themed. */
