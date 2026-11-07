@@ -407,11 +407,7 @@ public final class MusicActivity extends Activity {
             // Playlist storage is not implemented, hence no playlist children.
             return "0 Items";
         }
-        if (row.menuIndex == 6) {
-            // Settings has one implemented child: Add folders.
-            return "1 Item";
-        }
-        // Shuffle Songs is an action, not a container.
+        // Shuffle Songs and Settings have no child-count subtitle.
         return null;
     }
 
