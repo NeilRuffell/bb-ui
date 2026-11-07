@@ -103,12 +103,17 @@ final class MusicListView extends ListView {
         this.data = data;
         artworkLoader = new MusicListArtworkLoader(context);
 
+        // BBOS6 Music always uses a black canvas and black unfocused rows,
+        // regardless of the host's system light/dark setting.
+        canvasColor = Color.BLACK;
+        rowColor = Color.BLACK;
+        titleColor = Color.WHITE;
+        int dividerColor = 0xff303030;
+
+        // Keep the existing focus gradient and stroke unchanged, including
+        // the original system-theme-dependent gradient selection.
         boolean dark = (getResources().getConfiguration().uiMode
                 & Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES;
-        canvasColor = dark ? 0xff10141a : 0xfff4f6f8;
-        rowColor = dark ? 0xff283442 : Color.WHITE;
-        titleColor = dark ? Color.WHITE : 0xff182838;
-        int dividerColor = dark ? 0xff476f8f : 0xff9eafbe;
         selectionColors = dark ? DARK_SELECTION : LIGHT_SELECTION;
 
         // Preserve the proven BB UI QS-style ListView configuration.
