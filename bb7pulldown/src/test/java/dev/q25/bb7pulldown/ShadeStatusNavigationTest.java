@@ -14,10 +14,14 @@ public class ShadeStatusNavigationTest {
         int backs;
         int notifications;
         int quick;
+        int closed;
+        int recents;
         @Override public void onZoneFocus(int zone) { focused = zone; changes++; }
         @Override public void onBack() { backs++; }
         @Override public void onNotificationsSelected() { notifications++; }
         @Override public void onQuickSettingsSelected() { quick++; }
+        @Override public void onCloseApplicationSelected() { closed++; }
+        @Override public void onSwitchApplicationSelected() { recents++; }
     }
 
     @Test public void contentKeysStayUntouchedOutsidePopup() {
@@ -42,7 +46,7 @@ public class ShadeStatusNavigationTest {
         assertEquals(ShadeStatusNavigation.NONE, n.zone());
     }
 
-    @Test public void upReturnsToNotificationsFromSecondRow() {
+    @Test public void upFromQuickSettingsReturnsToNotifications() {
         Callbacks c = new Callbacks();
         ShadeStatusNavigation n = new ShadeStatusNavigation(c);
         n.enter(ShadeStatusNavigation.QUICK_SETTINGS);
@@ -51,19 +55,50 @@ public class ShadeStatusNavigationTest {
         assertEquals(1, c.notifications);
     }
 
-    @Test public void boundedMovementDoesNotRepeatFocusChange() {
+    @Test public void switchApplicationExistsWithoutCloseApplication() {
         Callbacks c = new Callbacks();
         ShadeStatusNavigation n = new ShadeStatusNavigation(c);
         n.enter(ShadeStatusNavigation.NOTIFICATIONS);
         n.handleKey(KeyEvent.KEYCODE_DPAD_UP, KeyEvent.ACTION_DOWN);
+        assertEquals(ShadeStatusNavigation.SWITCH_APPLICATION, c.focused);
         n.handleKey(KeyEvent.KEYCODE_DPAD_UP, KeyEvent.ACTION_DOWN);
-        assertEquals(1, c.changes);
-        n.handleKey(KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.ACTION_DOWN);
-        n.handleKey(KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.ACTION_DOWN);
-        assertEquals(2, c.changes);
+        assertEquals(ShadeStatusNavigation.SWITCH_APPLICATION, c.focused);
+        n.handleKey(KeyEvent.KEYCODE_ENTER, KeyEvent.ACTION_UP);
+        assertEquals(1, c.recents);
+        assertEquals(0, c.closed);
     }
 
-    @Test public void backDismissesWithoutSelectingPage() {
+    @Test public void closeAvailableEnablesOneMoreUpRow() {
+        Callbacks c = new Callbacks();
+        ShadeStatusNavigation n = new ShadeStatusNavigation(c);
+        n.setCloseApplicationAvailable(true);
+        n.enter(ShadeStatusNavigation.NOTIFICATIONS);
+        n.handleKey(KeyEvent.KEYCODE_DPAD_UP, KeyEvent.ACTION_DOWN);
+        n.handleKey(KeyEvent.KEYCODE_DPAD_UP, KeyEvent.ACTION_DOWN);
+        assertEquals(ShadeStatusNavigation.CLOSE_APPLICATION, c.focused);
+        n.handleKey(KeyEvent.KEYCODE_DPAD_UP, KeyEvent.ACTION_DOWN);
+        assertEquals(ShadeStatusNavigation.CLOSE_APPLICATION, c.focused);
+        n.handleKey(KeyEvent.KEYCODE_ENTER, KeyEvent.ACTION_UP);
+        assertEquals(1, c.closed);
+    }
+
+    @Test public void unavailableCloseRowIsNotSelectable() {
+        Callbacks c = new Callbacks();
+        ShadeStatusNavigation n = new ShadeStatusNavigation(c);
+        boolean rejected = false;
+        try {
+            n.enter(ShadeStatusNavigation.CLOSE_APPLICATION);
+        } catch (IllegalArgumentException expected) {
+            rejected = true;
+        }
+        assertTrue(rejected);
+        n.setCloseApplicationAvailable(true);
+        n.enter(ShadeStatusNavigation.CLOSE_APPLICATION);
+        n.setCloseApplicationAvailable(false);
+        assertEquals(ShadeStatusNavigation.SWITCH_APPLICATION, n.zone());
+    }
+
+    @Test public void backDismissesWithoutActivatingAnAction() {
         Callbacks c = new Callbacks();
         ShadeStatusNavigation n = new ShadeStatusNavigation(c);
         n.enter(ShadeStatusNavigation.NOTIFICATIONS);
@@ -71,6 +106,8 @@ public class ShadeStatusNavigationTest {
         assertEquals(1, c.backs);
         assertEquals(0, c.notifications);
         assertEquals(0, c.quick);
+        assertEquals(0, c.closed);
+        assertEquals(0, c.recents);
         assertFalse(n.isFocused());
     }
 

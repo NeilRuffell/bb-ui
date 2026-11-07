@@ -6,20 +6,25 @@ import android.content.Context;
 import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
 import android.view.Gravity;
+import android.view.View;
 import android.widget.TextView;
 import android.widget.LinearLayout;
 
-/** Transient bottom-left BB-button page popup. Never attached to the shade. */
+/** Transient bottom-left BlackBerry application menu. Not part of the shade. */
 final class ShadeDateHeader extends LinearLayout {
     private static final int WIDTH_DP = 224;
     private static final int ROW_HEIGHT_DP = 48;
+    private final TextView closeApplicationRow;
+    private final TextView switchApplicationRow;
     private final TextView notificationsRow;
     private final TextView quickSettingsRow;
     private final int normalTextColor;
+    private final boolean closeAvailable;
     private int focusedZone = ShadeStatusNavigation.NONE;
 
-    ShadeDateHeader(Context context) {
+    ShadeDateHeader(Context context, boolean closeAvailable) {
         super(context);
+        this.closeAvailable = closeAvailable;
         setOrientation(VERTICAL);
         final BB7Theme.Palette palette = BB7Theme.palette(context);
         normalTextColor = palette.headingText;
@@ -33,13 +38,22 @@ final class ShadeDateHeader extends LinearLayout {
         setBackground(background);
         setClipToOutline(true);
         setFocusable(false);
-        setContentDescription("BB UI page menu");
+        setContentDescription("BlackBerry application menu");
 
+        closeApplicationRow = row(context, "Close Application");
+        switchApplicationRow = row(context, "Switch Application");
         notificationsRow = row(context, "Notifications");
         quickSettingsRow = row(context, "Quick Settings");
-        addView(notificationsRow, new LinearLayout.LayoutParams(
-                LayoutParams.MATCH_PARENT, dp(ROW_HEIGHT_DP)));
-        addView(quickSettingsRow, new LinearLayout.LayoutParams(
+
+        if (closeAvailable) addRow(closeApplicationRow);
+        else closeApplicationRow.setVisibility(View.GONE);
+        addRow(switchApplicationRow);
+        addRow(notificationsRow);
+        addRow(quickSettingsRow);
+    }
+
+    private void addRow(TextView row) {
+        addView(row, new LinearLayout.LayoutParams(
                 LayoutParams.MATCH_PARENT, dp(ROW_HEIGHT_DP)));
     }
 
@@ -59,23 +73,26 @@ final class ShadeDateHeader extends LinearLayout {
     void setFocusedZone(int zone) {
         if (focusedZone == zone) return;
         focusedZone = zone;
-        notificationsRow.setBackground(zone == ShadeStatusNavigation.NOTIFICATIONS
+        style(closeApplicationRow, zone == ShadeStatusNavigation.CLOSE_APPLICATION);
+        style(switchApplicationRow, zone == ShadeStatusNavigation.SWITCH_APPLICATION);
+        style(notificationsRow, zone == ShadeStatusNavigation.NOTIFICATIONS);
+        style(quickSettingsRow, zone == ShadeStatusNavigation.QUICK_SETTINGS);
+    }
+
+    private void style(TextView view, boolean selected) {
+        view.setBackground(selected
                 ? BB7Theme.selected(getContext(), dp(2), dp(1)) : null);
-        quickSettingsRow.setBackground(zone == ShadeStatusNavigation.QUICK_SETTINGS
-                ? BB7Theme.selected(getContext(), dp(2), dp(1)) : null);
-        notificationsRow.setTextColor(
-                zone == ShadeStatusNavigation.NOTIFICATIONS ? Color.WHITE : normalTextColor);
-        quickSettingsRow.setTextColor(
-                zone == ShadeStatusNavigation.QUICK_SETTINGS ? Color.WHITE : normalTextColor);
+        view.setTextColor(selected ? Color.WHITE : normalTextColor);
     }
 
     static int widthPx(Context context) {
         return Math.round(WIDTH_DP * context.getResources().getDisplayMetrics().density);
     }
 
-    static int heightPx(Context context) {
-        return Math.round(ROW_HEIGHT_DP * 2
+    static int heightPx(Context context, boolean closeAvailable) {
+        int rowHeight = Math.round(ROW_HEIGHT_DP
                 * context.getResources().getDisplayMetrics().density);
+        return rowHeight * (closeAvailable ? 4 : 3);
     }
 
     private int dp(int value) {

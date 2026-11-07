@@ -547,17 +547,13 @@ final class BB6NativeQsPanel extends FrameLayout {
         if (code == KeyEvent.KEYCODE_DPAD_UP || code == KeyEvent.KEYCODE_DPAD_DOWN) {
             if (event.getAction() == KeyEvent.ACTION_DOWN && !rows.isEmpty()) {
                 int selected = selectedIndex();
-                if (code == KeyEvent.KEYCODE_DPAD_UP && selected <= 0) {
-                    if (lockscreenMode) listener.onClose();
-                    else if (navigation != null) {
-                        navigation.focusStatusBarFromPage(ShadeStatusNavigation.QUICK_SETTINGS);
-                        // Keep ListView as the hardware key receiver. The shared
-                        // controller now owns header selection, so its
-                        // dispatchKeyEvent() consumes Left/Right/Down/Enter.
-                        // Clearing actual View focus here strands key events
-                        // outside this panel while its status zone stays active.
-                        styleVisibleRows();
-                    }
+                if (code == KeyEvent.KEYCODE_DPAD_UP
+                        && lockscreenMode && selected <= 0) {
+                    // Retain the lockscreen's existing Up-to-close behavior.
+                    listener.onClose();
+                } else if (code == KeyEvent.KEYCODE_DPAD_UP && selected == 0) {
+                    // On the unlocked shade, Up is bounded at the first row.
+                    // The BB popup is accessible only through the hardware key.
                 } else if (selected < 0) {
                     // Re-enter keyboard navigation at an already visible row
                     // if touch scrolling has cleared ListView's selection.

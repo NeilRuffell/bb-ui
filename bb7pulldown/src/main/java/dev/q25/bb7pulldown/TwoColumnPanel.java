@@ -1275,9 +1275,9 @@ final class TwoColumnPanel extends FrameLayout {
                             mediaSeekSelected = true;
                             updateMediaHighlight();
                         }
-                    } else if (code == KeyEvent.KEYCODE_DPAD_UP) {
-                        enterStatusZone();
-                    } else {
+                    } else if (code == KeyEvent.KEYCODE_DPAD_DOWN) {
+                        // Up at the media-row boundary stays inside the shade.
+                        // Only the hardware BB key may open the page popup.
                         focusSelectedAppIcon();
                     }
                 }
@@ -2085,13 +2085,6 @@ final class TwoColumnPanel extends FrameLayout {
         return BB7Theme.selected(getContext(), dp(5), dp(1));
     }
 
-    private void enterStatusZone() {
-        if (activeReplyInput != null) return;
-        requestFocus();
-        navigation.focusStatusBarFromPage(ShadeStatusNavigation.NOTIFICATIONS);
-        Log.i(TAG, "Shade navigation header focused: notifications");
-    }
-
     private void leaveStatusZone() {
         navigation.focusContent();
     }
@@ -2205,8 +2198,9 @@ final class TwoColumnPanel extends FrameLayout {
                     int next = AppSelectionPolicy.move(selectedIndex,
                             direction, iconRows.size());
                     if (keyCode == KeyEvent.KEYCODE_DPAD_UP && selectedIndex == 0) {
+                        // At the top, move to media if present; otherwise stay
+                        // on the first app row instead of opening the BB menu.
                         if (mediaRow.getVisibility() == View.VISIBLE) focusMediaRow();
-                        else enterStatusZone();
                     } else if (next >= 0) {
                         iconRows.get(next).requestFocus();
                     }
