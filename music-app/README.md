@@ -110,12 +110,12 @@ resource, so it does not introduce a second adapter or custom scrolling.
 PNG once, finds the bounding rectangle of pixels with alpha greater than 16,
 and creates an in-memory cropped bitmap. `FIT_CENTER` then scales that
 visible region proportionally into a centered **52 × 52dp** area inside
-the existing **64 × 64dp** image slot. This normalizes the apparent size
+the existing **68 × 68dp** image slot. This normalizes the apparent size
 despite the original 65px/75px source dimensions and differing transparent
 margins. The original PNG files remain byte-for-byte unchanged. Cached
 bitmaps are reused by the shared list adapter. When a recycled row changes
-from a home-menu icon to album artwork, its temporary 6dp inset is cleared;
-album covers retain their full edge-to-edge 64dp presentation.
+from a home-menu icon to album artwork, its temporary 8dp inset is cleared;
+album covers retain their full edge-to-edge 68dp presentation.
 
 The initial six icons were identified from the Music menu reference.
 **Settings** now uses the original BBOS6 **Options** wrench from
@@ -135,7 +135,7 @@ Other library artwork fallbacks and original audio files are unchanged.
 ### Shared list component
 
 The list implementation is extracted into `MusicListView.java`. This class
-extends Android's native `ListView` and owns one `BaseAdapter`, 64dp recycled
+extends Android's native `ListView` and owns one `BaseAdapter`, 68dp recycled
 rows, the full-width square-cornered BBOS6 selection gradient, cached album
 artwork binding, count/text presentation, and the same QS-derived Up/Down
 trackpad behavior. Every menu and library page uses **the same instance**;
@@ -247,17 +247,17 @@ The search field does not automatically invoke a touch keyboard.
 
 ### Artwork in music browse lists
 
-The shared row height is **64dp**, increased from 55dp to better match the
-relative height of the BBOS6 Music category bands in the supplied screenshot
-(approximately 113px per row across 640px content width). A single
+The shared row height is **68dp**, increased from 64dp to add approximately
+2dp of space above and below centered text relative to the separators.
+A single
 `MusicListView.ROW_HEIGHT_DP` constant sizes both the rows and square artwork,
 keeping the image flush with the selection's left, top and bottom edges.
 
-Songs, Artists, Albums and Genres now display 64dp square album covers
-flush with the left, top and bottom edges of the 64dp `ListView` selection
+Songs, Artists, Albums and Genres display 68dp square album covers
+flush with the left, top and bottom edges of the 68dp `ListView` selection
 bounds, with zero artwork or row padding. Text labels keep their own internal
 inset. The existing selected-row gradient stays full-width.
-Home-menu entries and Settings are left unchanged.
+The home menu and Settings use the same shared 68dp rows.
 
 The cover-selection rules are **BB Music project rules**, not a verified
 claim about the proprietary BlackBerry OS 6 selection algorithm:
@@ -292,7 +292,7 @@ algorithm for artist/genre representative artwork.
 
 
 **Child-item counters:** The main menu and browsable category entries use
-two-line 64dp ListView rows, matching the BBOS6 Music example: a primary
+two-line 68dp ListView rows, matching the BBOS6 Music example: a primary
 label and a smaller muted count underneath. All Songs displays the number
 of selected-folder audio tracks (e.g. `1 Song`, `2 Songs`); Artists, Albums
 and Genres display distinct category entries (`1 Item`, `2 Items`).
@@ -353,7 +353,7 @@ Android's DocumentsProvider must actually expose the folders for SAF access.
 ### Manage selected folders
 
 The Settings page retains **Add folders** as its first row. Beneath it,
-one regular 64dp list row appears for each **saved** selected SAF folder,
+one regular 68dp list row appears for each **saved** selected SAF folder,
 with its document-provider display name, the tree document ID as a
 distinguishing subtitle, and a right-side **Remove** button. Folders whose
 Android read permission is no longer held remain listed with an
@@ -517,7 +517,7 @@ adb -s 202512003630 install -r app/build/outputs/apk/debug/app-debug.apk
     selected-folder songs with the correct artwork.
 23. Type on the Artists, Albums, Genres and nested song lists. Verify
     only the current page is filtered; all search results retain the
-    regular 64dp borderless blue selector and trackpad navigation.
+    regular 68dp borderless blue selector and trackpad navigation.
 24. Enter a query with no matches on the main and nested pages.
     Confirm the empty adapter leaves no selectable rows and shows
     horizontally centered `No search results found` below the search bar,
