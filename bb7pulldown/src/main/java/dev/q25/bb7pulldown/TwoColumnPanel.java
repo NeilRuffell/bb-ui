@@ -15,8 +15,11 @@ import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.ColorFilter;
 import android.graphics.Paint;
+import android.graphics.Path;
 import android.graphics.PixelFormat;
 import android.graphics.Rect;
+import android.graphics.LinearGradient;
+import android.graphics.Shader;
 import android.os.Bundle;
 import android.graphics.drawable.ClipDrawable;
 import android.graphics.drawable.ColorDrawable;
@@ -85,6 +88,10 @@ final class TwoColumnPanel extends FrameLayout {
     // of Android UI_MODE_NIGHT. The collapsed strip retains the global theme.
     private static final BB7Theme.Palette EXPANDED_MEDIA_PALETTE = BB7Theme.Palette.DARK;
     private final BB7Theme.Palette palette;
+    // One retained drawable spans the entire expanded playback-controls row.
+    // The individual buttons only overlay their focused selection state.
+    private final GradientDrawable expandedMediaTransportBackground = new GradientDrawable();
+    private final Drawable expandedMediaTransportSeparators;
     private final CloseListener onClose;
     private final ShadeUiController navigation;
     private final OpenNotificationListener onOpenNotification;
@@ -173,6 +180,20 @@ final class TwoColumnPanel extends FrameLayout {
             ShadeUiController navigation, MediaControlListener mediaControl) {
         super(context);
         palette = BB7Theme.palette(context);
+        // Reconstructed from the supplied BBOS6 Music screenshot (toolbar
+        // approximately y=300..359): the upper half darkens much faster.
+        // Explicit offsets preserve that shape at any Android screen density.
+        expandedMediaTransportBackground.setOrientation(
+                GradientDrawable.Orientation.TOP_BOTTOM);
+        expandedMediaTransportBackground.setColors(
+                new int[] {
+                        0xff6b7173, // 0%: bright charcoal at top
+                        0xff5a5d63, // 17%
+                        0xff42454a, // 34%
+                        0xff313839, // 51%
+                        0xff212021  // 100%: near-black lower edge
+                },
+                new float[] {0f, 0.17f, 0.34f, 0.51f, 1f});
         Log.i(TAG, "BB7 shade palette: " + (palette == BB7Theme.Palette.DARK ? "dark" : "light"));
         onClose = close;
         onOpenNotification = openNotification;
@@ -194,6 +215,7 @@ final class TwoColumnPanel extends FrameLayout {
 
         // One focusable row for all native media sessions, hidden when none exist.
         mediaRow = new LinearLayout(context);
+        expandedMediaTransportSeparators = mediaTransportSeparators();
         mediaRow.setOrientation(LinearLayout.HORIZONTAL);
         mediaRow.setGravity(Gravity.CENTER_VERTICAL);
         mediaRow.setPadding(dp(9), dp(3), dp(9), dp(3));
@@ -256,17 +278,13 @@ final class TwoColumnPanel extends FrameLayout {
         repeatStatusLayout.rightMargin = dp(3);
         mediaRow.addView(mediaRepeatStatus, repeatStatusLayout);
 
-        final int[] icons = {
-                android.R.drawable.ic_media_previous,
-                android.R.drawable.ic_media_play,
-                android.R.drawable.ic_media_next
-        };
         final String[] descriptions = {"Previous", "Play or pause", "Next"};
         for (int i = 0; i < mediaButtons.length; i++) {
             final int action = i;
             ImageView button = new ImageView(context);
-            button.setImageResource(icons[i]);
-            button.setScaleType(ImageView.ScaleType.FIT_CENTER);
+            // Native vector geometry works in the host SystemUI context.
+            button.setImageDrawable(mediaTransportIcon(i, false));
+            button.setScaleType(ImageView.ScaleType.CENTER);
             button.setPadding(dp(9), dp(9), dp(9), dp(9));
             button.setFocusable(false); // Trackpad focus remains on the parent row.
             // Transport buttons belong exclusively to the expanded media view.
@@ -333,7 +351,7 @@ final class TwoColumnPanel extends FrameLayout {
         // Preserve the silver pill's own fill and border rather than applying
         // the current Android theme's SeekBar thumb tint.
         mediaSeekBar.setThumbTintList(null);
-        mediaSeekBar.setThumb(mediaSeekThumb(false));
+        mediaSeekBar.setThumb(mediaSeekThumb(false, false));
         mediaSeekBar.setContentDescription("Playback position");
         mediaSeekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override public void onStartTrackingTouch(SeekBar seekBar) {
@@ -370,8 +388,10 @@ final class TwoColumnPanel extends FrameLayout {
                 renderMediaProgress();
             }
         });
+        // Compact BBOS6 seek strip: keep the drawable and touch area centered
+        // within the 30dp row, matching the reference player proportions.
         mediaSeekRow.addView(mediaSeekBar, new LinearLayout.LayoutParams(
-                0, dp(48), 1f));
+                0, dp(30), 1f));
 
         mediaDuration = text("--:--", 14, EXPANDED_MEDIA_PALETTE.muted);
         mediaDuration.setGravity(Gravity.CENTER_VERTICAL | Gravity.RIGHT);
@@ -380,7 +400,7 @@ final class TwoColumnPanel extends FrameLayout {
         // Insert ahead of the transport row; artwork is prepended afterwards.
         // Final expanded order: artwork, seekbar, transport controls.
         mediaContainer.addView(mediaSeekRow, 0, new LinearLayout.LayoutParams(
-                LayoutParams.MATCH_PARENT, dp(48)));
+                LayoutParams.MATCH_PARENT, dp(30)));
 
         // Expanded-only artwork and metadata: artwork on the left, track info
         // centered vertically on the right. The collapsed 46dp row is unchanged.
@@ -576,8 +596,8 @@ final class TwoColumnPanel extends FrameLayout {
         expandedMediaTitle.setText(entry.title.isEmpty() ? "Now playing" : entry.title);
         expandedMediaArtist.setText(entry.artist);
         expandedMediaArtist.setVisibility(entry.artist.isEmpty() ? View.GONE : View.VISIBLE);
-        mediaButtons[NativeMediaSessions.PLAY_PAUSE].setImageResource(entry.playing
-                ? android.R.drawable.ic_media_pause : android.R.drawable.ic_media_play);
+        mediaButtons[NativeMediaSessions.PLAY_PAUSE].setImageDrawable(
+                mediaTransportIcon(NativeMediaSessions.PLAY_PAUSE, entry.playing));
         mediaButtons[NativeMediaSessions.PLAY_PAUSE].setContentDescription(
                 entry.playing ? "Pause" : "Play");
         mediaIndex.setText(mediaSessions.size() > 1
@@ -676,8 +696,14 @@ final class TwoColumnPanel extends FrameLayout {
         updateCollapsedMediaStatuses(currentMediaSession());
         mediaIndex.setVisibility(open ? View.GONE
                 : mediaSessions.size() > 1 ? View.VISIBLE : View.GONE);
-        mediaRow.setPadding(dp(open ? 10 : 9), dp(3),
-                dp(open ? 10 : 9), dp(3));
+        // Expanded playback buttons must touch both screen edges and the
+        // full toolbar height. Padding belongs inside each icon view only.
+        // Preserve the original outer inset on the collapsed media strip.
+        mediaRow.setPadding(open ? 0 : dp(9), open ? 0 : dp(3),
+                open ? 0 : dp(9), open ? 0 : dp(3));
+        // Foreground lines overlay the shared gradient and focused button,
+        // without consuming layout width or affecting click/trackpad routing.
+        mediaRow.setForeground(open ? expandedMediaTransportSeparators : null);
         mediaRow.setLayoutParams(new LinearLayout.LayoutParams(
                 LayoutParams.MATCH_PARENT, dp(open ? 62 : 46)));
         for (ImageView button : mediaButtons) {
@@ -685,8 +711,10 @@ final class TwoColumnPanel extends FrameLayout {
             button.setLayoutParams(open
                     ? new LinearLayout.LayoutParams(0, LayoutParams.MATCH_PARENT, 1f)
                     : new LinearLayout.LayoutParams(dp(39), dp(39)));
-            button.setPadding(dp(open ? 14 : 9), dp(open ? 14 : 9),
-                    dp(open ? 14 : 9), dp(open ? 14 : 9));
+            // Expanded icons are 36dp; 10dp internal inset leaves sufficient
+            // vertical room inside the unchanged 62dp playback-button row.
+            button.setPadding(dp(open ? 10 : 9), dp(open ? 10 : 9),
+                    dp(open ? 10 : 9), dp(open ? 10 : 9));
         }
         mediaContainer.setLayoutParams(new LinearLayout.LayoutParams(
                 LayoutParams.MATCH_PARENT,
@@ -845,18 +873,15 @@ final class TwoColumnPanel extends FrameLayout {
 
     /** BBOS6 seek area: dark vertical fill, 2dp top rule and silver bottom rule. */
     private Drawable mediaSeekBackground() {
-        GradientDrawable fill = new GradientDrawable(
-                GradientDrawable.Orientation.TOP_BOTTOM,
-                new int[] {0xff222422, 0xff181818});
-        GradientDrawable bottomBorder = new GradientDrawable(
-                GradientDrawable.Orientation.LEFT_RIGHT,
-                new int[] {0xffb5b6b5, 0xffffffff, 0xffb5b6b5});
+        GradientDrawable fill = MediaChromeDivider.darkMediaBackground();
+        // The mode header's upper border uses this exact same silver gradient.
+        GradientDrawable bottomBorder = MediaChromeDivider.silverLine();
         LayerDrawable layers = new LayerDrawable(new Drawable[] {
-                fill, new ColorDrawable(0xff393c3c), bottomBorder
+                fill, MediaChromeDivider.darkRule(), bottomBorder
         });
-        layers.setLayerHeight(1, dp(2));
+        layers.setLayerHeight(1, dp(MediaChromeDivider.DARK_RULE_HEIGHT_DP));
         layers.setLayerGravity(1, Gravity.TOP | Gravity.FILL_HORIZONTAL);
-        layers.setLayerHeight(2, dp(2));
+        layers.setLayerHeight(2, dp(MediaChromeDivider.HEIGHT_DP));
         layers.setLayerGravity(2, Gravity.BOTTOM | Gravity.FILL_HORIZONTAL);
         return layers;
     }
@@ -918,12 +943,15 @@ final class TwoColumnPanel extends FrameLayout {
     }
 
     /**
-     * Expanded BBOS6 seek thumb. Keep the existing highlighted blue style,
-     * while the normal thumb uses a shaded, round-ended silver-blue capsule.
-     * Both drawables have transparent pixels outside their rounded ends.
+     * BBOS6 seek-pill states:
+     * idle = silver-blue layered capsule;
+     * highlighted = the same layered capsule with glossy blue gradients;
+     * selected/editing = the original solid blue focus gradient and border.
+     * Highlight alone never enters trackpad seek-edit mode.
      */
-    private Drawable mediaSeekThumb(boolean selected) {
+    private Drawable mediaSeekThumb(boolean highlighted, boolean selected) {
         if (selected) {
+            // Preserve the previous selected/editing style unchanged.
             GradientDrawable pill = new GradientDrawable(
                     GradientDrawable.Orientation.TOP_BOTTOM,
                     BB7SelectionGradientColors.colors(false));
@@ -934,29 +962,42 @@ final class TwoColumnPanel extends FrameLayout {
             return pill;
         }
 
-        // The outside shell provides the dark rounded edge and bottom rim.
+        // Highlight reuses the idle pill's silhouette, bevel and nine-stop
+        // vertical lighting. Only its shell/body colors change to blue.
         GradientDrawable shell = new GradientDrawable(
                 GradientDrawable.Orientation.TOP_BOTTOM,
-                new int[] {0xff636563, 0xff929396, 0xff525253});
+                highlighted
+                        ? new int[] {0xff19466e, 0xff477eac, 0xff12365c}
+                        : new int[] {0xff636563, 0xff929396, 0xff525253});
         shell.setShape(GradientDrawable.RECTANGLE);
         shell.setCornerRadius(dp(8));
         shell.setSize(dp(54), dp(16));
 
-        // Vertical light-and-shadow bands sampled conceptually from the
-        // reference pill, with no bitmap assets or theme-derived colors.
         GradientDrawable body = new GradientDrawable(
                 GradientDrawable.Orientation.TOP_BOTTOM,
-                new int[] {
-                        0xfff7f7f7, // bright top edge
-                        0xff8ca6c6, // blue-grey upper body
-                        0xff9caece,
-                        0xffa5bace,
-                        0xffbdcbde,
-                        0xffced7e7,
-                        0xffdee3ef,
-                        0xffefeff7, // lower silver highlight
-                        0xffadaaad  // shaded bottom edge
-                });
+                highlighted
+                        ? new int[] {
+                                0xffe7f6ff, // bright upper edge
+                                0xff4b92d6, // blue upper body
+                                0xff559cdf,
+                                0xff64a7e6,
+                                0xff7cb8ef,
+                                0xff92c8f6,
+                                0xffbadeff,
+                                0xffe1f1ff, // lower highlight
+                                0xff578fbe  // blue shaded bottom rim
+                        }
+                        : new int[] {
+                                0xfff7f7f7, // bright top edge
+                                0xff8ca6c6, // blue-grey upper body
+                                0xff9caece,
+                                0xffa5bace,
+                                0xffbdcbde,
+                                0xffced7e7,
+                                0xffdee3ef,
+                                0xffefeff7, // lower silver highlight
+                                0xffadaaad  // shaded bottom edge
+                        });
         body.setShape(GradientDrawable.RECTANGLE);
         body.setCornerRadius(dp(7));
         body.setSize(dp(52), dp(14));
@@ -966,13 +1007,149 @@ final class TwoColumnPanel extends FrameLayout {
         return capsule;
     }
 
-    /** Fixed BBOS6 focus styling for expanded media; other surfaces stay themed. */
-    private GradientDrawable expandedMediaSelection(int radius, int border) {
+    /**
+     * BBOS6 transport dividers: a 1dp dark line immediately followed by a
+     * 1dp light line, both shading vertically with the toolbar. The sample
+     * screenshot has identical pairs at each button boundary. Drawing in
+     * the retained parent foreground preserves three existing hit targets.
+     */
+    private Drawable mediaTransportSeparators() {
+        return new Drawable() {
+            private final Paint dark = new Paint();
+            private final Paint light = new Paint();
+
+            @Override protected void onBoundsChange(Rect bounds) {
+                super.onBoundsChange(bounds);
+                if (bounds.isEmpty()) return;
+                float top = bounds.top;
+                float bottom = bounds.bottom;
+                float[] stops = {0f, 0.17f, 0.34f, 0.51f, 1f};
+                dark.setShader(new LinearGradient(0f, top, 0f, bottom,
+                        new int[] {
+                                0xff525152, 0xff313839, 0xff212829,
+                                0xff181c18, 0xff080808
+                        }, stops, Shader.TileMode.CLAMP));
+                light.setShader(new LinearGradient(0f, top, 0f, bottom,
+                        new int[] {
+                                0xffb5b2b5, 0xff9c9ea5, 0xff848684,
+                                0xff6b6d73, 0xff313831
+                        }, stops, Shader.TileMode.CLAMP));
+            }
+
+            @Override public void draw(Canvas canvas) {
+                Rect bounds = getBounds();
+                int width = dp(1);
+                // Use the real child positions, not estimated thirds, so
+                // separators stay aligned across screen sizes and densities.
+                for (int i = 0; i < mediaButtons.length - 1; i++) {
+                    int edge = mediaButtons[i].getRight();
+                    if (edge <= bounds.left || edge >= bounds.right) continue;
+                    canvas.drawRect(edge - width, bounds.top, edge, bounds.bottom, dark);
+                    canvas.drawRect(edge, bounds.top, edge + width, bounds.bottom, light);
+                }
+            }
+
+            @Override public void setAlpha(int alpha) {
+                dark.setAlpha(alpha);
+                light.setAlpha(alpha);
+                invalidateSelf();
+            }
+
+            @Override public void setColorFilter(ColorFilter filter) {
+                dark.setColorFilter(filter);
+                light.setColorFilter(filter);
+                invalidateSelf();
+            }
+
+            @Override public int getOpacity() {
+                return PixelFormat.TRANSLUCENT;
+            }
+        };
+    }
+
+    /**
+     * Solid 36dp vector playback symbols, independent of external resources.
+     * This drawable is painted in the host SystemUI context, avoiding the
+     * APK-vs-SystemUI resource namespace mismatch entirely.
+     */
+    private Drawable mediaTransportIcon(int action, boolean pause) {
+        final Path shape = new Path();
+        if (action == NativeMediaSessions.PREVIOUS) {
+            shape.addRect(5f, 5f, 7f, 19f, Path.Direction.CW);
+            shape.moveTo(18f, 5f);
+            shape.lineTo(8f, 12f);
+            shape.lineTo(18f, 19f);
+            shape.close();
+        } else if (action == NativeMediaSessions.NEXT) {
+            shape.moveTo(6f, 5f);
+            shape.lineTo(16f, 12f);
+            shape.lineTo(6f, 19f);
+            shape.close();
+            shape.addRect(17f, 5f, 19f, 19f, Path.Direction.CW);
+        } else if (pause) {
+            shape.addRect(6f, 5f, 10f, 19f, Path.Direction.CW);
+            shape.addRect(14f, 5f, 18f, 19f, Path.Direction.CW);
+        } else {
+            shape.moveTo(7f, 5f);
+            shape.lineTo(19f, 12f);
+            shape.lineTo(7f, 19f);
+            shape.close();
+        }
+
+        final Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
+        fill.setColor(Color.WHITE);
+        fill.setStyle(Paint.Style.FILL);
+        return new Drawable() {
+            @Override public void draw(Canvas canvas) {
+                Rect bounds = getBounds();
+                if (bounds.isEmpty()) return;
+                int save = canvas.save();
+                canvas.translate(bounds.left, bounds.top);
+                canvas.scale(bounds.width() / 24f, bounds.height() / 24f);
+                canvas.drawPath(shape, fill);
+                canvas.restoreToCount(save);
+            }
+
+            @Override public int getIntrinsicWidth() { return dp(36); }
+            @Override public int getIntrinsicHeight() { return dp(36); }
+
+            @Override public void setAlpha(int alpha) {
+                fill.setAlpha(alpha);
+                invalidateSelf();
+            }
+
+            @Override public void setColorFilter(ColorFilter filter) {
+                fill.setColorFilter(filter);
+                invalidateSelf();
+            }
+
+            @Override public int getOpacity() { return PixelFormat.TRANSLUCENT; }
+        };
+    }
+
+    /**
+     * Selected BBOS6 playback button: fixed dark-blue gradient sampled from
+     * the supplied screenshot, away from the white playback icon.
+     * Fill the entire button rectangle with no stroke or rounded corners.
+     * Parent foreground draws the double separators above this selection.
+     * The independent seek-pill selection style remains unchanged.
+     */
+    private GradientDrawable expandedMediaSelection() {
         GradientDrawable selected = new GradientDrawable(
                 GradientDrawable.Orientation.TOP_BOTTOM,
-                BB7SelectionGradientColors.colors(false));
-        selected.setCornerRadius(radius);
-        selected.setStroke(border, BB7Theme.BLUE_BORDER);
+                new int[] {
+                        0xff0871ce, //   0%
+                        0xff0871ce, //  10%
+                        0xff086dc6, //  20%
+                        0xff086dc6, //  30%
+                        0xff0869bd, //  40%
+                        0xff0865bd, //  50%
+                        0xff0861b5, //  60%
+                        0xff105db5, //  70%
+                        0xff1059ad, //  80%
+                        0xff1055a5, //  90%
+                        0xff1055a5  // 100%
+                });
         return selected;
     }
 
@@ -980,10 +1157,12 @@ final class TwoColumnPanel extends FrameLayout {
         boolean focused = mediaRow.isFocused();
         mediaRow.setBackground(focused && !mediaControlsOpen
                 ? BB7Theme.selected(getContext(), dp(2), dp(1))
-                : new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
-                        mediaControlsOpen || palette == BB7Theme.Palette.DARK
-                                ? new int[] {0xff2f4053, 0xff1e2c3b}
-                                : new int[] {0xffecf1f7, 0xffd8e2ec}));
+                : mediaControlsOpen
+                        ? expandedMediaTransportBackground
+                        : new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+                                palette == BB7Theme.Palette.DARK
+                                        ? new int[] {0xff2f4053, 0xff1e2c3b}
+                                        : new int[] {0xffecf1f7, 0xffd8e2ec}));
         mediaNowPlaying.setTextColor(focused && !mediaControlsOpen
                 ? Color.WHITE : palette.title);
         mediaIndex.setTextColor(focused && !mediaControlsOpen
@@ -991,10 +1170,11 @@ final class TwoColumnPanel extends FrameLayout {
         int statusTint = focused && !mediaControlsOpen ? Color.WHITE : palette.body;
         mediaShuffleStatus.setTint(statusTint);
         mediaRepeatStatus.setTint(statusTint);
-        boolean seekFocused = focused && mediaControlsOpen && mediaSeekSelected;
-        // Keep the fixed seek-area background; focus changes only the pill.
-        // The elapsed/total timestamps stay unchanged.
-        mediaSeekBar.setThumb(mediaSeekThumb(seekFocused));
+        boolean seekHighlighted = focused && mediaControlsOpen && mediaSeekSelected;
+        boolean seekSelected = seekHighlighted && mediaSeekEditing;
+        // Keep the fixed seek-area background and timestamps. Navigation only
+        // highlights the glossy blue capsule; Enter changes to selected/editing.
+        mediaSeekBar.setThumb(mediaSeekThumb(seekHighlighted, seekSelected));
         mediaElapsed.setTextColor(EXPANDED_MEDIA_PALETTE.muted);
         mediaDuration.setTextColor(EXPANDED_MEDIA_PALETTE.muted);
         int index = mediaSessionIndex();
@@ -1008,7 +1188,7 @@ final class TwoColumnPanel extends FrameLayout {
                     && !mediaSeekSelected && !mediaModeSelected
                     && selectedMediaButton == i;
             ImageView button = mediaButtons[i];
-            button.setBackground(selected ? expandedMediaSelection(dp(3), dp(1)) : null);
+            button.setBackground(selected ? expandedMediaSelection() : null);
             button.setColorFilter(selected ? Color.WHITE : EXPANDED_MEDIA_PALETTE.headingText);
             button.setAlpha(enabled ? 1f : 0.35f);
         }
