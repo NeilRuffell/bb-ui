@@ -19,13 +19,27 @@ below system bars.
 
 Home screen, in order:
 
-1. All Songs
-2. Artists
-3. Albums
-4. Genres
-5. Playlists (not implemented yet)
-6. Shuffle Songs (first-party shuffled playback)
-7. Settings
+1. **Now Playing...** — only while Media3 has a current track in
+   ready/buffering state (playing or paused)
+2. All Songs
+3. Artists
+4. Albums
+5. Genres
+6. Playlists (not implemented yet)
+7. Shuffle Songs (first-party shuffled playback)
+8. Settings
+
+The **Now Playing...** item is the first row of the existing shared native
+`MusicListView`, with the original BBOS6 `341.png` icon and identical
+row sizing/gradient/trackpad handling. It is not shown before a song is
+queued, and disappears if the session no longer has an active track.
+Tapping or pressing Enter on this item reopens the existing Now Playing
+screen for the **same** Media3 session; it does **not** restart, resume, or
+requeue the song, so paused audio remains paused. The same row appears
+when resuming the app if the live session still has a current track.
+The original seven menu indices remain unchanged in code. Updates modify
+only `rootPage.rows` and preserve existing list selection/Back navigation;
+the shortcut is not included in the home screen's song-search results.
 
 **Settings** provides **Add folders**, **Refresh library**, and a live list
 of each saved music folder, with a per-folder **Remove** control. Removing a
@@ -76,6 +90,7 @@ OS 6 Music home menu supplied for this project:
 
 | Menu entry | Original asset | Android packaged resource |
 | --- | --- | --- |
+| Now Playing... (when active) | `341.png` | `bbos6_menu_now_playing.png` |
 | All Songs | `350.png` | `bbos6_menu_all_songs.png` |
 | Artists | `345.png` | `bbos6_menu_artists.png` |
 | Albums | `351.png` | `bbos6_menu_albums.png` |
@@ -283,7 +298,8 @@ of selected-folder audio tracks (e.g. `1 Song`, `2 Songs`); Artists, Albums
 and Genres display distinct category entries (`1 Item`, `2 Items`).
 Artist/album/genre groups display their direct number of songs when opened.
 Settings has no child-count subtitle on the home menu, while retaining
-its Add folders entry. Playlists displays `0 Items` until the app supports
+its Add folders entry. The conditional Now Playing shortcut also has no
+child-count subtitle. Playlists displays `0 Items` until the app supports
 playlists. Shuffle Songs is an action and has no child count.
 
 When the app opens, counts come from the saved Room catalog for the current
