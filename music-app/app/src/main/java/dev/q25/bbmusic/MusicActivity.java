@@ -318,8 +318,9 @@ public final class MusicActivity extends Activity {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
-        // Keep the row/background edge-to-edge; indent only the label.
-        row.setPadding(0, dp(4), 0, dp(4));
+        // The cover touches every edge of the selected row. Only labels
+        // have their own internal inset, not the row or artwork.
+        row.setPadding(0, 0, 0, 0);
         row.setLayoutParams(new AbsListView.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, dp(55)));
         row.setFocusable(false);
@@ -332,10 +333,10 @@ public final class MusicActivity extends Activity {
         art.setContentDescription("Album artwork");
         art.setVisibility(View.GONE);
         Drawable placeholder = new MusicCoverPlaceholderDrawable();
+        // Full 55dp row height and flush to the screen's left edge.
+        // No inset between artwork and the square selection background.
         LinearLayout.LayoutParams artLayout =
-                new LinearLayout.LayoutParams(dp(44), dp(44));
-        artLayout.leftMargin = dp(10);
-        artLayout.rightMargin = dp(4);
+                new LinearLayout.LayoutParams(dp(55), dp(55));
         row.addView(art, artLayout);
 
         LinearLayout textColumn = new LinearLayout(this);
