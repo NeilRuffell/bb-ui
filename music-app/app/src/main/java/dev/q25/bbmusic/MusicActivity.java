@@ -4,29 +4,15 @@ import android.app.Activity;
 import android.content.Intent;
 import android.net.Uri;
 import android.provider.DocumentsContract;
-import android.content.res.Configuration;
-import android.graphics.Color;
-import android.graphics.Bitmap;
-import android.graphics.drawable.Drawable;
-import android.graphics.drawable.ColorDrawable;
-import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
 import android.util.Log;
-import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.window.OnBackInvokedCallback;
 import android.window.OnBackInvokedDispatcher;
-import android.widget.AbsListView;
-import android.widget.AdapterView;
-import android.widget.BaseAdapter;
 import android.widget.FrameLayout;
-import android.widget.ImageView;
-import android.widget.LinearLayout;
-import android.widget.ListView;
-import android.widget.TextView;
 import android.widget.Toast;
 
 import java.util.ArrayDeque;
@@ -70,23 +56,9 @@ public final class MusicActivity extends Activity {
             "Settings"
     };
 
-    // BB UI's QS palette and selected-state gradient are replicated locally:
-    // the standalone music APK has no dependency on BB UI at build or runtime.
-    private static final int BLUE_BORDER = 0xffb4e2fb;
-    private static final int[] LIGHT_SELECTION = {
-            0xff088eef, 0xff088aef, 0xff0886ef, 0xff0882ef, 0xff087de7,
-            0xff0879e7, 0xff1075e7, 0xff1071e7, 0xff106dde, 0xff1069de,
-            0xff1065de
-    };
-    private static final int[] DARK_SELECTION = {
-            0xff459fd9, 0xff3285c5, 0xff2368aa
-    };
-
-    private ListView list;
-    private BaseAdapter adapter;
+    private MusicListView list;
     private TrackpadPressHandler trackpadPress;
     private LocalMusicSource localSource;
-    private MusicListArtworkLoader listArtwork;
     private Map<String, List<Uri>> albumArtworkSources = Collections.emptyMap();
     private MusicPlaybackClient playback;
     private FrameLayout safeViewport;
@@ -102,12 +74,6 @@ public final class MusicActivity extends Activity {
     private final ArrayDeque<Page> backStack = new ArrayDeque<>();
     private Page currentPage;
     private OnBackInvokedCallback nestedBackCallback;
-    private int canvasColor;
-    private int rowColor;
-    private int titleColor;
-    private int dividerColor;
-    private int[] selectionColors;
-
     private static final class MenuRow {
         final String title;
         final int kind;
@@ -166,23 +132,6 @@ public final class MusicActivity extends Activity {
         Group(String label) { this.label = label; }
     }
 
-    private static final class RowViews {
-        final LinearLayout root;
-        final ImageView artwork;
-        final Drawable noArtwork;
-        final TextView label;
-        final TextView count;
-
-        RowViews(LinearLayout root, ImageView artwork, Drawable noArtwork,
-                TextView label, TextView count) {
-            this.root = root;
-            this.artwork = artwork;
-            this.noArtwork = noArtwork;
-            this.label = label;
-            this.count = count;
-        }
-    }
-
     // Artist/genre representative: alphabetical first album title, with
     // deterministic tie-breaking for identical album names.
     private static final Comparator<LocalMusicSource.Song> FIRST_ALBUM =
@@ -196,18 +145,9 @@ public final class MusicActivity extends Activity {
     @Override
     protected void onCreate(Bundle state) {
         super.onCreate(state);
-        boolean dark = (getResources().getConfiguration().uiMode
-                & Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES;
-        canvasColor = dark ? 0xff10141a : 0xfff4f6f8;
-        rowColor = dark ? 0xff283442 : Color.WHITE;
-        titleColor = dark ? Color.WHITE : 0xff182838;
-        dividerColor = dark ? 0xff476f8f : 0xff9eafbe;
-        selectionColors = dark ? DARK_SELECTION : LIGHT_SELECTION;
-
         trackpadPress = new TrackpadPressHandler(this::activateSelected,
                 () -> { /* Long-press behavior will be specified later. */ });
         localSource = new LocalMusicSource(this);
-        listArtwork = new MusicListArtworkLoader(this);
         playback = new MusicPlaybackClient(this, new MusicPlaybackClient.Listener() {
             @Override public void onPlaybackChanged() {
                 if (nowPlayingVisible && nowPlaying != null) nowPlaying.render();
@@ -223,63 +163,17 @@ public final class MusicActivity extends Activity {
         }
         currentPage = new Page("Music", rootRows);
 
-        list = new ListView(this);
-        // Rows and their selection backgrounds must span the full content width.
-        list.setPadding(0, 0, 0, 0);
-        list.setBackgroundColor(canvasColor);
-        list.setVerticalScrollBarEnabled(false);
-        list.setFastScrollEnabled(false);
-        list.setItemsCanFocus(false);
-        list.setFocusable(true);
-        list.setFocusableInTouchMode(true);
-        list.setSelector(android.R.color.transparent);
-        list.setDivider(new ColorDrawable(dividerColor));
-        list.setDividerHeight(dp(1));
-        adapter = new BaseAdapter() {
-            @Override public int getCount() {
+        list = new MusicListView(this, new MusicListView.DataSource() {
+            @Override public int size() {
                 return currentPage.rows.size();
             }
 
-            @Override public Object getItem(int position) {
-                return currentPage.rows.get(position);
+            @Override public MusicListView.RowData rowAt(int position) {
+                return rowPresentation(currentPage.rows.get(position));
             }
 
-            @Override public boolean isEnabled(int position) {
-                return currentPage.rows.get(position).kind != ROW_MESSAGE;
-            }
-
-            @Override public long getItemId(int position) {
-                return position;
-            }
-
-            @Override public View getView(int position, View convertView,
-                    ViewGroup parent) {
-                View view = convertView == null ? createRowView() : convertView;
-                RowViews views = (RowViews) view.getTag();
-                bindRow(views, currentPage.rows.get(position), position);
-                return view;
-            }
-        };
-        list.setAdapter(adapter);
-
-        list.setOnItemClickListener((parent, row, position, id) -> activate(position));
-        list.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
-            @Override public void onItemSelected(AdapterView<?> parent,
-                    View row, int position, long id) {
-                styleVisibleRows();
-            }
-
-            @Override public void onNothingSelected(AdapterView<?> parent) {
-                styleVisibleRows();
-            }
-        });
-        list.setOnFocusChangeListener((view, hasFocus) -> styleVisibleRows());
-        list.setOnScrollListener(new AbsListView.OnScrollListener() {
-            @Override public void onScrollStateChanged(AbsListView view, int state) { }
-
-            @Override public void onScroll(AbsListView view, int firstVisibleItem,
-                    int visibleItemCount, int totalItemCount) {
-                styleVisibleRows();
+            @Override public void activate(int position) {
+                MusicActivity.this.activate(position);
             }
         });
 
@@ -288,7 +182,7 @@ public final class MusicActivity extends Activity {
         // On edge-to-edge Android versions, this keeps rows and their selected
         // backgrounds beneath the visible status bar without fixed offsets.
         safeViewport = new FrameLayout(this);
-        safeViewport.setBackgroundColor(canvasColor);
+        safeViewport.setBackgroundColor(list.canvasColor());
         safeViewport.setFitsSystemWindows(true);
         safeViewport.setClipChildren(true);
         safeViewport.setClipToPadding(true);
@@ -302,7 +196,7 @@ public final class MusicActivity extends Activity {
             if (isFinishing() || isDestroyed()) return;
             list.requestFocus();
             list.setSelectionFromTop(0, 0);
-            styleVisibleRows();
+            list.refreshSelection();
         });
 
         // Derive home-menu counts from precisely the selected folder trees.
@@ -314,112 +208,15 @@ public final class MusicActivity extends Activity {
         }
     }
 
-    private View createRowView() {
-        LinearLayout row = new LinearLayout(this);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setGravity(Gravity.CENTER_VERTICAL);
-        // The cover touches every edge of the selected row. Only labels
-        // have their own internal inset, not the row or artwork.
-        row.setPadding(0, 0, 0, 0);
-        row.setLayoutParams(new AbsListView.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(55)));
-        row.setFocusable(false);
-
-        // Only song/artist/album/genre lists have album art. The root
-        // menu and Settings retain the original label-only presentation.
-        ImageView art = new ImageView(this);
-        art.setScaleType(ImageView.ScaleType.CENTER_CROP);
-        art.setFocusable(false);
-        art.setContentDescription("Album artwork");
-        art.setVisibility(View.GONE);
-        Drawable placeholder = new MusicCoverPlaceholderDrawable();
-        // Full 55dp row height and flush to the screen's left edge.
-        // No inset between artwork and the square selection background.
-        LinearLayout.LayoutParams artLayout =
-                new LinearLayout.LayoutParams(dp(55), dp(55));
-        row.addView(art, artLayout);
-
-        LinearLayout textColumn = new LinearLayout(this);
-        textColumn.setOrientation(LinearLayout.VERTICAL);
-        textColumn.setGravity(Gravity.CENTER_VERTICAL);
-        row.addView(textColumn, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT));
-
-        TextView title = new TextView(this);
-        title.setTextSize(15);
-        title.setPadding(dp(16), 0, dp(16), 0);
-        title.setSingleLine(true);
-        title.setEllipsize(android.text.TextUtils.TruncateAt.END);
-        textColumn.addView(title, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT));
-
-        TextView count = new TextView(this);
-        count.setTextSize(12);
-        count.setPadding(dp(16), 0, dp(16), 0);
-        count.setSingleLine(true);
-        count.setEllipsize(android.text.TextUtils.TruncateAt.END);
-        textColumn.addView(count, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT));
-
-        row.setTag(new RowViews(row, art, placeholder, title, count));
-        return row;
-    }
-
-    /** Rebind visible count labels in place without disturbing ListView selection. */
-    private void refreshVisibleRows() {
-        if (list == null) return;
-        int first = list.getFirstVisiblePosition();
-        for (int child = 0; child < list.getChildCount(); child++) {
-            View row = list.getChildAt(child);
-            int position = first + child;
-            if (!(row.getTag() instanceof RowViews)
-                    || position < 0 || position >= currentPage.rows.size()) continue;
-            bindRow((RowViews) row.getTag(), currentPage.rows.get(position), position);
-        }
-    }
-
-    private void bindRow(RowViews views, MenuRow row, int position) {
-        views.label.setText(row.title);
-        String detail = childCountLabel(row);
-        views.count.setVisibility(detail == null ? View.GONE : View.VISIBLE);
-        views.count.setText(detail == null ? "" : detail);
-        views.root.setContentDescription(
-                detail == null ? row.title : row.title + ", " + detail);
-        bindArtwork(views, row);
-        styleRow(views, position);
-    }
-
-    private void bindArtwork(RowViews views, MenuRow row) {
-        if (row.kind != ROW_GROUP && row.kind != ROW_SONG) {
-            views.artwork.setVisibility(View.GONE);
-            views.artwork.setTag(null);
-            views.artwork.setImageDrawable(null);
-            return;
-        }
-        views.artwork.setVisibility(View.VISIBLE);
-        String albumKey = albumKeyForRow(row);
+    private MusicListView.RowData rowPresentation(MenuRow row) {
+        boolean hasArtwork = row.kind == ROW_GROUP || row.kind == ROW_SONG;
+        String albumKey = hasArtwork ? albumKeyForRow(row) : null;
         List<Uri> candidates = albumKey == null
                 ? null : albumArtworkSources.get(albumKey);
-        if (candidates == null || candidates.isEmpty()) {
-            views.artwork.setTag(null);
-            views.artwork.setImageDrawable(views.noArtwork);
-            return;
-        }
-        String requestKey = "album:" + albumKey;
-        if (!requestKey.equals(views.artwork.getTag())) {
-            views.artwork.setTag(requestKey);
-            views.artwork.setImageDrawable(views.noArtwork);
-        }
-        // The view's tag protects against asynchronous results arriving
-        // after the native ListView recycles a row for a different album.
-        listArtwork.request(requestKey, candidates, image -> {
-            if (!requestKey.equals(views.artwork.getTag())) return;
-            if (image == null) views.artwork.setImageDrawable(views.noArtwork);
-            else views.artwork.setImageBitmap(image);
-        });
+        return new MusicListView.RowData(
+                row.title, childCountLabel(row), row.kind != ROW_MESSAGE,
+                hasArtwork, albumKey == null ? null : "album:" + albumKey,
+                candidates);
     }
 
     private String albumKeyForRow(MenuRow row) {
@@ -519,35 +316,7 @@ public final class MusicActivity extends Activity {
         }
         // No notifyDataSetChanged(): a count update must not reset focus
         // or the scroll position of the user's selected row.
-        refreshVisibleRows();
-    }
-
-    private void styleVisibleRows() {
-        if (list == null) return;
-        int first = list.getFirstVisiblePosition();
-        for (int child = 0; child < list.getChildCount(); child++) {
-            View row = list.getChildAt(child);
-            if (!(row.getTag() instanceof RowViews)) continue;
-            int position = first + child;
-            if (position < 0 || position >= currentPage.rows.size()) continue;
-            styleRow((RowViews) row.getTag(), position);
-        }
-    }
-
-    private void styleRow(RowViews views, int position) {
-        boolean focused = list.hasFocus() && list.getSelectedItemPosition() == position;
-        if (focused) {
-            GradientDrawable highlight = new GradientDrawable(
-                    GradientDrawable.Orientation.TOP_BOTTOM, selectionColors);
-            highlight.setCornerRadius(0);
-            highlight.setStroke(dp(1), BLUE_BORDER);
-            views.root.setBackground(highlight);
-        } else {
-            views.root.setBackgroundColor(rowColor);
-        }
-        views.label.setTextColor(focused ? Color.WHITE : titleColor);
-        views.count.setTextColor(focused ? 0xffedf4ff : (rowColor == Color.WHITE
-                ? 0xff66798a : 0xffb3c1ce));
+        list.refreshVisibleRows();
     }
 
     private void activateSelected() {
@@ -653,7 +422,7 @@ public final class MusicActivity extends Activity {
             if (nowPlayingVisible || isFinishing() || isDestroyed()) return;
             list.requestFocus();
             list.setSelectionFromTop(Math.max(0, savedListPosition), savedListTop);
-            styleVisibleRows();
+            list.refreshSelection();
         });
     }
 
@@ -700,7 +469,7 @@ public final class MusicActivity extends Activity {
                 localSource.invalidate();
                 localSongs = null;
                 albumArtworkSources = Collections.emptyMap();
-                listArtwork.clear();
+                list.clearArtworkCache();
                 loading = false;
                 pendingMenu = -1;
                 startLocalScan(false);
@@ -741,7 +510,7 @@ public final class MusicActivity extends Activity {
         }
         loading = true;
         localSongs = null;
-        refreshVisibleRows();
+        list.refreshVisibleRows();
         if (showFeedback) {
             Toast.makeText(this, "Reading selected music folders...",
                     Toast.LENGTH_SHORT).show();
@@ -766,7 +535,7 @@ public final class MusicActivity extends Activity {
                 loading = false;
                 pendingMenu = -1;
                 pendingShuffleStart = false;
-                refreshVisibleRows();
+                list.refreshVisibleRows();
                 Toast.makeText(MusicActivity.this, reason, Toast.LENGTH_LONG).show();
             }
         });
@@ -846,12 +615,12 @@ public final class MusicActivity extends Activity {
     private void showPage(Page page) {
         currentPage = page;
         trackpadPress.cancel();
-        adapter.notifyDataSetChanged();
+        list.notifyRowsChanged();
         list.post(() -> {
             if (currentPage != page || isFinishing() || isDestroyed()) return;
             list.requestFocus();
             list.setSelectionFromTop(Math.max(0, page.selected), page.selectedTop);
-            styleVisibleRows();
+            list.refreshSelection();
         });
     }
 
@@ -910,30 +679,7 @@ public final class MusicActivity extends Activity {
             return super.dispatchKeyEvent(event);
         }
         if (code == KeyEvent.KEYCODE_DPAD_UP || code == KeyEvent.KEYCODE_DPAD_DOWN) {
-            if (event.getAction() == KeyEvent.ACTION_DOWN) {
-                int selected = list.getSelectedItemPosition();
-                if (selected < 0) {
-                    // As in QS: if touch scrolling cleared selection, resume
-                    // trackpad navigation from a currently visible list row.
-                    int first = Math.max(0, list.getFirstVisiblePosition());
-                    int last = Math.min(currentPage.rows.size() - 1,
-                            list.getLastVisiblePosition());
-                    int target = code == KeyEvent.KEYCODE_DPAD_UP
-                            ? Math.max(first, last) : first;
-                    int visibleIndex = target - list.getFirstVisiblePosition();
-                    View visible = visibleIndex >= 0 && visibleIndex < list.getChildCount()
-                            ? list.getChildAt(visibleIndex) : null;
-                    int top = visible == null ? 0 : visible.getTop();
-                    list.requestFocus();
-                    list.setSelectionFromTop(target, top);
-                } else {
-                    // ListView itself owns one-row movement and viewport
-                    // changes; there is deliberately no manual scrolling.
-                    if (!list.hasFocus()) list.requestFocus();
-                    list.dispatchKeyEvent(event);
-                }
-            }
-            return true;
+            return list.handleVerticalKey(event);
         }
         return super.dispatchKeyEvent(event);
     }
@@ -958,7 +704,7 @@ public final class MusicActivity extends Activity {
         unregisterNestedBack();
         if (nowPlaying != null) nowPlaying.dispose();
         playback.disconnect();
-        listArtwork.close();
+        list.dispose();
         localSource.close();
         super.onDestroy();
     }
@@ -969,7 +715,4 @@ public final class MusicActivity extends Activity {
         if (!hasWindowFocus) trackpadPress.cancel();
     }
 
-    private int dp(float value) {
-        return Math.round(getResources().getDisplayMetrics().density * value);
-    }
 }
