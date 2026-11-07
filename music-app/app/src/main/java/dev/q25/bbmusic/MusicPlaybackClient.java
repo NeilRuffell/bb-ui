@@ -142,7 +142,7 @@ final class MusicPlaybackClient {
 
     void playPause() {
         if (controller == null) return;
-        if (controller.isPlaying()) controller.pause();
+        if (controller.getPlayWhenReady()) controller.pause();
         else controller.play();
     }
 
