@@ -99,8 +99,9 @@ reusing the existing native `EditText` and input handler:
 - **1dp top separator:** `#5A5D63` at the outer top edge.
 - **Panel gradient:** vertical, `#4B4E53` (top) to `#292C31` (bottom).
 - **Input field:** inset approximately 6dp horizontally and 6dp above,
-  white with a 5dp rounded dark outer rim and a gray-to-white inset
-  highlight/shadow near the upper edge. Approximately 31dp tall.
+  white with a 4dp rounded dark outer rim and a gray-to-white inset
+  highlight/shadow that reaches pure white within the first ~5dp.
+  Approximately 31dp tall.
 - **Typed text:** dark charcoal inside the white field, approximately
   12dp internal horizontal inset.
 - No hint or `Search` description appears; the Q25 physical keyboard
