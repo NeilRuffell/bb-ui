@@ -1,9 +1,7 @@
 name: Build BB UI debug APK
 
+# CI is intentionally manual-only. Device builds are done with local Gradle/ADB.
 on:
-  push:
-    branches: [main, master, 'feat/**']
-  pull_request:
   workflow_dispatch:
 
 permissions:
