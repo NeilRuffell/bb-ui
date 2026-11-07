@@ -1,6 +1,8 @@
 package dev.q25.bbmusic;
 
+import android.Manifest;
 import android.app.Activity;
+import android.content.pm.PackageManager;
 import android.content.res.Configuration;
 import android.graphics.Color;
 import android.graphics.drawable.ColorDrawable;
@@ -19,6 +21,16 @@ import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.TextView;
+import android.widget.Toast;
+
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 
 /**
  * Standalone BBOS6 Music main menu.
@@ -27,11 +39,17 @@ import android.widget.TextView;
  * and one-item trackpad navigation used by BB UI's Quick Settings panel,
  * without importing or depending on BB UI, Vector or SystemUI.
  *
- * Category destinations are intentionally not implemented yet. Symfonium is
- * not connected on startup and no media app is required to open this screen.
+ * Local music is read from Android MediaStore after the ordinary Android 13+
+ * READ_MEDIA_AUDIO permission prompt. Symfonium is never required or started.
+ * The UI uses the same recycled ListView row on every browse page.
  */
 public final class MusicActivity extends Activity {
     private static final String TAG = "BBMusic";
+    private static final int READ_AUDIO_REQUEST = 6101;
+    private static final int ROW_MENU = 0;
+    private static final int ROW_SONG = 1;
+    private static final int ROW_GROUP = 2;
+    private static final int ROW_MESSAGE = 3;
     private static final String[] MENU = {
             "All Songs",
             "Artists",
@@ -54,12 +72,73 @@ public final class MusicActivity extends Activity {
     };
 
     private ListView list;
+    private BaseAdapter adapter;
     private TrackpadPressHandler trackpadPress;
+    private LocalMusicSource localSource;
+    private List<LocalMusicSource.Song> localSongs;
+    private boolean loading;
+    private int pendingMenu = -1;
+    private final ArrayDeque<Page> backStack = new ArrayDeque<>();
+    private Page currentPage;
     private int canvasColor;
     private int rowColor;
     private int titleColor;
     private int dividerColor;
     private int[] selectionColors;
+
+    private static final class MenuRow {
+        final String title;
+        final int kind;
+        final int menuIndex;
+        final int groupCategory;
+        final List<LocalMusicSource.Song> songs;
+        final LocalMusicSource.Song song;
+
+        MenuRow(String title, int kind, int menuIndex, int groupCategory,
+                List<LocalMusicSource.Song> songs, LocalMusicSource.Song song) {
+            this.title = title;
+            this.kind = kind;
+            this.menuIndex = menuIndex;
+            this.groupCategory = groupCategory;
+            this.songs = songs;
+            this.song = song;
+        }
+
+        static MenuRow root(String name, int index) {
+            return new MenuRow(name, ROW_MENU, index, -1, null, null);
+        }
+
+        static MenuRow group(String name, int category,
+                List<LocalMusicSource.Song> songs) {
+            return new MenuRow(name, ROW_GROUP, -1, category, songs, null);
+        }
+
+        static MenuRow song(LocalMusicSource.Song song) {
+            return new MenuRow(song.title, ROW_SONG, -1, -1, null, song);
+        }
+
+        static MenuRow message(String message) {
+            return new MenuRow(message, ROW_MESSAGE, -1, -1, null, null);
+        }
+    }
+
+    private static final class Page {
+        final String name;
+        final List<MenuRow> rows;
+        int selected;
+        int selectedTop;
+
+        Page(String name, List<MenuRow> rows) {
+            this.name = name;
+            this.rows = rows;
+        }
+    }
+
+    private static final class Group {
+        final String label;
+        final ArrayList<LocalMusicSource.Song> songs = new ArrayList<>();
+        Group(String label) { this.label = label; }
+    }
 
     private static final class RowViews {
         final LinearLayout root;
@@ -83,7 +162,13 @@ public final class MusicActivity extends Activity {
         selectionColors = dark ? DARK_SELECTION : LIGHT_SELECTION;
 
         trackpadPress = new TrackpadPressHandler(this::activateSelected,
-                () -> { /* No long-press menu has been specified yet. */ });
+                () -> { /* Long-press behavior will be specified later. */ });
+        localSource = new LocalMusicSource(this);
+        ArrayList<MenuRow> rootRows = new ArrayList<>();
+        for (int index = 0; index < MENU.length; index++) {
+            rootRows.add(MenuRow.root(MENU[index], index));
+        }
+        currentPage = new Page("Music", rootRows);
 
         list = new ListView(this);
         // Rows and their selection backgrounds must span the full content width.
@@ -97,13 +182,13 @@ public final class MusicActivity extends Activity {
         list.setSelector(android.R.color.transparent);
         list.setDivider(new ColorDrawable(dividerColor));
         list.setDividerHeight(dp(1));
-        list.setAdapter(new BaseAdapter() {
+        adapter = new BaseAdapter() {
             @Override public int getCount() {
-                return MENU.length;
+                return currentPage.rows.size();
             }
 
             @Override public Object getItem(int position) {
-                return MENU[position];
+                return currentPage.rows.get(position);
             }
 
             @Override public long getItemId(int position) {
@@ -114,12 +199,14 @@ public final class MusicActivity extends Activity {
                     ViewGroup parent) {
                 View view = convertView == null ? createRowView() : convertView;
                 RowViews views = (RowViews) view.getTag();
-                views.label.setText(MENU[position]);
-                views.root.setContentDescription(MENU[position]);
+                String title = currentPage.rows.get(position).title;
+                views.label.setText(title);
+                views.root.setContentDescription(title);
                 styleRow(views, position);
                 return view;
             }
-        });
+        };
+        list.setAdapter(adapter);
 
         list.setOnItemClickListener((parent, row, position, id) -> activate(position));
         list.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
@@ -195,7 +282,7 @@ public final class MusicActivity extends Activity {
             View row = list.getChildAt(child);
             if (!(row.getTag() instanceof RowViews)) continue;
             int position = first + child;
-            if (position < 0 || position >= MENU.length) continue;
+            if (position < 0 || position >= currentPage.rows.size()) continue;
             styleRow((RowViews) row.getTag(), position);
         }
     }
@@ -219,10 +306,171 @@ public final class MusicActivity extends Activity {
     }
 
     private void activate(int position) {
-        if (position < 0 || position >= MENU.length) return;
-        // We will implement each destination under user guidance. Selection
-        // is deliberately inert until its screen/action has been defined.
-        Log.i(TAG, "Menu activated (not wired): " + MENU[position]);
+        if (position < 0 || position >= currentPage.rows.size()) return;
+        MenuRow row = currentPage.rows.get(position);
+        if (row.kind == ROW_MENU) {
+            if (row.menuIndex < 4) {
+                openLocalCategory(row.menuIndex);
+            } else if (row.menuIndex == 4) {
+                Toast.makeText(this, "Playlists are not implemented yet",
+                        Toast.LENGTH_SHORT).show();
+            } else {
+                Toast.makeText(this, "Playback is not implemented yet",
+                        Toast.LENGTH_SHORT).show();
+            }
+        } else if (row.kind == ROW_GROUP) {
+            List<LocalMusicSource.Song> groupSongs = new ArrayList<>(row.songs);
+            if (row.groupCategory == 2) {
+                // Android's TRACK column includes disc/track ordering.
+                groupSongs.sort(Comparator.comparingInt(song -> song.trackNumber));
+            }
+            navigateTo(new Page(row.title, songRows(groupSongs)));
+        } else if (row.kind == ROW_SONG) {
+            // MediaStore provided row.song.uri for our future native player.
+            Log.i(TAG, "Local track selected, media id=" + row.song.id);
+            Toast.makeText(this, "Playback is not implemented yet",
+                    Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void openLocalCategory(int menuIndex) {
+        pendingMenu = menuIndex;
+        if (checkSelfPermission(Manifest.permission.READ_MEDIA_AUDIO)
+                != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[] {Manifest.permission.READ_MEDIA_AUDIO},
+                    READ_AUDIO_REQUEST);
+            return;
+        }
+        if (localSongs != null) {
+            showLocalCategory(menuIndex);
+        } else if (!loading) {
+            loading = true;
+            Toast.makeText(this, "Reading device music...", Toast.LENGTH_SHORT).show();
+            localSource.load(new LocalMusicSource.Listener() {
+                @Override public void onLoaded(List<LocalMusicSource.Song> songs) {
+                    loading = false;
+                    localSongs = songs;
+                    Log.i(TAG, "Local music library ready: " + songs.size() + " songs");
+                    int menu = pendingMenu;
+                    pendingMenu = -1;
+                    if (menu >= 0 && backStack.isEmpty()) showLocalCategory(menu);
+                }
+
+                @Override public void onError(String reason) {
+                    loading = false;
+                    pendingMenu = -1;
+                    Toast.makeText(MusicActivity.this, reason, Toast.LENGTH_LONG).show();
+                }
+            });
+        }
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions,
+            int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode != READ_AUDIO_REQUEST) return;
+        if (grantResults.length > 0
+                && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+            if (pendingMenu >= 0) openLocalCategory(pendingMenu);
+        } else {
+            pendingMenu = -1;
+            Toast.makeText(this, "Music permission is required for device songs",
+                    Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void showLocalCategory(int category) {
+        if (localSongs == null || category < 0 || category > 3) return;
+        List<MenuRow> rows;
+        switch (category) {
+            case 0:
+                rows = songRows(localSongs);
+                break;
+            case 1:
+            case 2:
+            case 3:
+                rows = groupedRows(category);
+                break;
+            default:
+                return;
+        }
+        navigateTo(new Page(MENU[category], rows));
+        pendingMenu = -1;
+    }
+
+    private List<MenuRow> songRows(List<LocalMusicSource.Song> songs) {
+        ArrayList<MenuRow> rows = new ArrayList<>(songs.size());
+        for (LocalMusicSource.Song song : songs) rows.add(MenuRow.song(song));
+        if (rows.isEmpty()) rows.add(MenuRow.message("No local music found"));
+        return rows;
+    }
+
+    private List<MenuRow> groupedRows(int category) {
+        // All grouping is read-only; no secondary music scanner is required.
+        Map<String, Group> groups = new LinkedHashMap<>();
+        for (LocalMusicSource.Song song : localSongs) {
+            String label;
+            String key;
+            if (category == 1) {
+                label = song.artist;
+                key = label.toLowerCase(Locale.ROOT);
+            } else if (category == 2) {
+                label = song.album;
+                key = song.albumId >= 0 ? "album:" + song.albumId
+                        : "album:" + label + ":" + song.artist;
+            } else {
+                label = song.genre;
+                key = label.toLowerCase(Locale.ROOT);
+            }
+            Group group = groups.get(key);
+            if (group == null) {
+                group = new Group(label);
+                groups.put(key, group);
+            }
+            group.songs.add(song);
+        }
+
+        ArrayList<Group> sorted = new ArrayList<>(groups.values());
+        sorted.sort(Comparator.comparing(group -> group.label,
+                String.CASE_INSENSITIVE_ORDER));
+        ArrayList<MenuRow> rows = new ArrayList<>(sorted.size());
+        for (Group group : sorted) {
+            rows.add(MenuRow.group(group.label, category, group.songs));
+        }
+        if (rows.isEmpty()) rows.add(MenuRow.message("No local music found"));
+        return rows;
+    }
+
+    private void navigateTo(Page next) {
+        Page previous = currentPage;
+        previous.selected = list.getSelectedItemPosition();
+        View selectedView = list.getSelectedView();
+        previous.selectedTop = selectedView == null ? 0 : selectedView.getTop();
+        backStack.push(previous);
+        showPage(next);
+    }
+
+    private void showPage(Page page) {
+        currentPage = page;
+        trackpadPress.cancel();
+        adapter.notifyDataSetChanged();
+        list.post(() -> {
+            if (currentPage != page || isFinishing() || isDestroyed()) return;
+            list.requestFocus();
+            list.setSelectionFromTop(Math.max(0, page.selected), page.selectedTop);
+            styleVisibleRows();
+        });
+    }
+
+    @Override
+    @SuppressWarnings("deprecation")
+    public void onBackPressed() {
+        if (!backStack.isEmpty()) {
+            showPage(backStack.pop());
+        } else {
+            super.onBackPressed();
+        }
     }
 
     @Override
@@ -242,7 +490,8 @@ public final class MusicActivity extends Activity {
                     // As in QS: if touch scrolling cleared selection, resume
                     // trackpad navigation from a currently visible list row.
                     int first = Math.max(0, list.getFirstVisiblePosition());
-                    int last = Math.min(MENU.length - 1, list.getLastVisiblePosition());
+                    int last = Math.min(currentPage.rows.size() - 1,
+                            list.getLastVisiblePosition());
                     int target = code == KeyEvent.KEYCODE_DPAD_UP
                             ? Math.max(first, last) : first;
                     int visibleIndex = target - list.getFirstVisiblePosition();
@@ -275,6 +524,12 @@ public final class MusicActivity extends Activity {
     protected void onStop() {
         trackpadPress.cancel();
         super.onStop();
+    }
+
+    @Override
+    protected void onDestroy() {
+        localSource.close();
+        super.onDestroy();
     }
 
     @Override
