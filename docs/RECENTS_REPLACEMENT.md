@@ -13,7 +13,7 @@ Branch: `feat/bbos6-recents-replacement`, based on `master`.
 - Deleted `app/src/main/java/dev/q25/trackpad/NativeRecentsGridHook.java` rather than disabling it behind `bb_ui_vertical_recents`.
 - Removed its `app/src/main/assets/xposed_init` entry, so BBUI no longer installs any old Recents grid hooks.
 - Removed the Launcher3-to-SystemUI `RECENTS_VISIBILITY` broadcast and stale status-bar appearance state; these existed solely for the retired Recents grid.
-- Preserved the SystemUI BlackBerry-key popup and changed its `showNativeRecents()` action to forward the existing `CommandQueue.toggleRecentApps()` native command, with a thread-local exception from our BB-key interception. The original `showRecentApps(false)` route could complete without entering Overview. The menu is **not** a Recents renderer. On-device confirmation is pending.
+- Preserved the SystemUI BlackBerry-key popup and changed `showNativeRecents()` to forward the existing `CommandQueue.toggleRecentApps()` command with a thread-local bypass of our BB-key interception. The native command is posted to the main looper **after** the menu's input handler returns; no timed workaround is used. The menu is **not** a Recents renderer. On-device confirmation is pending.
 - The active Recents presentation is now stock Quickstep **only**. This is a transitional baseline, not the final BBOS6 design.
 - The deprecated global setting `bb_ui_vertical_recents` is obsolete and can be deleted on the device.
 
@@ -30,6 +30,27 @@ The retired hook targeted these Q25 Quickstep classes:
 Those references verify which implementation the old code targeted, **not** that a replacement renderer has been tested on the current device build. Inspect installed Quickstep signatures and native layout ownership before implementing hooks.
 
 SystemUI receives the BlackBerry-key Recents command in `PullDownHook.installRecentsInterception()`. Its popup's Switch Application action forwards the **same** native `toggleRecentApps()` command without recursively opening the BB menu. The CommandQueue owner is referenced from its constructor as well as native toggle callbacks. Keep this entry routing distinct from Quickstep's visual renderer. Do not add a competing Recents command path.
+
+## Native Recents dispatch investigation (0.9.98)
+
+The Q25 logs supplied after the earlier 0.9.97 build show the BlackBerry menu opened and `Switch Application forwarded to native Quickstep toggle` logged. This only proves `CommandQueue.toggleRecentApps()` returned; Android enqueues this event for asynchronous delivery. No real Quickstep transition is verified by that log. There is also a `Native Recents command queue unavailable` warning from a separate class-loader entry, alongside successful registration on the first entry, so do not mistake the warning for proof that the working hook is absent.
+
+The 0.9.98 investigation:
+- Posts the **same native** Quickstep toggle after the popup Enter key dispatch has returned, avoiding an in-progress overlay/window transition.
+- Adds read-only hooks on native `Recents.toggleRecentApps()` and `OverviewProxyRecentsImpl.toggleRecentApps()` when those classes exist, logging whether dispatch reaches the callback.
+- For `OverviewProxyRecentsImpl`, reads its existing `OverviewProxyService.getProxy()` connection, logging `Native Quickstep proxy connected=true/false`. Does not construct a new service, connection, launcher or Recents view.
+- Keeps stock Quickstep as the exclusive Recents presentation. The result must be tested on Q25.
+
+Interpretation after pressing **Switch Application**:
+- `Switch Application native toggle queued` only: native CommandQueue message queued; callback dispatch or Quickstep connection is not yet demonstrated.
+- `Native Recents callback reached`: downstream SystemUI callback actually received the request.
+- `Native Quickstep proxy connected=false`: native SystemUI has no connected Overview proxy at callback time; investigate Launcher3/TouchInteractionService or native user/setup state rather than adding a second Recents implementation.
+- `... connected=true` but no Overview: inspect Quickstep task/gesture state and Launcher3 exceptions. Do not claim the routing works without visible Q25 verification.
+
+Focused log:
+```sh
+adb -s 202512003630 logcat -d -s 'BB7-PullDown:V' 'OverviewProxyRecentsImpl:V' 'OverviewProxyService:V' '*:S' | tail -100
+```
 
 ## Proposed replacement architecture
 
