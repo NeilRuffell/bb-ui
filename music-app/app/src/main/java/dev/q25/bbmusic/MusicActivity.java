@@ -28,11 +28,14 @@ import android.widget.Toast;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Standalone BBOS6 Music main menu.
@@ -41,8 +44,8 @@ import java.util.Map;
  * and one-item trackpad navigation used by BB UI's Quick Settings panel,
  * without importing or depending on BB UI, Vector or SystemUI.
  *
- * Local music is read from Android MediaStore after the ordinary Android 13+
- * SAF folder selection. Symfonium is never required or started.
+ * Local music is read only from user-selected SAF folder trees.
+ * Symfonium is never required or started.
  * The UI uses the same recycled ListView row on every browse page.
  */
 public final class MusicActivity extends Activity {
@@ -80,6 +83,7 @@ public final class MusicActivity extends Activity {
     private TrackpadPressHandler trackpadPress;
     private LocalMusicSource localSource;
     private List<LocalMusicSource.Song> localSongs;
+    private final int[] localCategoryCounts = new int[4];
     private boolean loading;
     private int pendingMenu = -1;
     private final ArrayDeque<Page> backStack = new ArrayDeque<>();
@@ -152,10 +156,12 @@ public final class MusicActivity extends Activity {
     private static final class RowViews {
         final LinearLayout root;
         final TextView label;
+        final TextView count;
 
-        RowViews(LinearLayout root, TextView label) {
+        RowViews(LinearLayout root, TextView label, TextView count) {
             this.root = root;
             this.label = label;
+            this.count = count;
         }
     }
 
@@ -212,10 +218,7 @@ public final class MusicActivity extends Activity {
                     ViewGroup parent) {
                 View view = convertView == null ? createRowView() : convertView;
                 RowViews views = (RowViews) view.getTag();
-                String title = currentPage.rows.get(position).title;
-                views.label.setText(title);
-                views.root.setContentDescription(title);
-                styleRow(views, position);
+                bindRow(views, currentPage.rows.get(position), position);
                 return view;
             }
         };
@@ -263,6 +266,14 @@ public final class MusicActivity extends Activity {
             list.setSelectionFromTop(0, 0);
             styleVisibleRows();
         });
+
+        // Derive home-menu counts from precisely the selected folder trees.
+        // No folder grants means zero music queries and zero children.
+        if (MusicFolders.selectedTrees(this).isEmpty()) {
+            localSongs = Collections.emptyList();
+        } else {
+            startLocalScan(false);
+        }
     }
 
     private View createRowView() {
@@ -275,17 +286,100 @@ public final class MusicActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT, dp(55)));
         row.setFocusable(false);
 
-        TextView title = new TextView(this);
-        title.setTextSize(15);
-        title.setPadding(dp(16), 0, dp(16), 0);
-        title.setGravity(Gravity.CENTER_VERTICAL);
-        title.setSingleLine(true);
-        row.addView(title, new LinearLayout.LayoutParams(
+        LinearLayout textColumn = new LinearLayout(this);
+        textColumn.setOrientation(LinearLayout.VERTICAL);
+        textColumn.setGravity(Gravity.CENTER_VERTICAL);
+        row.addView(textColumn, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT));
 
-        row.setTag(new RowViews(row, title));
+        TextView title = new TextView(this);
+        title.setTextSize(15);
+        title.setPadding(dp(16), 0, dp(16), 0);
+        title.setSingleLine(true);
+        title.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        textColumn.addView(title, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        TextView count = new TextView(this);
+        count.setTextSize(12);
+        count.setPadding(dp(16), 0, dp(16), 0);
+        count.setSingleLine(true);
+        count.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        textColumn.addView(count, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        row.setTag(new RowViews(row, title, count));
         return row;
+    }
+
+    /** Rebind visible count labels in place without disturbing ListView selection. */
+    private void refreshVisibleRows() {
+        if (list == null) return;
+        int first = list.getFirstVisiblePosition();
+        for (int child = 0; child < list.getChildCount(); child++) {
+            View row = list.getChildAt(child);
+            int position = first + child;
+            if (!(row.getTag() instanceof RowViews)
+                    || position < 0 || position >= currentPage.rows.size()) continue;
+            bindRow((RowViews) row.getTag(), currentPage.rows.get(position), position);
+        }
+    }
+
+    private void bindRow(RowViews views, MenuRow row, int position) {
+        views.label.setText(row.title);
+        String detail = childCountLabel(row);
+        views.count.setVisibility(detail == null ? View.GONE : View.VISIBLE);
+        views.count.setText(detail == null ? "" : detail);
+        views.root.setContentDescription(
+                detail == null ? row.title : row.title + ", " + detail);
+        styleRow(views, position);
+    }
+
+    private String childCountLabel(MenuRow row) {
+        if (row.kind == ROW_GROUP) {
+            return countLabel(row.songs.size(), "Song", "Songs");
+        }
+        if (row.kind != ROW_MENU) return null;
+        if (row.menuIndex < 4) {
+            if (localSongs == null) return loading ? "Scanning..." : "Unavailable";
+            int count = row.menuIndex == 0
+                    ? localSongs.size() : localCategoryCounts[row.menuIndex];
+            return row.menuIndex == 0
+                    ? countLabel(count, "Song", "Songs")
+                    : countLabel(count, "Item", "Items");
+        }
+        if (row.menuIndex == 4) {
+            // Playlist storage is not implemented, hence no playlist children.
+            return "0 Items";
+        }
+        if (row.menuIndex == 6) {
+            // Settings has one implemented child: Add folders.
+            return "1 Item";
+        }
+        // Shuffle Songs is an action, not a container.
+        return null;
+    }
+
+    private static String countLabel(int count, String singular, String plural) {
+        return count + " " + (count == 1 ? singular : plural);
+    }
+
+    private void updateLocalCategoryCounts() {
+        if (localSongs == null) return;
+        localCategoryCounts[0] = localSongs.size();
+        for (int category = 1; category <= 3; category++) {
+            Set<String> keys = new HashSet<>();
+            for (LocalMusicSource.Song song : localSongs) {
+                keys.add(groupKey(song, category));
+            }
+            localCategoryCounts[category] = keys.size();
+        }
+        // No notifyDataSetChanged(): a count update must not reset focus
+        // or the scroll position of the user's selected row.
+        refreshVisibleRows();
     }
 
     private void styleVisibleRows() {
@@ -312,6 +406,8 @@ public final class MusicActivity extends Activity {
             views.root.setBackgroundColor(rowColor);
         }
         views.label.setTextColor(focused ? Color.WHITE : titleColor);
+        views.count.setTextColor(focused ? 0xffedf4ff : (rowColor == Color.WHITE
+                ? 0xff66798a : 0xffb3c1ce));
     }
 
     private void activateSelected() {
@@ -391,6 +487,7 @@ public final class MusicActivity extends Activity {
                 localSongs = null;
                 loading = false;
                 pendingMenu = -1;
+                startLocalScan(false);
                 Log.i(TAG, "Selected music folder added; total="
                         + MusicFolders.selectedTrees(this).size());
             }
@@ -415,26 +512,42 @@ public final class MusicActivity extends Activity {
         if (localSongs != null) {
             showLocalCategory(menuIndex);
         } else if (!loading) {
-            loading = true;
+            startLocalScan(true);
+        }
+    }
+
+    private void startLocalScan(boolean showFeedback) {
+        if (loading) return;
+        if (MusicFolders.selectedTrees(this).isEmpty()) {
+            localSongs = Collections.emptyList();
+            updateLocalCategoryCounts();
+            return;
+        }
+        loading = true;
+        localSongs = null;
+        refreshVisibleRows();
+        if (showFeedback) {
             Toast.makeText(this, "Reading selected music folders...",
                     Toast.LENGTH_SHORT).show();
-            localSource.load(new LocalMusicSource.Listener() {
-                @Override public void onLoaded(List<LocalMusicSource.Song> songs) {
-                    loading = false;
-                    localSongs = songs;
-                    Log.i(TAG, "Selected-folder music ready: " + songs.size() + " tracks");
-                    int menu = pendingMenu;
-                    pendingMenu = -1;
-                    if (menu >= 0 && backStack.isEmpty()) showLocalCategory(menu);
-                }
-
-                @Override public void onError(String reason) {
-                    loading = false;
-                    pendingMenu = -1;
-                    Toast.makeText(MusicActivity.this, reason, Toast.LENGTH_LONG).show();
-                }
-            });
         }
+        localSource.load(new LocalMusicSource.Listener() {
+            @Override public void onLoaded(List<LocalMusicSource.Song> songs) {
+                loading = false;
+                localSongs = songs;
+                updateLocalCategoryCounts();
+                Log.i(TAG, "Selected-folder music ready: " + songs.size() + " tracks");
+                int menu = pendingMenu;
+                pendingMenu = -1;
+                if (menu >= 0 && backStack.isEmpty()) showLocalCategory(menu);
+            }
+
+            @Override public void onError(String reason) {
+                loading = false;
+                pendingMenu = -1;
+                refreshVisibleRows();
+                Toast.makeText(MusicActivity.this, reason, Toast.LENGTH_LONG).show();
+            }
+        });
     }
 
     private void showLocalCategory(int category) {
@@ -467,19 +580,9 @@ public final class MusicActivity extends Activity {
         // All grouping is read-only; no secondary music scanner is required.
         Map<String, Group> groups = new LinkedHashMap<>();
         for (LocalMusicSource.Song song : localSongs) {
-            String label;
-            String key;
-            if (category == 1) {
-                label = song.artist;
-                key = label.toLowerCase(Locale.ROOT);
-            } else if (category == 2) {
-                label = song.album;
-                key = song.albumId >= 0 ? "album:" + song.albumId
-                        : "album:" + label + ":" + song.artist;
-            } else {
-                label = song.genre;
-                key = label.toLowerCase(Locale.ROOT);
-            }
+            String label = category == 1 ? song.artist
+                    : category == 2 ? song.album : song.genre;
+            String key = groupKey(song, category);
             Group group = groups.get(key);
             if (group == null) {
                 group = new Group(label);
@@ -497,6 +600,15 @@ public final class MusicActivity extends Activity {
         }
         if (rows.isEmpty()) rows.add(MenuRow.message("No local music found"));
         return rows;
+    }
+
+    private static String groupKey(LocalMusicSource.Song song, int category) {
+        if (category == 1) return song.artist.toLowerCase(Locale.ROOT);
+        if (category == 2) {
+            return song.albumId >= 0 ? "album:" + song.albumId
+                    : "album:" + song.album + ":" + song.artist;
+        }
+        return song.genre.toLowerCase(Locale.ROOT);
     }
 
     private void navigateTo(Page next) {
