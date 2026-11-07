@@ -27,7 +27,7 @@ Home screen, in order:
 ### Shared list component
 
 The list implementation is extracted into `MusicListView.java`. This class
-extends Android's native `ListView` and owns one `BaseAdapter`, 55dp recycled
+extends Android's native `ListView` and owns one `BaseAdapter`, 64dp recycled
 rows, the full-width square-cornered BBOS6 selection gradient, cached album
 artwork binding, count/text presentation, and the same QS-derived Up/Down
 trackpad behavior. Every menu and library page uses **the same instance**;
@@ -46,8 +46,14 @@ Vector/LSPosed, a custom ROM, or another music app.
 
 ### Artwork in music browse lists
 
-Songs, Artists, Albums and Genres now display 55dp square album covers
-flush with the left, top and bottom edges of the 55dp `ListView` selection
+The shared row height is **64dp**, increased from 55dp to better match the
+relative height of the BBOS6 Music category bands in the supplied screenshot
+(approximately 113px per row across 640px content width). A single
+`MusicListView.ROW_HEIGHT_DP` constant sizes both the rows and square artwork,
+keeping the image flush with the selection's left, top and bottom edges.
+
+Songs, Artists, Albums and Genres now display 64dp square album covers
+flush with the left, top and bottom edges of the 64dp `ListView` selection
 bounds, with zero artwork or row padding. Text labels keep their own internal
 inset. The existing selected-row gradient stays full-width.
 Home-menu entries and Settings are left unchanged.
@@ -85,7 +91,7 @@ algorithm for artist/genre representative artwork.
 
 
 **Child-item counters:** The main menu and browsable category entries use
-two-line 55dp ListView rows, matching the BBOS6 Music example: a primary
+two-line 64dp ListView rows, matching the BBOS6 Music example: a primary
 label and a smaller muted count underneath. All Songs displays the number
 of selected-folder audio tracks (e.g. `1 Song`, `2 Songs`); Artists, Albums
 and Genres display distinct category entries (`1 Item`, `2 Items`).
