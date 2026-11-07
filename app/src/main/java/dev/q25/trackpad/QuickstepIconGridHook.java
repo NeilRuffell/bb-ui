@@ -1,6 +1,7 @@
 package dev.q25.trackpad;
 
 import android.content.Context;
+import android.content.Intent;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
@@ -52,6 +53,7 @@ public final class QuickstepIconGridHook implements IXposedHookLoadPackage {
     private static final int FOCUS_FILL = 0xff245b97;
     private static final int FOCUS_STROKE = 0xffa8cef3;
     private static final WeakHashMap<View, GridState> STATES = new WeakHashMap<>();
+    private static final WeakHashMap<View, Drawable> FALLBACK_ICONS = new WeakHashMap<>();
     private static final WeakHashMap<View, Boolean> CHROME_REMOVED = new WeakHashMap<>();
     private static final WeakHashMap<View, Boolean> SURFACE_PENDING = new WeakHashMap<>();
     private static final Paint PAINT = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -235,10 +237,28 @@ public final class QuickstepIconGridHook implements IXposedHookLoadPackage {
             if (!(containers instanceof List)) return null;
             List<?> all = (List<?>) containers;
             if (containerIndex < 0 || containerIndex >= all.size()) return null;
-            Object chip = XposedHelpers.callMethod(
-                    all.get(containerIndex), "getIconView");
+            Object nativeContainer = all.get(containerIndex);
+            Object chip = XposedHelpers.callMethod(nativeContainer, "getIconView");
             Object drawable = XposedHelpers.callMethod(chip, "getDrawable");
-            return drawable instanceof Drawable ? (Drawable) drawable : null;
+            if (drawable instanceof Drawable) return (Drawable) drawable;
+            // Native Quickstep may not have loaded offscreen carousel icons.
+            // Read the application identity from the SAME bound task object,
+            // not a separate recent-tasks query or a speculative app list.
+            Drawable cached = FALLBACK_ICONS.get(task);
+            if (cached != null && containerIndex == 0) return cached;
+            Object nativeTask = XposedHelpers.callMethod(nativeContainer, "getTask");
+            Object key = XposedHelpers.getObjectField(nativeTask, "key");
+            Intent baseIntent = (Intent) XposedHelpers.getObjectField(
+                    key, "baseIntent");
+            if (baseIntent == null) return null;
+            String pkg = baseIntent.getComponent() != null
+                    ? baseIntent.getComponent().getPackageName()
+                    : baseIntent.getPackage();
+            if (pkg == null) return null;
+            Drawable installed = task.getContext().getPackageManager()
+                    .getApplicationIcon(pkg);
+            if (containerIndex == 0) FALLBACK_ICONS.put(task, installed);
+            return installed;
         } catch (Throwable ignored) {
             return null; // native model can be empty during initial binding
         }
