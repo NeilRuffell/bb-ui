@@ -709,8 +709,10 @@ final class TwoColumnPanel extends FrameLayout {
             button.setLayoutParams(open
                     ? new LinearLayout.LayoutParams(0, LayoutParams.MATCH_PARENT, 1f)
                     : new LinearLayout.LayoutParams(dp(39), dp(39)));
-            button.setPadding(dp(open ? 14 : 9), dp(open ? 14 : 9),
-                    dp(open ? 14 : 9), dp(open ? 14 : 9));
+            // Expanded icons are 36dp; 10dp internal inset leaves sufficient
+            // vertical room inside the unchanged 62dp playback-button row.
+            button.setPadding(dp(open ? 10 : 9), dp(open ? 10 : 9),
+                    dp(open ? 10 : 9), dp(open ? 10 : 9));
         }
         mediaContainer.setLayoutParams(new LinearLayout.LayoutParams(
                 LayoutParams.MATCH_PARENT,
@@ -1051,7 +1053,7 @@ final class TwoColumnPanel extends FrameLayout {
     }
 
     /**
-     * Solid 24dp vector playback symbols, independent of external resources.
+     * Solid 36dp vector playback symbols, independent of external resources.
      * This drawable is painted in the host SystemUI context, avoiding the
      * APK-vs-SystemUI resource namespace mismatch entirely.
      */
@@ -1093,8 +1095,8 @@ final class TwoColumnPanel extends FrameLayout {
                 canvas.restoreToCount(save);
             }
 
-            @Override public int getIntrinsicWidth() { return dp(24); }
-            @Override public int getIntrinsicHeight() { return dp(24); }
+            @Override public int getIntrinsicWidth() { return dp(36); }
+            @Override public int getIntrinsicHeight() { return dp(36); }
 
             @Override public void setAlpha(int alpha) {
                 fill.setAlpha(alpha);
