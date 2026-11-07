@@ -15,6 +15,7 @@ import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.ColorFilter;
 import android.graphics.Paint;
+import android.graphics.Path;
 import android.graphics.PixelFormat;
 import android.graphics.Rect;
 import android.graphics.LinearGradient;
@@ -277,18 +278,12 @@ final class TwoColumnPanel extends FrameLayout {
         repeatStatusLayout.rightMargin = dp(3);
         mediaRow.addView(mediaRepeatStatus, repeatStatusLayout);
 
-        final int[] icons = {
-                R.drawable.bb_media_previous,
-                R.drawable.bb_media_play,
-                R.drawable.bb_media_next
-        };
         final String[] descriptions = {"Previous", "Play or pause", "Next"};
         for (int i = 0; i < mediaButtons.length; i++) {
             final int action = i;
             ImageView button = new ImageView(context);
-            button.setImageResource(icons[i]);
-            // Render Android's stock media drawable at its intrinsic size.
-            // CENTER neither upscales nor downscales the raster image.
+            // Native vector geometry works in the host SystemUI context.
+            button.setImageDrawable(mediaTransportIcon(i, false));
             button.setScaleType(ImageView.ScaleType.CENTER);
             button.setPadding(dp(9), dp(9), dp(9), dp(9));
             button.setFocusable(false); // Trackpad focus remains on the parent row.
@@ -599,8 +594,8 @@ final class TwoColumnPanel extends FrameLayout {
         expandedMediaTitle.setText(entry.title.isEmpty() ? "Now playing" : entry.title);
         expandedMediaArtist.setText(entry.artist);
         expandedMediaArtist.setVisibility(entry.artist.isEmpty() ? View.GONE : View.VISIBLE);
-        mediaButtons[NativeMediaSessions.PLAY_PAUSE].setImageResource(entry.playing
-                ? R.drawable.bb_media_pause : R.drawable.bb_media_play);
+        mediaButtons[NativeMediaSessions.PLAY_PAUSE].setImageDrawable(
+                mediaTransportIcon(NativeMediaSessions.PLAY_PAUSE, entry.playing));
         mediaButtons[NativeMediaSessions.PLAY_PAUSE].setContentDescription(
                 entry.playing ? "Pause" : "Play");
         mediaIndex.setText(mediaSessions.size() > 1
@@ -1052,6 +1047,66 @@ final class TwoColumnPanel extends FrameLayout {
             @Override public int getOpacity() {
                 return PixelFormat.TRANSLUCENT;
             }
+        };
+    }
+
+    /**
+     * Solid 24dp vector playback symbols, independent of external resources.
+     * This drawable is painted in the host SystemUI context, avoiding the
+     * APK-vs-SystemUI resource namespace mismatch entirely.
+     */
+    private Drawable mediaTransportIcon(int action, boolean pause) {
+        final Path shape = new Path();
+        if (action == NativeMediaSessions.PREVIOUS) {
+            shape.addRect(5f, 5f, 7f, 19f, Path.Direction.CW);
+            shape.moveTo(18f, 5f);
+            shape.lineTo(8f, 12f);
+            shape.lineTo(18f, 19f);
+            shape.close();
+        } else if (action == NativeMediaSessions.NEXT) {
+            shape.moveTo(6f, 5f);
+            shape.lineTo(16f, 12f);
+            shape.lineTo(6f, 19f);
+            shape.close();
+            shape.addRect(17f, 5f, 19f, 19f, Path.Direction.CW);
+        } else if (pause) {
+            shape.addRect(6f, 5f, 10f, 19f, Path.Direction.CW);
+            shape.addRect(14f, 5f, 18f, 19f, Path.Direction.CW);
+        } else {
+            shape.moveTo(7f, 5f);
+            shape.lineTo(19f, 12f);
+            shape.lineTo(7f, 19f);
+            shape.close();
+        }
+
+        final Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
+        fill.setColor(Color.WHITE);
+        fill.setStyle(Paint.Style.FILL);
+        return new Drawable() {
+            @Override public void draw(Canvas canvas) {
+                Rect bounds = getBounds();
+                if (bounds.isEmpty()) return;
+                int save = canvas.save();
+                canvas.translate(bounds.left, bounds.top);
+                canvas.scale(bounds.width() / 24f, bounds.height() / 24f);
+                canvas.drawPath(shape, fill);
+                canvas.restoreToCount(save);
+            }
+
+            @Override public int getIntrinsicWidth() { return dp(24); }
+            @Override public int getIntrinsicHeight() { return dp(24); }
+
+            @Override public void setAlpha(int alpha) {
+                fill.setAlpha(alpha);
+                invalidateSelf();
+            }
+
+            @Override public void setColorFilter(ColorFilter filter) {
+                fill.setColorFilter(filter);
+                invalidateSelf();
+            }
+
+            @Override public int getOpacity() { return PixelFormat.TRANSLUCENT; }
         };
     }
 
