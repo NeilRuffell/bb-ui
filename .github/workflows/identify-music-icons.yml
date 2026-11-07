@@ -1,0 +1,23 @@
+name: Identify BlackBerry Music icons
+on:
+  push:
+    branches:
+      - feat/music-bbos6-menu-icons
+permissions:
+  contents: read
+jobs:
+  match:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install image-comparison dependencies
+        run: python -m pip install --quiet pillow numpy opencv-python-headless
+      - name: Match screenshot icons against 3651 repository PNGs
+        run: python tools/find_bbos6_icons.py
+      - name: Upload candidate contact sheet
+        uses: actions/upload-artifact@v4
+        with:
+          name: bbos6-icon-candidate-sheet
+          path: tools/icon-match-results.png
+          if-no-files-found: error
+          retention-days: 3
