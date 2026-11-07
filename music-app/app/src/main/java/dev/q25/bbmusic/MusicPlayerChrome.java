@@ -17,7 +17,7 @@ import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.LayerDrawable;
 import android.view.Gravity;
 import android.widget.ImageView;
-import android.widget.TextView;
+import android.view.View;
 
 /**
  * Resource-independent visual port of BB UI's expanded BBOS6 player chrome.
@@ -261,7 +261,7 @@ final class MusicPlayerChrome {
         };
     }
 
-    static void styleMode(Context context, TextView view, boolean active, boolean focused) {
+    static void styleMode(Context context, View view, boolean active, boolean focused) {
         if (focused) {
             GradientDrawable background = new GradientDrawable();
             background.setColor(0xff153a65);
