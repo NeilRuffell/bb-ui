@@ -348,7 +348,9 @@ final class MusicListView extends ListView {
             views.artwork.setPadding(inset, inset, inset, inset);
             views.artwork.setTag(null);
             views.artwork.setVisibility(View.VISIBLE);
-            views.artwork.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+            // FIT_CENTER, unlike CENTER_INSIDE, also upscales smaller
+            // originals; all visible silhouettes reach the same 52dp fit box.
+            views.artwork.setScaleType(ImageView.ScaleType.FIT_CENTER);
             views.artwork.setContentDescription(row.title + " icon");
             views.artwork.setImageBitmap(menuIconBitmap(row.menuIconRes));
             return;
