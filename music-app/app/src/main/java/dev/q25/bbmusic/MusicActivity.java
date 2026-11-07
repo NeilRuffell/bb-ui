@@ -65,6 +65,7 @@ public final class MusicActivity extends Activity {
 
     private MusicListView list;
     private LinearLayout libraryShell;
+    private MusicAlbumHeaderView albumHeader;
     private EditText searchInput;
     private Page rootPage;
     private List<MenuRow> visibleRows;
@@ -131,12 +132,19 @@ public final class MusicActivity extends Activity {
     private static final class Page {
         final String name;
         final List<MenuRow> rows;
+        // Only a page opened directly from an album group has this header.
+        final MenuRow albumGroup;
         int selected;
         int selectedTop;
 
         Page(String name, List<MenuRow> rows) {
+            this(name, rows, null);
+        }
+
+        Page(String name, List<MenuRow> rows, MenuRow albumGroup) {
             this.name = name;
             this.rows = rows;
+            this.albumGroup = albumGroup;
         }
     }
 
@@ -207,6 +215,15 @@ public final class MusicActivity extends Activity {
         libraryShell = new LinearLayout(this);
         libraryShell.setOrientation(LinearLayout.VERTICAL);
         libraryShell.setBackgroundColor(Color.BLACK);
+
+        // Album detail: directly below the status bar and flush to the
+        // left edge, without adding a header adapter row or disturbing
+        // native song selection indices.
+        albumHeader = new MusicAlbumHeaderView(this, list);
+        albumHeader.setVisibility(View.GONE);
+        libraryShell.addView(albumHeader, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                dp(MusicAlbumHeaderView.heightDp())));
 
         searchInput = new EditText(this);
         searchInput.setSingleLine(true);
@@ -404,7 +421,8 @@ public final class MusicActivity extends Activity {
                 // Tagged track numbers provide album ordering where available.
                 groupSongs.sort(Comparator.comparingInt(song -> song.trackNumber));
             }
-            navigateTo(new Page(row.title, songRows(groupSongs)));
+            navigateTo(new Page(row.title, songRows(groupSongs),
+                    row.groupCategory == 2 ? row : null));
         } else if (row.kind == ROW_SONG) {
             // Play this track within its currently displayed folder-scoped
             // song list, preserving the order for native Previous/Next.
@@ -675,10 +693,26 @@ public final class MusicActivity extends Activity {
         showPage(next);
     }
 
+    private void bindAlbumHeader(Page page) {
+        MenuRow album = page.albumGroup;
+        if (album == null || album.songs == null || album.songs.isEmpty()) {
+            albumHeader.clear();
+            albumHeader.setVisibility(View.GONE);
+            return;
+        }
+        LocalMusicSource.Song first = album.songs.get(0);
+        String key = albumKeyForRow(album);
+        List<Uri> candidates = key == null ? null : albumArtworkSources.get(key);
+        albumHeader.bind(album.title, first.artist, first.genre,
+                album.songs.size(), key == null ? null : "album:" + key, candidates);
+        albumHeader.setVisibility(View.VISIBLE);
+    }
+
     private void showPage(Page page) {
         if (searchOpen) closeSearch(false);
         currentPage = page;
         visibleRows = page.rows;
+        bindAlbumHeader(page);
         trackpadPress.cancel();
         list.notifyRowsChanged();
         list.post(() -> {
