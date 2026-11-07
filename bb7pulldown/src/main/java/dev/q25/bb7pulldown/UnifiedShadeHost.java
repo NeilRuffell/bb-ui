@@ -139,7 +139,7 @@ final class UnifiedShadeHost extends FrameLayout {
         LayerDrawable mediaModeChrome = new LayerDrawable(new Drawable[] {
                 mediaModeFill, MediaChromeDivider.silverLine()
         });
-        mediaModeChrome.setLayerHeight(1, dp(2));
+        mediaModeChrome.setLayerHeight(1, dp(MediaChromeDivider.HEIGHT_DP));
         mediaModeChrome.setLayerGravity(1, Gravity.TOP | Gravity.FILL_HORIZONTAL);
         mediaModeHeader.setBackground(mediaModeChrome);
         mediaModeHeader.setVisibility(View.GONE);

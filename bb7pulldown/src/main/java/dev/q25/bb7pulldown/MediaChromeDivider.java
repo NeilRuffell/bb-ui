@@ -4,6 +4,10 @@ import android.graphics.drawable.GradientDrawable;
 
 /** Shared BBOS6 silver horizontal media-chrome divider. */
 final class MediaChromeDivider {
+    // Single source of truth for both the seekbar bottom divider and the
+    // shuffle/repeat header top divider.
+    static final int HEIGHT_DP = 1;
+
     private MediaChromeDivider() { }
 
     static GradientDrawable silverLine() {

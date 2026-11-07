@@ -881,7 +881,7 @@ final class TwoColumnPanel extends FrameLayout {
         });
         layers.setLayerHeight(1, dp(2));
         layers.setLayerGravity(1, Gravity.TOP | Gravity.FILL_HORIZONTAL);
-        layers.setLayerHeight(2, dp(2));
+        layers.setLayerHeight(2, dp(MediaChromeDivider.HEIGHT_DP));
         layers.setLayerGravity(2, Gravity.BOTTOM | Gravity.FILL_HORIZONTAL);
         return layers;
     }
