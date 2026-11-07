@@ -299,16 +299,7 @@ final class LocalMusicSource {
                         Uri fileUri = DocumentsContract.buildDocumentUriUsingTree(
                                 tree, docId);
                         Song song = inspectAudio(tree, fileUri, name);
-                        if (song != null) {
-                            songs.add(song);
-                        } else if (!hasAudioExtension(name)
-                                && isBrowsableDirectory(tree, docId)) {
-                            // Some document providers misreport a child
-                            // directory as audio/*. Keep walking its actual
-                            // children rather than losing nested songs.
-                            directories.addLast(docId);
-                            Log.i(TAG, "Traversing misclassified music folder: " + name);
-                        }
+                        if (song != null) songs.add(song);
                     }
                 }
             } catch (SecurityException exception) {
@@ -323,6 +314,15 @@ final class LocalMusicSource {
 
     private static boolean isAudio(String filename, String mime) {
         if (DocumentsContract.Document.MIME_TYPE_DIR.equals(mime)) return false;
+        // A playlist is not an audio stream even when a provider publishes it
+        // with an audio/* MIME label. Do not query it as a child directory.
+        if (filename != null) {
+            String lower = filename.toLowerCase(Locale.ROOT);
+            if (lower.endsWith(".m3u") || lower.endsWith(".m3u8")
+                    || lower.endsWith(".pls") || lower.endsWith(".xspf")) {
+                return false;
+            }
+        }
         if (mime != null && mime.toLowerCase(Locale.ROOT).startsWith("audio/")) {
             return true;
         }
@@ -342,24 +342,6 @@ final class LocalMusicSource {
                 || lower.endsWith(".aiff") || lower.endsWith(".aif")
                 || lower.endsWith(".alac") || lower.endsWith(".ape")
                 || lower.endsWith(".amr");
-    }
-
-    /**
-     * Probe children only for a failed audio entry with no audio extension.
-     * A successful SAF child query identifies a directory despite a bad MIME
-     * label, while unselected folders are never queried.
-     */
-    private boolean isBrowsableDirectory(Uri tree, String documentId) {
-        Uri childUri = DocumentsContract.buildChildDocumentsUriUsingTree(
-                tree, documentId);
-        try (Cursor cursor = resolver.query(childUri,
-                new String[]{DocumentsContract.Document.COLUMN_DOCUMENT_ID},
-                null, null, null)) {
-            return cursor != null && cursor.getColumnIndex(
-                    DocumentsContract.Document.COLUMN_DOCUMENT_ID) >= 0;
-        } catch (RuntimeException exception) {
-            return false;
-        }
     }
 
     /**
@@ -385,7 +367,7 @@ final class LocalMusicSource {
                 return Math.max(0L, durationUs / 1000L);
             }
         } catch (java.io.IOException | RuntimeException exception) {
-            Log.d(TAG, "Document is not a readable audio track: " + fileUri,
+            Log.d(TAG, "Cannot recognize or extract audio from: " + fileUri,
                     exception);
         } finally {
             extractor.release();
@@ -396,7 +378,7 @@ final class LocalMusicSource {
     private Song inspectAudio(Uri sourceTree, Uri fileUri, String filename) {
         long verifiedDurationMs = probeAudioTrack(fileUri);
         if (verifiedDurationMs < 0L) {
-            Log.i(TAG, "Ignoring non-audio selected document: " + fileUri);
+            Log.i(TAG, "Skipping unrecognized or unsupported audio candidate: " + fileUri);
             return null;
         }
 
