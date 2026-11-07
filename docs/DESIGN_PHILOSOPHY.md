@@ -18,6 +18,7 @@ Vector or a separate always-running overlay service.
 | Status bar | Android's native status-bar window and views | Preserve real clock, notification, network, battery and privacy indicators; style focus without replacing their owners |
 | Media | Android MediaSessionManager / MediaController | Present and control real active sessions, artwork, position and supported shuffle/repeat functions |
 | Lock screen/security | Android keyguard, bouncer and credential services | Style the lock screen and expose supported native shortcuts; never replace credential verification |
+| Recent applications | Android task management and Launcher3/Quickstep Overview | Replace Quickstep's visual presentation with **one** BBOS6 icon grid, while reusing native task actions, lifecycle and navigation; never mount or conceal a second renderer |
 | Hardware navigation | One BB `ShadeUiController` and `ShadeStatusNavigation` | Map trackpad and keyboard focus to the appropriate native surface/action |
 
 **Rule:** A new BB screen must not introduce a second implementation of an
@@ -111,8 +112,9 @@ delivery method, not the final ROM architecture.
 - **Reuse first.** Inspect the actual installed Q25 SystemUI classes, then
   prefer existing Android controllers, view models, events and services.
 - **One visible interaction path.** Avoid duplicate notification shades,
-  Quick Settings panels, status indicators, focus controllers and synthetic
-  tile/radio state. Hiding a second interactive surface is not enough.
+  Quick Settings panels, Recents renderers, status indicators, focus controllers
+  and synthetic tile/radio state. Hiding a second surface is not enough:
+  the superseded Recents view tree must not remain mounted behind BB UI.
 - **Do not break ownership.** Native notification actions, RemoteInput,
   tile dialogs, permission checks, media sessions and credential prompts
   must still be handled by Android.
@@ -126,6 +128,17 @@ delivery method, not the final ROM architecture.
   notification actions/replies, QS details, media, heads-up, lock/unlock,
   rotation, screen-off and repeated open/close. Compilation is not evidence
   of on-device UI correctness.
+
+## Recents migration boundary
+
+The previous `NativeRecentsGridHook` portrait task-card adapter was deleted in
+`feat/bbos6-recents-replacement`. At the current baseline, Android's native
+Quickstep overview is the **only** Recents renderer; BB UI's BlackBerry-key
+menu may still call its native entry point. Before bringing up the BBOS6 icon
+grid, identify the actual Q25 Quickstep host and replace its presentation,
+not merely obscure it. Vector handles the temporary integration; a future ROM
+port moves that bridge into native Launcher3/Quickstep source. See
+[the Recents plan](RECENTS_REPLACEMENT.md).
 
 ## Development status and next steps
 
