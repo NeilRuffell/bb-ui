@@ -10,8 +10,8 @@ Android on the Zinwa Q25. The current test build is a single **Vector/LSPosed
 APK** that integrates with LineageOS SystemUI. The long-term target is a
 native LineageOS SystemUI implementation.
 
-**Current APK version:** `0.9.98-recents-dispatch-trace-q25-test`
-(versionCode 128). The native shade integration and its slide animation
+**Current APK version:** `0.9.99-bbos6-native-recents-icons-prototype`
+(versionCode 129). The native shade integration and its slide animation
 remain **opt-in** while the remaining presentation work continues.
 
 This branch restores stock Quickstep Recents while the exclusive BBOS6
