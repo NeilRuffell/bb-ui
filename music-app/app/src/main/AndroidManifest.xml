@@ -1,6 +1,5 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- Standard runtime permission for indexed device audio on Android 13+. -->
-    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+    <!-- Music is read only from user-selected SAF document trees. -->
     <!-- Narrow package visibility; no QUERY_ALL_PACKAGES or privileged access. -->
     <queries>
         <package android:name="app.symfonik.music.player" />
