@@ -6,12 +6,25 @@ It has its own Gradle project and launcher.
 
 ## Implementation status
 
-**UI:** The first prototype was discarded. `MusicActivity` now contains
-only a native Android `ListView` with an empty `BaseAdapter`. Its setup
-mirrors `BB6NativeQsPanel`: the ListView owns native touch scrolling,
-one-item D-pad/trackpad selection, and recycling. No menus, headers, music
-rows, transport bar or UI styling beyond the empty dark canvas are defined.
-The user will direct UI construction one element at a time.
+**UI:** The initial browsing prototype was discarded. `MusicActivity` now
+contains only the BBOS6 Music home menu, in this order:
+
+1. All Songs
+2. Artists
+3. Albums
+4. Genres
+5. Playlists
+6. Shuffle Songs
+
+The six rows use a native Android `ListView` and fixed `BaseAdapter`. This
+mirrors the proven QS shade approach: one owner for touch scrolling and
+hardware Up/Down movement, row recycling, visible-row focus styling, and a
+ported stand-alone trackpad press handler. Rows are 55dp tall, use the QS
+light/dark palette and focus gradient, and contain text only until additional
+UI design is specified. Pressing a row presently logs its name; it does
+not navigate or shuffle because those actions are not yet designed.
+No custom scrolling behavior, other music menus, or transport controls
+are included.
 
 **Sources:** `SymfoniumSource.java` remains an optional source adapter. It
 uses public `MediaBrowser` and `MediaController` APIs and retains the
@@ -37,7 +50,7 @@ existing OneDrive-indexed catalog, but is never the mandatory player.
 ```text
 BB Music APK (dev.q25.bbmusic)
   MusicActivity
-    Android ListView + BaseAdapter — user-directed BBOS6 UI
+    Android ListView + BaseAdapter — six-entry BBOS6 Music home menu
              |
          Music library / controller (to be implemented)
              |
@@ -67,8 +80,10 @@ gradle :app:assembleDebug
 adb -s 202512003630 install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
-Launch **BB Music**. It currently shows an intentionally empty black
-ListView. No Symfonium connection or playback is initiated.
+Launch **BB Music**. It displays the six-entry BBOS6 Music home menu.
+Up/Down moves the selected row via the native ListView; center/Enter activates
+but only logs the selected entry until the next screen is implemented.
+No Symfonium connection or playback is initiated.
 
 ## Source verification to date
 
