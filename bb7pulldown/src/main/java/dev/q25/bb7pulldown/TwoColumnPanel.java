@@ -1,10 +1,10 @@
 package dev.q25.bb7pulldown;
 
 import dev.q25.trackpad.theme.BB7Theme;
+import dev.q25.trackpad.theme.BB7SelectionGradientColors;
 import dev.q25.trackpad.input.TrackpadPressHandler;
 
 import android.content.Context;
-import android.content.res.ColorStateList;
 import android.os.SystemClock;
 import android.text.InputType;
 import android.view.inputmethod.EditorInfo;
@@ -12,9 +12,17 @@ import android.widget.EditText;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.Bitmap;
+import android.graphics.Canvas;
+import android.graphics.ColorFilter;
+import android.graphics.Paint;
+import android.graphics.PixelFormat;
+import android.graphics.Rect;
 import android.os.Bundle;
+import android.graphics.drawable.ClipDrawable;
+import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.LayerDrawable;
 import android.media.session.MediaSession;
 import android.text.TextUtils;
 import android.text.format.DateFormat;
@@ -70,9 +78,12 @@ final class TwoColumnPanel extends FrameLayout {
     }
 
     private static final String TAG = "BB7-PullDown";
-    // BBOS-style silver scrubber; the focused state belongs to the thumb alone.
-    private static final int MEDIA_SEEK_SILVER = 0xffc9ced5;
-    private static final int MEDIA_SEEK_TRACK = 0xff454b53;
+    // Solid unplayed upper/lower halves of the BBOS6 seek rail; no gradient.
+    private static final int MEDIA_SEEK_TRACK_TOP = 0xff101010;
+    private static final int MEDIA_SEEK_TRACK_BOTTOM = 0xff393839;
+    // Expanded media is always rendered with the same palette, irrespective
+    // of Android UI_MODE_NIGHT. The collapsed strip retains the global theme.
+    private static final BB7Theme.Palette EXPANDED_MEDIA_PALETTE = BB7Theme.Palette.DARK;
     private final BB7Theme.Palette palette;
     private final CloseListener onClose;
     private final ShadeUiController navigation;
@@ -295,10 +306,10 @@ final class TwoColumnPanel extends FrameLayout {
         mediaSeekRow.setOrientation(LinearLayout.HORIZONTAL);
         mediaSeekRow.setGravity(Gravity.CENTER_VERTICAL);
         mediaSeekRow.setPadding(dp(10), 0, dp(10), 0);
-        mediaSeekRow.setBackgroundColor(palette.heading);
+        mediaSeekRow.setBackground(mediaSeekBackground());
         mediaSeekRow.setVisibility(View.GONE);
 
-        mediaElapsed = text("0:00", 11, palette.muted);
+        mediaElapsed = text("0:00", 14, EXPANDED_MEDIA_PALETTE.muted);
         mediaElapsed.setGravity(Gravity.CENTER_VERTICAL);
         mediaSeekRow.addView(mediaElapsed, new LinearLayout.LayoutParams(
                 dp(45), LayoutParams.MATCH_PARENT));
@@ -313,9 +324,12 @@ final class TwoColumnPanel extends FrameLayout {
         // not clip it against the separate elapsed/total-time views.
         // This also keeps the touch-to-seek range aligned with the visible track.
         mediaSeekBar.setPadding(dp(32), 0, dp(32), 0);
-        mediaSeekBar.setProgressTintList(ColorStateList.valueOf(MEDIA_SEEK_SILVER));
-        mediaSeekBar.setProgressBackgroundTintList(ColorStateList.valueOf(MEDIA_SEEK_TRACK));
-        mediaSeekBar.setSecondaryProgressTintList(ColorStateList.valueOf(MEDIA_SEEK_TRACK));
+        // Flat white played portion over the existing two-tone unplayed rail.
+        // Use native progress levels so the played segment tracks the thumb.
+        mediaSeekBar.setProgressTintList(null);
+        mediaSeekBar.setProgressBackgroundTintList(null);
+        mediaSeekBar.setSecondaryProgressTintList(null);
+        mediaSeekBar.setProgressDrawable(mediaSeekTrackDrawable());
         // Preserve the silver pill's own fill and border rather than applying
         // the current Android theme's SeekBar thumb tint.
         mediaSeekBar.setThumbTintList(null);
@@ -359,7 +373,7 @@ final class TwoColumnPanel extends FrameLayout {
         mediaSeekRow.addView(mediaSeekBar, new LinearLayout.LayoutParams(
                 0, dp(48), 1f));
 
-        mediaDuration = text("--:--", 11, palette.muted);
+        mediaDuration = text("--:--", 14, EXPANDED_MEDIA_PALETTE.muted);
         mediaDuration.setGravity(Gravity.CENTER_VERTICAL | Gravity.RIGHT);
         mediaSeekRow.addView(mediaDuration, new LinearLayout.LayoutParams(
                 dp(52), LayoutParams.MATCH_PARENT));
@@ -396,7 +410,7 @@ final class TwoColumnPanel extends FrameLayout {
         artworkArea.addView(mediaArtworkImage, new FrameLayout.LayoutParams(
                 LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
 
-        mediaArtworkPlaceholder = text("Artwork unavailable", 13, palette.muted);
+        mediaArtworkPlaceholder = text("Artwork unavailable", 13, EXPANDED_MEDIA_PALETTE.muted);
         mediaArtworkPlaceholder.setGravity(Gravity.CENTER);
         mediaArtworkPlaceholder.setFocusable(false);
         artworkArea.addView(mediaArtworkPlaceholder, new FrameLayout.LayoutParams(
@@ -410,14 +424,14 @@ final class TwoColumnPanel extends FrameLayout {
         artworkInfo.addView(metadataArea, new LinearLayout.LayoutParams(
                 0, LayoutParams.MATCH_PARENT, 1f));
 
-        expandedMediaTitle = text("", 18, palette.title);
+        expandedMediaTitle = text("", 18, EXPANDED_MEDIA_PALETTE.title);
         expandedMediaTitle.setMaxLines(3);
         expandedMediaTitle.setEllipsize(TextUtils.TruncateAt.END);
         expandedMediaTitle.setFocusable(false);
         metadataArea.addView(expandedMediaTitle, new LinearLayout.LayoutParams(
                 LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
 
-        expandedMediaArtist = text("", 13, palette.muted);
+        expandedMediaArtist = text("", 13, EXPANDED_MEDIA_PALETTE.muted);
         expandedMediaArtist.setMaxLines(3);
         expandedMediaArtist.setEllipsize(TextUtils.TruncateAt.END);
         expandedMediaArtist.setPadding(0, dp(8), 0, 0);
@@ -642,6 +656,9 @@ final class TwoColumnPanel extends FrameLayout {
     private void setMediaControlsOpen(boolean open) {
         if (mediaControlsOpen == open) return;
         mediaControlsOpen = open;
+        // Only full-screen media is theme-independent; restore the surrounding
+        // shade palette on collapse, without recreating either presentation.
+        setBackgroundColor(open ? EXPANDED_MEDIA_PALETTE.canvas : palette.canvas);
         mediaSeekEditing = false;
         mediaSeekSelected = false;
         mediaModeSelected = false;
@@ -826,18 +843,137 @@ final class TwoColumnPanel extends FrameLayout {
         super.onDetachedFromWindow();
     }
 
-    /** Silver by default; selected pill alone uses the existing BB UI blue. */
-    private GradientDrawable mediaSeekThumb(boolean selected) {
-        GradientDrawable pill = new GradientDrawable(
+    /** BBOS6 seek area: dark vertical fill, 2dp top rule and silver bottom rule. */
+    private Drawable mediaSeekBackground() {
+        GradientDrawable fill = new GradientDrawable(
                 GradientDrawable.Orientation.TOP_BOTTOM,
-                selected ? BB7Theme.gradientColors(getContext())
-                        : new int[] {0xffe5e9ef, 0xffaeb6c0});
-        pill.setShape(GradientDrawable.RECTANGLE);
-        pill.setCornerRadius(dp(10));
-        pill.setSize(dp(selected ? 56 : 54), dp(selected ? 18 : 16));
-        pill.setStroke(dp(selected ? 2 : 1),
-                selected ? BB7Theme.BLUE_BORDER : 0xff87919c);
-        return pill;
+                new int[] {0xff222422, 0xff181818});
+        GradientDrawable bottomBorder = new GradientDrawable(
+                GradientDrawable.Orientation.LEFT_RIGHT,
+                new int[] {0xffb5b6b5, 0xffffffff, 0xffb5b6b5});
+        LayerDrawable layers = new LayerDrawable(new Drawable[] {
+                fill, new ColorDrawable(0xff393c3c), bottomBorder
+        });
+        layers.setLayerHeight(1, dp(2));
+        layers.setLayerGravity(1, Gravity.TOP | Gravity.FILL_HORIZONTAL);
+        layers.setLayerHeight(2, dp(2));
+        layers.setLayerGravity(2, Gravity.BOTTOM | Gravity.FILL_HORIZONTAL);
+        return layers;
+    }
+
+    /** Centered 4dp rail: hard two-tone unplayed track, solid white played track. */
+    private Drawable mediaSeekTrackDrawable() {
+        final int railHeight = dp(4);
+        Drawable unplayed = new Drawable() {
+            private final Paint topPaint = new Paint();
+            private final Paint bottomPaint = new Paint();
+
+            {
+                topPaint.setColor(MEDIA_SEEK_TRACK_TOP);
+                bottomPaint.setColor(MEDIA_SEEK_TRACK_BOTTOM);
+            }
+
+            @Override public void draw(Canvas canvas) {
+                Rect bounds = getBounds();
+                // ProgressBar may size the drawable to the entire seek row.
+                // Paint only the centered 4dp rail, not the drawable's full height.
+                int railTop = bounds.centerY() - railHeight / 2;
+                int halfway = railTop + railHeight / 2;
+                int railBottom = railTop + railHeight;
+                canvas.drawRect(bounds.left, railTop, bounds.right, halfway, topPaint);
+                canvas.drawRect(bounds.left, halfway, bounds.right, railBottom, bottomPaint);
+            }
+
+            @Override public int getIntrinsicHeight() {
+                return railHeight;
+            }
+
+            @Override public void setAlpha(int alpha) {
+                topPaint.setAlpha(alpha);
+                bottomPaint.setAlpha(alpha);
+                invalidateSelf();
+            }
+
+            @Override public void setColorFilter(ColorFilter filter) {
+                topPaint.setColorFilter(filter);
+                bottomPaint.setColorFilter(filter);
+                invalidateSelf();
+            }
+
+            @Override public int getOpacity() {
+                return PixelFormat.TRANSLUCENT;
+            }
+        };
+
+        // Android updates R.id.progress with a 0..10000 drawable level.
+        // Clip only the white overlay from the left; do not clip the base track.
+        ClipDrawable played = new ClipDrawable(
+                new ColorDrawable(Color.WHITE), Gravity.LEFT, ClipDrawable.HORIZONTAL);
+        LayerDrawable layers = new LayerDrawable(new Drawable[] {unplayed, played});
+        layers.setId(0, android.R.id.background);
+        layers.setId(1, android.R.id.progress);
+        layers.setLayerHeight(1, railHeight);
+        layers.setLayerGravity(1, Gravity.CENTER_VERTICAL | Gravity.FILL_HORIZONTAL);
+        return layers;
+    }
+
+    /**
+     * Expanded BBOS6 seek thumb. Keep the existing highlighted blue style,
+     * while the normal thumb uses a shaded, round-ended silver-blue capsule.
+     * Both drawables have transparent pixels outside their rounded ends.
+     */
+    private Drawable mediaSeekThumb(boolean selected) {
+        if (selected) {
+            GradientDrawable pill = new GradientDrawable(
+                    GradientDrawable.Orientation.TOP_BOTTOM,
+                    BB7SelectionGradientColors.colors(false));
+            pill.setShape(GradientDrawable.RECTANGLE);
+            pill.setCornerRadius(dp(10));
+            pill.setSize(dp(56), dp(18));
+            pill.setStroke(dp(2), BB7Theme.BLUE_BORDER);
+            return pill;
+        }
+
+        // The outside shell provides the dark rounded edge and bottom rim.
+        GradientDrawable shell = new GradientDrawable(
+                GradientDrawable.Orientation.TOP_BOTTOM,
+                new int[] {0xff636563, 0xff929396, 0xff525253});
+        shell.setShape(GradientDrawable.RECTANGLE);
+        shell.setCornerRadius(dp(8));
+        shell.setSize(dp(54), dp(16));
+
+        // Vertical light-and-shadow bands sampled conceptually from the
+        // reference pill, with no bitmap assets or theme-derived colors.
+        GradientDrawable body = new GradientDrawable(
+                GradientDrawable.Orientation.TOP_BOTTOM,
+                new int[] {
+                        0xfff7f7f7, // bright top edge
+                        0xff8ca6c6, // blue-grey upper body
+                        0xff9caece,
+                        0xffa5bace,
+                        0xffbdcbde,
+                        0xffced7e7,
+                        0xffdee3ef,
+                        0xffefeff7, // lower silver highlight
+                        0xffadaaad  // shaded bottom edge
+                });
+        body.setShape(GradientDrawable.RECTANGLE);
+        body.setCornerRadius(dp(7));
+        body.setSize(dp(52), dp(14));
+
+        LayerDrawable capsule = new LayerDrawable(new Drawable[] {shell, body});
+        capsule.setLayerInset(1, dp(1), dp(1), dp(1), dp(1));
+        return capsule;
+    }
+
+    /** Fixed BBOS6 focus styling for expanded media; other surfaces stay themed. */
+    private GradientDrawable expandedMediaSelection(int radius, int border) {
+        GradientDrawable selected = new GradientDrawable(
+                GradientDrawable.Orientation.TOP_BOTTOM,
+                BB7SelectionGradientColors.colors(false));
+        selected.setCornerRadius(radius);
+        selected.setStroke(border, BB7Theme.BLUE_BORDER);
+        return selected;
     }
 
     private void updateMediaHighlight() {
@@ -845,7 +981,7 @@ final class TwoColumnPanel extends FrameLayout {
         mediaRow.setBackground(focused && !mediaControlsOpen
                 ? BB7Theme.selected(getContext(), dp(2), dp(1))
                 : new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
-                        palette == BB7Theme.Palette.DARK
+                        mediaControlsOpen || palette == BB7Theme.Palette.DARK
                                 ? new int[] {0xff2f4053, 0xff1e2c3b}
                                 : new int[] {0xffecf1f7, 0xffd8e2ec}));
         mediaNowPlaying.setTextColor(focused && !mediaControlsOpen
@@ -856,16 +992,11 @@ final class TwoColumnPanel extends FrameLayout {
         mediaShuffleStatus.setTint(statusTint);
         mediaRepeatStatus.setTint(statusTint);
         boolean seekFocused = focused && mediaControlsOpen && mediaSeekSelected;
-        // Never highlight the entire seek row: selection is visible exclusively
-        // on the movable pill. The elapsed/total timestamps stay unchanged.
-        mediaSeekRow.setBackground(new GradientDrawable(
-                GradientDrawable.Orientation.TOP_BOTTOM,
-                palette == BB7Theme.Palette.DARK
-                        ? new int[] {0xff2f4053, 0xff1e2c3b}
-                        : new int[] {0xffecf1f7, 0xffd8e2ec}));
+        // Keep the fixed seek-area background; focus changes only the pill.
+        // The elapsed/total timestamps stay unchanged.
         mediaSeekBar.setThumb(mediaSeekThumb(seekFocused));
-        mediaElapsed.setTextColor(palette.muted);
-        mediaDuration.setTextColor(palette.muted);
+        mediaElapsed.setTextColor(EXPANDED_MEDIA_PALETTE.muted);
+        mediaDuration.setTextColor(EXPANDED_MEDIA_PALETTE.muted);
         int index = mediaSessionIndex();
         if (index < 0) return;
         NativeMediaSessions.Entry entry = mediaSessions.get(index);
@@ -877,9 +1008,8 @@ final class TwoColumnPanel extends FrameLayout {
                     && !mediaSeekSelected && !mediaModeSelected
                     && selectedMediaButton == i;
             ImageView button = mediaButtons[i];
-            button.setBackground(selected ? BB7Theme.selected(getContext(), dp(3), dp(1)) : null);
-            button.setColorFilter(selected || focused && !mediaControlsOpen
-                    ? Color.WHITE : palette.headingText);
+            button.setBackground(selected ? expandedMediaSelection(dp(3), dp(1)) : null);
+            button.setColorFilter(selected ? Color.WHITE : EXPANDED_MEDIA_PALETTE.headingText);
             button.setAlpha(enabled ? 1f : 0.35f);
         }
     }
