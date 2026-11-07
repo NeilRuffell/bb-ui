@@ -89,7 +89,7 @@ genre; the proprietary BBOS6 screenshot does not establish what its
 
 While a music list or main menu is visible, **simply type** on the Q25's
 physical keyboard. No search button, menu command or trackpad click is needed.
-The first printable character reveals a **42dp BBOS6 search bar** above
+The first printable character reveals a **54dp BBOS6 search bar** above
 the same existing `MusicListView`. Further typing filters results immediately.
 Shift and ALT characters work through Android key mapping.
 
@@ -99,9 +99,9 @@ reusing the existing native `EditText` and input handler:
 - **1dp top separator:** `#5A5D63` at the outer top edge.
 - **Panel gradient:** vertical, `#4B4E53` (top) to `#292C31` (bottom).
 - **Input field:** inset approximately 6dp horizontally and 6dp above,
-  white with a 4dp rounded dark outer rim and a gray-to-white inset
+  white with a 5dp rounded dark outer rim and a gray-to-white inset
   highlight/shadow that reaches pure white within the first ~5dp.
-  Approximately 31dp tall.
+  Approximately 43dp tall.
 - **Typed text:** dark charcoal inside the white field, approximately
   12dp internal horizontal inset.
 - No hint or `Search` description appears; the Q25 physical keyboard
