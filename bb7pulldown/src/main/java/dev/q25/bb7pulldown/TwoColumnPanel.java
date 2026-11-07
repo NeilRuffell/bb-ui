@@ -351,7 +351,7 @@ final class TwoColumnPanel extends FrameLayout {
         // Preserve the silver pill's own fill and border rather than applying
         // the current Android theme's SeekBar thumb tint.
         mediaSeekBar.setThumbTintList(null);
-        mediaSeekBar.setThumb(mediaSeekThumb(false));
+        mediaSeekBar.setThumb(mediaSeekThumb(false, false));
         mediaSeekBar.setContentDescription("Playback position");
         mediaSeekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override public void onStartTrackingTouch(SeekBar seekBar) {
@@ -943,12 +943,15 @@ final class TwoColumnPanel extends FrameLayout {
     }
 
     /**
-     * Expanded BBOS6 seek thumb. Keep the existing highlighted blue style,
-     * while the normal thumb uses a shaded, round-ended silver-blue capsule.
-     * Both drawables have transparent pixels outside their rounded ends.
+     * BBOS6 seek-pill states:
+     * idle = silver-blue layered capsule;
+     * highlighted = the same layered capsule with glossy blue gradients;
+     * selected/editing = the original solid blue focus gradient and border.
+     * Highlight alone never enters trackpad seek-edit mode.
      */
-    private Drawable mediaSeekThumb(boolean selected) {
+    private Drawable mediaSeekThumb(boolean highlighted, boolean selected) {
         if (selected) {
+            // Preserve the previous selected/editing style unchanged.
             GradientDrawable pill = new GradientDrawable(
                     GradientDrawable.Orientation.TOP_BOTTOM,
                     BB7SelectionGradientColors.colors(false));
@@ -959,29 +962,42 @@ final class TwoColumnPanel extends FrameLayout {
             return pill;
         }
 
-        // The outside shell provides the dark rounded edge and bottom rim.
+        // Highlight reuses the idle pill's silhouette, bevel and nine-stop
+        // vertical lighting. Only its shell/body colors change to blue.
         GradientDrawable shell = new GradientDrawable(
                 GradientDrawable.Orientation.TOP_BOTTOM,
-                new int[] {0xff636563, 0xff929396, 0xff525253});
+                highlighted
+                        ? new int[] {0xff19466e, 0xff477eac, 0xff12365c}
+                        : new int[] {0xff636563, 0xff929396, 0xff525253});
         shell.setShape(GradientDrawable.RECTANGLE);
         shell.setCornerRadius(dp(8));
         shell.setSize(dp(54), dp(16));
 
-        // Vertical light-and-shadow bands sampled conceptually from the
-        // reference pill, with no bitmap assets or theme-derived colors.
         GradientDrawable body = new GradientDrawable(
                 GradientDrawable.Orientation.TOP_BOTTOM,
-                new int[] {
-                        0xfff7f7f7, // bright top edge
-                        0xff8ca6c6, // blue-grey upper body
-                        0xff9caece,
-                        0xffa5bace,
-                        0xffbdcbde,
-                        0xffced7e7,
-                        0xffdee3ef,
-                        0xffefeff7, // lower silver highlight
-                        0xffadaaad  // shaded bottom edge
-                });
+                highlighted
+                        ? new int[] {
+                                0xffe7f6ff, // bright upper edge
+                                0xff4b92d6, // blue upper body
+                                0xff559cdf,
+                                0xff64a7e6,
+                                0xff7cb8ef,
+                                0xff92c8f6,
+                                0xffbadeff,
+                                0xffe1f1ff, // lower highlight
+                                0xff578fbe  // blue shaded bottom rim
+                        }
+                        : new int[] {
+                                0xfff7f7f7, // bright top edge
+                                0xff8ca6c6, // blue-grey upper body
+                                0xff9caece,
+                                0xffa5bace,
+                                0xffbdcbde,
+                                0xffced7e7,
+                                0xffdee3ef,
+                                0xffefeff7, // lower silver highlight
+                                0xffadaaad  // shaded bottom edge
+                        });
         body.setShape(GradientDrawable.RECTANGLE);
         body.setCornerRadius(dp(7));
         body.setSize(dp(52), dp(14));
@@ -1154,10 +1170,11 @@ final class TwoColumnPanel extends FrameLayout {
         int statusTint = focused && !mediaControlsOpen ? Color.WHITE : palette.body;
         mediaShuffleStatus.setTint(statusTint);
         mediaRepeatStatus.setTint(statusTint);
-        boolean seekFocused = focused && mediaControlsOpen && mediaSeekSelected;
-        // Keep the fixed seek-area background; focus changes only the pill.
-        // The elapsed/total timestamps stay unchanged.
-        mediaSeekBar.setThumb(mediaSeekThumb(seekFocused));
+        boolean seekHighlighted = focused && mediaControlsOpen && mediaSeekSelected;
+        boolean seekSelected = seekHighlighted && mediaSeekEditing;
+        // Keep the fixed seek-area background and timestamps. Navigation only
+        // highlights the glossy blue capsule; Enter changes to selected/editing.
+        mediaSeekBar.setThumb(mediaSeekThumb(seekHighlighted, seekSelected));
         mediaElapsed.setTextColor(EXPANDED_MEDIA_PALETTE.muted);
         mediaDuration.setTextColor(EXPANDED_MEDIA_PALETTE.muted);
         int index = mediaSessionIndex();
