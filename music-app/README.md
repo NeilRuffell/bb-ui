@@ -259,6 +259,16 @@ bounds, with zero artwork or row padding. Text labels keep their own internal
 inset. The existing selected-row gradient stays full-width.
 The home menu and Settings use the same shared 68dp rows.
 
+**BBOS6 song-row metadata:** Every song entry in All Songs, artist/genre
+track lists, album track lists and song-search results shows its **title on
+the left**, the stored **track duration (M:SS, or H:MM:SS when needed) on
+the right of the same line**, and its **artist on the second line**.
+Unknown durations are not fabricated or displayed. The title truncates
+before overlapping the right-aligned duration. Album track-number columns
+and the shared 68dp artwork/selection bounds remain unchanged. Non-song
+rows continue displaying their existing item-count or folder-location
+subtitles, with no duration field.
+
 The cover-selection rules are **BB Music project rules**, not a verified
 claim about the proprietary BlackBerry OS 6 selection algorithm:
 
@@ -518,7 +528,11 @@ adb -s 202512003630 install -r app/build/outputs/apk/debug/app-debug.apk
 23. Type on the Artists, Albums, Genres and nested song lists. Verify
     only the current page is filtered; all search results retain the
     regular 68dp borderless blue selector and trackpad navigation.
-24. Enter a query with no matches on the main and nested pages.
+24. Verify song rows in All Songs, album pages, artist/genre pages and
+    search results show artist directly under the title and duration at
+    the far right of the title line. Long titles must ellipsize without
+    overlapping the duration. Confirm non-song rows still show counts.
+25. Enter a query with no matches on the main and nested pages.
     Confirm the empty adapter leaves no selectable rows and shows
     horizontally centered `No search results found` below the search bar,
     without the blue selection gradient or a row divider. Backspace to
