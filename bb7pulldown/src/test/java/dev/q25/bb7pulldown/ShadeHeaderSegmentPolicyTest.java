@@ -4,27 +4,27 @@ import static org.junit.Assert.assertEquals;
 import org.junit.Test;
 
 public final class ShadeHeaderSegmentPolicyTest {
-    @Test public void touchesChooseCorrespondingPage() {
+    @Test public void touchesChooseCorrespondingVerticalRow() {
         assertEquals(ShadeStatusNavigation.NOTIFICATIONS,
-                ShadeHeaderSegmentPolicy.zoneAt(0, 200));
+                ShadeHeaderSegmentPolicy.zoneAt(0, 96));
         assertEquals(ShadeStatusNavigation.NOTIFICATIONS,
-                ShadeHeaderSegmentPolicy.zoneAt(99, 200));
+                ShadeHeaderSegmentPolicy.zoneAt(47, 96));
         assertEquals(ShadeStatusNavigation.QUICK_SETTINGS,
-                ShadeHeaderSegmentPolicy.zoneAt(100, 200));
+                ShadeHeaderSegmentPolicy.zoneAt(48, 96));
         assertEquals(ShadeStatusNavigation.QUICK_SETTINGS,
-                ShadeHeaderSegmentPolicy.zoneAt(199, 200));
+                ShadeHeaderSegmentPolicy.zoneAt(95, 96));
     }
 
     @Test public void invalidCoordinatesDoNotSelectAnything() {
         assertEquals(ShadeStatusNavigation.NONE,
-                ShadeHeaderSegmentPolicy.zoneAt(-1, 200));
+                ShadeHeaderSegmentPolicy.zoneAt(-1, 96));
         assertEquals(ShadeStatusNavigation.NONE,
-                ShadeHeaderSegmentPolicy.zoneAt(200, 200));
+                ShadeHeaderSegmentPolicy.zoneAt(96, 96));
         assertEquals(ShadeStatusNavigation.NONE,
                 ShadeHeaderSegmentPolicy.zoneAt(2, 0));
     }
 
-    @Test public void oddWidthsHaveOneExactHalfwayBoundary() {
+    @Test public void oddHeightsHaveOneHalfwayBoundary() {
         assertEquals(ShadeStatusNavigation.NOTIFICATIONS,
                 ShadeHeaderSegmentPolicy.zoneAt(100, 201));
         assertEquals(ShadeStatusNavigation.QUICK_SETTINGS,

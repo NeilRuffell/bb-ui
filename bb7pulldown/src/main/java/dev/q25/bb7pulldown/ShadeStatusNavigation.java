@@ -3,14 +3,8 @@ package dev.q25.bb7pulldown;
 import android.view.KeyEvent;
 
 /**
- * Shared shade-header focus and keyboard routing for both BB UI shades.
- *
- * The blank navigation header is the visual focus target. Each panel keeps
- * its own content focus, while this controller owns the two header zones and
- * identical Up / Down / Left / Right / Enter / Back behavior.
- *
- * Down and Back are separate callbacks. The owning ShadeUiController decides
- * their session-level consequences; individual pages cannot redefine them.
+ * Popup row selection for both shade pages. Up/Down selects a row;
+ * Enter activates it and Back dismisses the transient popup.
  */
 final class ShadeStatusNavigation {
     static final int NONE = -1;
@@ -19,7 +13,6 @@ final class ShadeStatusNavigation {
 
     interface Listener {
         void onZoneFocus(int zone);
-        void onDown();
         void onBack();
         void onNotificationsSelected();
         void onQuickSettingsSelected();
@@ -32,47 +25,28 @@ final class ShadeStatusNavigation {
         this.listener = listener;
     }
 
-    int zone() {
-        return zone;
-    }
+    int zone() { return zone; }
 
-    boolean isFocused() {
-        return zone != NONE;
-    }
+    boolean isFocused() { return zone != NONE; }
 
     void enter(int selectedZone) {
         if (selectedZone != NOTIFICATIONS && selectedZone != QUICK_SETTINGS) {
-            throw new IllegalArgumentException("Invalid status-bar zone");
+            throw new IllegalArgumentException("Invalid popup row");
         }
         changeZone(selectedZone);
     }
 
-    void leave() {
-        changeZone(NONE);
-    }
+    void leave() { changeZone(NONE); }
 
-    /**
-     * Returns false outside the status bar, leaving all content key handling
-     * and hardware Backspace/Delete behavior untouched.
-     *
-     * Key-down changes selection; key-up activates a control exactly once.
-     */
+    /** Consume only popup keys; content retains all other key handling. */
     boolean handleKey(int code, int action) {
         if (!isFocused()) return false;
         switch (code) {
-            case KeyEvent.KEYCODE_DPAD_LEFT:
-            case KeyEvent.KEYCODE_DPAD_RIGHT:
-                if (action == KeyEvent.ACTION_DOWN) {
-                    changeZone(code == KeyEvent.KEYCODE_DPAD_LEFT
-                            ? NOTIFICATIONS : QUICK_SETTINGS);
-                }
-                return true;
             case KeyEvent.KEYCODE_DPAD_UP:
-                return true;
             case KeyEvent.KEYCODE_DPAD_DOWN:
-                if (action == KeyEvent.ACTION_UP) {
-                    leave();
-                    listener.onDown();
+                if (action == KeyEvent.ACTION_DOWN) {
+                    changeZone(code == KeyEvent.KEYCODE_DPAD_UP
+                            ? NOTIFICATIONS : QUICK_SETTINGS);
                 }
                 return true;
             case KeyEvent.KEYCODE_BACK:
@@ -89,11 +63,8 @@ final class ShadeStatusNavigation {
                 if (action == KeyEvent.ACTION_UP) {
                     int selectedZone = zone;
                     leave();
-                    if (selectedZone == NOTIFICATIONS) {
-                        listener.onNotificationsSelected();
-                    } else {
-                        listener.onQuickSettingsSelected();
-                    }
+                    if (selectedZone == NOTIFICATIONS) listener.onNotificationsSelected();
+                    else listener.onQuickSettingsSelected();
                 }
                 return true;
             default:
