@@ -299,7 +299,16 @@ final class LocalMusicSource {
                         Uri fileUri = DocumentsContract.buildDocumentUriUsingTree(
                                 tree, docId);
                         Song song = inspectAudio(tree, fileUri, name);
-                        if (song != null) songs.add(song);
+                        if (song != null) {
+                            songs.add(song);
+                        } else if (!hasAudioExtension(name)
+                                && isBrowsableDirectory(tree, docId)) {
+                            // Some document providers misreport a child
+                            // directory as audio/*. Keep walking its actual
+                            // children rather than losing nested songs.
+                            directories.addLast(docId);
+                            Log.i(TAG, "Traversing misclassified music folder: " + name);
+                        }
                     }
                 }
             } catch (SecurityException exception) {
@@ -313,12 +322,17 @@ final class LocalMusicSource {
     }
 
     private static boolean isAudio(String filename, String mime) {
+        if (DocumentsContract.Document.MIME_TYPE_DIR.equals(mime)) return false;
         if (mime != null && mime.toLowerCase(Locale.ROOT).startsWith("audio/")) {
             return true;
         }
         if (mime != null && mime.toLowerCase(Locale.ROOT).startsWith("video/")) {
             return false;
         }
+        return hasAudioExtension(filename);
+    }
+
+    private static boolean hasAudioExtension(String filename) {
         if (filename == null) return false;
         String lower = filename.toLowerCase(Locale.ROOT);
         return lower.endsWith(".mp3") || lower.endsWith(".m4a")
@@ -328,6 +342,24 @@ final class LocalMusicSource {
                 || lower.endsWith(".aiff") || lower.endsWith(".aif")
                 || lower.endsWith(".alac") || lower.endsWith(".ape")
                 || lower.endsWith(".amr");
+    }
+
+    /**
+     * Probe children only for a failed audio entry with no audio extension.
+     * A successful SAF child query identifies a directory despite a bad MIME
+     * label, while unselected folders are never queried.
+     */
+    private boolean isBrowsableDirectory(Uri tree, String documentId) {
+        Uri childUri = DocumentsContract.buildChildDocumentsUriUsingTree(
+                tree, documentId);
+        try (Cursor cursor = resolver.query(childUri,
+                new String[]{DocumentsContract.Document.COLUMN_DOCUMENT_ID},
+                null, null, null)) {
+            return cursor != null && cursor.getColumnIndex(
+                    DocumentsContract.Document.COLUMN_DOCUMENT_ID) >= 0;
+        } catch (RuntimeException exception) {
+            return false;
+        }
     }
 
     /**
