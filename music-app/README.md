@@ -88,7 +88,7 @@ data). Do not imply deleting an audio folder itself.
 ## Native playback and the BB UI Now Playing port
 
 BB Music now includes its own `MusicPlaybackService` with AndroidX
-Media3 1.11.1 ExoPlayer and a MediaSessionService. The independent
+Media3 1.9.4 ExoPlayer and a MediaSessionService. The independent
 `MusicPlaybackClient` controls it from the Activity. Neither Symfonium
 nor the BB UI Vector module is needed for local playback.
 
