@@ -1,5 +1,7 @@
 package dev.q25.bbmusic;
 
+import android.util.Log;
+
 import androidx.media3.common.AudioAttributes;
 import androidx.media3.common.C;
 import androidx.media3.exoplayer.ExoPlayer;
@@ -12,6 +14,7 @@ import androidx.media3.session.MediaSessionService;
  * Only the app's explicitly selected document-tree URIs enter its queue.
  */
 public final class MusicPlaybackService extends MediaSessionService {
+    private static final String TAG = "BBMusic-Service";
     private ExoPlayer player;
     private MediaSession session;
 
@@ -26,15 +29,18 @@ public final class MusicPlaybackService extends MediaSessionService {
                 .setHandleAudioBecomingNoisy(true)
                 .build();
         session = new MediaSession.Builder(this, player).build();
+        Log.i(TAG, "Media3 playback service created");
     }
 
     @Override
     public MediaSession onGetSession(MediaSession.ControllerInfo controllerInfo) {
+        Log.i(TAG, "Media3 playback session requested; available=" + (session != null));
         return session;
     }
 
     @Override
     public void onDestroy() {
+        Log.i(TAG, "Media3 playback service destroyed");
         if (session != null) {
             session.release();
             session = null;
