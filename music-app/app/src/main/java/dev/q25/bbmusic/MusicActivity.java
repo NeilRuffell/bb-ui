@@ -2,6 +2,10 @@ package dev.q25.bbmusic;
 
 import android.app.Activity;
 import android.content.Intent;
+import android.graphics.Color;
+import android.text.Editable;
+import android.text.InputType;
+import android.text.TextWatcher;
 import android.net.Uri;
 import android.provider.DocumentsContract;
 import android.os.Bundle;
@@ -10,9 +14,12 @@ import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.inputmethod.EditorInfo;
 import android.window.OnBackInvokedCallback;
 import android.window.OnBackInvokedDispatcher;
+import android.widget.EditText;
 import android.widget.FrameLayout;
+import android.widget.LinearLayout;
 import android.widget.Toast;
 
 import java.util.ArrayDeque;
@@ -57,6 +64,13 @@ public final class MusicActivity extends Activity {
     };
 
     private MusicListView list;
+    private LinearLayout libraryShell;
+    private EditText searchInput;
+    private Page rootPage;
+    private List<MenuRow> visibleRows;
+    private boolean searchOpen;
+    private int searchOriginalPosition;
+    private int searchOriginalTop;
     private TrackpadPressHandler trackpadPress;
     private LocalMusicSource localSource;
     private Map<String, List<Uri>> albumArtworkSources = Collections.emptyMap();
@@ -162,14 +176,16 @@ public final class MusicActivity extends Activity {
             rootRows.add(MenuRow.root(MENU[index], index));
         }
         currentPage = new Page("Music", rootRows);
+        rootPage = currentPage;
+        visibleRows = currentPage.rows;
 
         list = new MusicListView(this, new MusicListView.DataSource() {
             @Override public int size() {
-                return currentPage.rows.size();
+                return visibleRows.size();
             }
 
             @Override public MusicListView.RowData rowAt(int position) {
-                return rowPresentation(currentPage.rows.get(position));
+                return rowPresentation(visibleRows.get(position));
             }
 
             @Override public void activate(int position) {
@@ -186,7 +202,40 @@ public final class MusicActivity extends Activity {
         safeViewport.setFitsSystemWindows(true);
         safeViewport.setClipChildren(true);
         safeViewport.setClipToPadding(true);
-        safeViewport.addView(list, new FrameLayout.LayoutParams(
+        // Persistent shell: showing a search bar never rebuilds the list,
+        // its adapter, artwork cache, or focus/trackpad machinery.
+        libraryShell = new LinearLayout(this);
+        libraryShell.setOrientation(LinearLayout.VERTICAL);
+        libraryShell.setBackgroundColor(Color.BLACK);
+
+        searchInput = new EditText(this);
+        searchInput.setSingleLine(true);
+        searchInput.setTextSize(16);
+        searchInput.setTextColor(Color.WHITE);
+        searchInput.setHintTextColor(0xff929292);
+        searchInput.setInputType(InputType.TYPE_CLASS_TEXT
+                | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+        searchInput.setImeOptions(EditorInfo.IME_ACTION_DONE);
+        searchInput.setShowSoftInputOnFocus(false);
+        searchInput.setPadding(dp(16), 0, dp(16), 0);
+        searchInput.setBackgroundColor(Color.BLACK);
+        searchInput.setVisibility(View.GONE);
+        searchInput.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence value,
+                    int start, int count, int after) { }
+
+            @Override public void onTextChanged(CharSequence value,
+                    int start, int before, int count) { }
+
+            @Override public void afterTextChanged(Editable value) {
+                if (searchOpen) updateSearchResults();
+            }
+        });
+        libraryShell.addView(searchInput, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(44)));
+        libraryShell.addView(list, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+        safeViewport.addView(libraryShell, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT));
         setContentView(safeViewport);
@@ -206,6 +255,10 @@ public final class MusicActivity extends Activity {
         } else {
             startLocalScan(false);
         }
+    }
+
+    private int dp(float value) {
+        return Math.round(getResources().getDisplayMetrics().density * value);
     }
 
     private MusicListView.RowData rowPresentation(MenuRow row) {
@@ -328,8 +381,8 @@ public final class MusicActivity extends Activity {
     }
 
     private void activate(int position) {
-        if (position < 0 || position >= currentPage.rows.size()) return;
-        MenuRow row = currentPage.rows.get(position);
+        if (position < 0 || position >= visibleRows.size()) return;
+        MenuRow row = visibleRows.get(position);
         if (row.kind == ROW_MENU) {
             if (row.menuIndex < 4) {
                 openLocalCategory(row.menuIndex);
@@ -357,7 +410,7 @@ public final class MusicActivity extends Activity {
             // song list, preserving the order for native Previous/Next.
             ArrayList<LocalMusicSource.Song> queue = new ArrayList<>();
             int startIndex = -1;
-            for (MenuRow item : currentPage.rows) {
+            for (MenuRow item : visibleRows) {
                 if (item.kind != ROW_SONG) continue;
                 if (item == row) startIndex = queue.size();
                 queue.add(item.song);
@@ -395,7 +448,7 @@ public final class MusicActivity extends Activity {
         savedListPosition = list.getSelectedItemPosition();
         View selectedRow = list.getSelectedView();
         savedListTop = selectedRow == null ? 0 : selectedRow.getTop();
-        safeViewport.removeView(list);
+        safeViewport.removeView(libraryShell);
         nowPlaying = new MusicNowPlayingView(this, playback);
         safeViewport.addView(nowPlaying, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -414,10 +467,10 @@ public final class MusicActivity extends Activity {
             nowPlaying.dispose();
             nowPlaying = null;
         }
-        safeViewport.addView(list, new FrameLayout.LayoutParams(
+        safeViewport.addView(libraryShell, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT));
-        if (backStack.isEmpty()) unregisterNestedBack();
+        if (backStack.isEmpty() && !searchOpen) unregisterNestedBack();
         list.post(() -> {
             if (nowPlayingVisible || isFinishing() || isDestroyed()) return;
             list.requestFocus();
@@ -521,6 +574,7 @@ public final class MusicActivity extends Activity {
                 localSongs = songs;
                 updateAlbumArtworkSources();
                 updateLocalCategoryCounts();
+                if (searchOpen) updateSearchResults();
                 Log.i(TAG, "Selected-folder music ready: " + songs.size() + " tracks");
                 if (pendingShuffleStart) {
                     pendingShuffleStart = false;
@@ -536,6 +590,7 @@ public final class MusicActivity extends Activity {
                 pendingMenu = -1;
                 pendingShuffleStart = false;
                 list.refreshVisibleRows();
+                if (searchOpen) updateSearchResults();
                 Toast.makeText(MusicActivity.this, reason, Toast.LENGTH_LONG).show();
             }
         });
@@ -604,24 +659,173 @@ public final class MusicActivity extends Activity {
 
     private void navigateTo(Page next) {
         Page previous = currentPage;
-        previous.selected = list.getSelectedItemPosition();
-        View selectedView = list.getSelectedView();
-        previous.selectedTop = selectedView == null ? 0 : selectedView.getTop();
+        if (searchOpen) {
+            // The visible index is a filtered index. Restore the original
+            // source-page position when navigating Back to this page.
+            previous.selected = searchOriginalPosition;
+            previous.selectedTop = searchOriginalTop;
+            closeSearch(false);
+        } else {
+            previous.selected = list.getSelectedItemPosition();
+            View selectedView = list.getSelectedView();
+            previous.selectedTop = selectedView == null ? 0 : selectedView.getTop();
+        }
         backStack.push(previous);
         ensureBackCallback();
         showPage(next);
     }
 
     private void showPage(Page page) {
+        if (searchOpen) closeSearch(false);
         currentPage = page;
+        visibleRows = page.rows;
         trackpadPress.cancel();
         list.notifyRowsChanged();
         list.post(() -> {
-            if (currentPage != page || isFinishing() || isDestroyed()) return;
+            if (currentPage != page || searchOpen
+                    || isFinishing() || isDestroyed()) return;
             list.requestFocus();
             list.setSelectionFromTop(Math.max(0, page.selected), page.selectedTop);
             list.refreshSelection();
         });
+    }
+
+    /**
+     * Type-to-search works from both the library root and nested pages.
+     * Search never changes the underlying page rows or opens extra storage.
+     */
+    private void openSearch() {
+        if (searchOpen) return;
+        searchOriginalPosition = list.getSelectedItemPosition();
+        View selectedView = list.getSelectedView();
+        searchOriginalTop = selectedView == null ? 0 : selectedView.getTop();
+        searchOpen = true;
+        // A new text search supersedes an unfinished menu navigation.
+        pendingMenu = -1;
+        searchInput.setHint(currentPage == rootPage
+                ? "Search songs, artists, albums, genres"
+                : "Search " + currentPage.name);
+        searchInput.setVisibility(View.VISIBLE);
+        ensureBackCallback();
+        // Leave focus on the native ListView: blue selection, hardware
+        // arrows, and Enter continue to work on search results.
+    }
+
+    private void closeSearch(boolean restorePosition) {
+        if (!searchOpen) return;
+        searchOpen = false;
+        searchInput.setVisibility(View.GONE);
+        searchInput.setText("");
+        visibleRows = currentPage.rows;
+        list.notifyRowsChanged();
+        if (backStack.isEmpty() && !nowPlayingVisible) unregisterNestedBack();
+        if (restorePosition) {
+            final Page page = currentPage;
+            final int index = searchOriginalPosition;
+            final int top = searchOriginalTop;
+            list.post(() -> {
+                if (searchOpen || nowPlayingVisible || currentPage != page
+                        || isFinishing() || isDestroyed()) return;
+                list.requestFocus();
+                list.setSelectionFromTop(Math.max(0, index), top);
+                list.refreshSelection();
+            });
+        }
+    }
+
+    private void updateSearchResults() {
+        if (!searchOpen) return;
+        String term = searchInput.getText().toString().trim().toLowerCase(Locale.ROOT);
+        if (term.isEmpty()) {
+            visibleRows = currentPage.rows;
+        } else {
+            ArrayList<MenuRow> matches = new ArrayList<>();
+            if (currentPage == rootPage) {
+                // Typing on the main menu searches the full selected-folder
+                // catalog, not merely the seven menu item labels.
+                if (localSongs != null) {
+                    for (LocalMusicSource.Song song : localSongs) {
+                        if (songMatches(song, term)) matches.add(MenuRow.song(song));
+                    }
+                }
+                if (localSongs == null && loading) {
+                    matches.add(MenuRow.message("Reading selected music folders..."));
+                }
+            } else {
+                // Within Artists, Albums, Genres or a song list, narrow only
+                // the current page. The original Page.rows stay unchanged.
+                for (MenuRow row : currentPage.rows) {
+                    if (row.kind == ROW_MESSAGE) continue;
+                    if (row.title.toLowerCase(Locale.ROOT).contains(term)
+                            || (row.kind == ROW_SONG && songMatches(row.song, term))) {
+                        matches.add(row);
+                    }
+                }
+            }
+            if (matches.isEmpty()) matches.add(MenuRow.message("No matches"));
+            visibleRows = matches;
+        }
+        list.notifyRowsChanged();
+        list.setSelectionFromTop(0, 0);
+        list.refreshSelection();
+    }
+
+    private static boolean songMatches(LocalMusicSource.Song song, String term) {
+        return song.title.toLowerCase(Locale.ROOT).contains(term)
+                || song.artist.toLowerCase(Locale.ROOT).contains(term)
+                || song.album.toLowerCase(Locale.ROOT).contains(term)
+                || song.genre.toLowerCase(Locale.ROOT).contains(term);
+    }
+
+    /**
+     * Hardware printable keys edit the field without stealing ListView focus.
+     * Supports Q25 ALT/Shift characters, Backspace and cursor selections.
+     * A touch tap can still focus the native EditText for paste/editing.
+     */
+    private boolean handleSearchKey(KeyEvent event) {
+        int code = event.getKeyCode();
+        if (searchOpen && (code == KeyEvent.KEYCODE_DEL
+                || code == KeyEvent.KEYCODE_FORWARD_DEL)) {
+            if (event.getAction() == KeyEvent.ACTION_DOWN) {
+                Editable value = searchInput.getText();
+                int length = value.length();
+                int start = Math.max(0, searchInput.getSelectionStart());
+                int end = Math.max(0, searchInput.getSelectionEnd());
+                start = Math.min(start, length);
+                end = Math.min(end, length);
+                if (start != end) {
+                    value.delete(Math.min(start, end), Math.max(start, end));
+                } else if (code == KeyEvent.KEYCODE_DEL && start > 0) {
+                    int from = Character.offsetByCodePoints(value.toString(), start, -1);
+                    value.delete(from, start);
+                } else if (code == KeyEvent.KEYCODE_FORWARD_DEL && start < length) {
+                    int to = Character.offsetByCodePoints(value.toString(), start, 1);
+                    value.delete(start, to);
+                }
+            }
+            return true;
+        }
+        // Ctrl/Meta shortcuts must remain available to Android.
+        if ((event.getMetaState()
+                & (KeyEvent.META_CTRL_ON | KeyEvent.META_META_ON)) != 0) return false;
+        int character = event.getUnicodeChar();
+        if (!Character.isValidCodePoint(character) || character < 32
+                || Character.isISOControl(character)) return false;
+        if (!searchOpen && Character.isWhitespace(character)) return false;
+        if (event.getAction() == KeyEvent.ACTION_DOWN) {
+            openSearch();
+            Editable value = searchInput.getText();
+            int length = value.length();
+            int start = Math.max(0, Math.min(length, searchInput.getSelectionStart()));
+            int end = Math.max(0, Math.min(length, searchInput.getSelectionEnd()));
+            int from = Math.min(start, end);
+            value.replace(from, Math.max(start, end),
+                    new String(Character.toChars(character)));
+            searchInput.setSelection(from + Character.charCount(character));
+        }
+        // Consume the matching key-up as well: no second character is sent
+        // to the ListView or a temporarily focused EditText.
+        return true;
     }
 
     private void ensureBackCallback() {
@@ -634,6 +838,10 @@ public final class MusicActivity extends Activity {
     private void navigateBack() {
         if (nowPlayingVisible) {
             closeNowPlaying();
+            return;
+        }
+        if (searchOpen) {
+            closeSearch(true);
             return;
         }
         if (backStack.isEmpty()) return;
@@ -652,7 +860,7 @@ public final class MusicActivity extends Activity {
     @Override
     @SuppressWarnings("deprecation")
     public void onBackPressed() {
-        if (nowPlayingVisible || !backStack.isEmpty()) navigateBack();
+        if (nowPlayingVisible || searchOpen || !backStack.isEmpty()) navigateBack();
         else super.onBackPressed();
     }
 
@@ -678,6 +886,9 @@ public final class MusicActivity extends Activity {
             }
             return super.dispatchKeyEvent(event);
         }
+        // Physical keyboard type-to-search requires no menu or shortcut.
+        // Keep system modifier shortcuts and media/trackpad keys untouched.
+        if (handleSearchKey(event)) return true;
         if (code == KeyEvent.KEYCODE_DPAD_UP || code == KeyEvent.KEYCODE_DPAD_DOWN) {
             return list.handleVerticalKey(event);
         }
