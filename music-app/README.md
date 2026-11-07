@@ -72,11 +72,14 @@ saved scan marker.
 **Audio document validation:** Before indexing a purported audio file,
 `LocalMusicSource` opens it through Android's `MediaExtractor` and requires
 an actual `audio/*` track. An extension or document-provider MIME label alone
-is insufficient. Directories retain their recursive traversal; when a provider
-mislabels an extensionless folder as audio, the scanner can detect a valid
-child-document cursor and continue into that directory. The scanner excludes
-invalid or unreadable non-audio entries instead of adding them as songs with
-zero duration. A playable audio file with unreadable title tags still uses
+is insufficient. Only SAF entries explicitly identified as directories by
+`DocumentsContract.Document.MIME_TYPE_DIR` are traversed. Playlist
+documents (`.m3u`, `.m3u8`, `.pls`, `.xspf`) are excluded even if a provider
+reports an audio MIME type; a successful child-query cursor does **not**
+prove that a document is a folder. The scanner excludes unrecognized or
+unsupported audio candidates rather than adding them as playable songs
+with zero duration. `MediaExtractor` may also reject otherwise legitimate
+formats such as WMA when no extractor is available on the device. A playable audio file with unreadable title tags still uses
 its filename and Unknown Artist/Album/Genre fallbacks.
 
 **One-time index revision:** The audio-validation change versions the saved
