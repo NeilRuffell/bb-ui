@@ -132,12 +132,17 @@ delivery method, not the final ROM architecture.
 ## Recents migration boundary
 
 The previous `NativeRecentsGridHook` portrait task-card adapter was deleted in
-`feat/bbos6-recents-replacement`. At the current baseline, Android's native
-Quickstep overview is the **only** Recents renderer; BB UI's BlackBerry-key
-menu may still call its native entry point. Before bringing up the BBOS6 icon
-grid, identify the actual Q25 Quickstep host and replace its presentation,
-not merely obscure it. Vector handles the temporary integration; a future ROM
-port moves that bridge into native Launcher3/Quickstep source. See
+`feat/bbos6-recents-replacement`. Quickstep's native `RecentsView` remains
+the **only** Recents renderer. A separate opt-in
+`QuickstepIconGridHook` now adapts the **existing** native TaskViews to show
+native application icons and labels, arranged as a pageable grid. It adds no
+second Overview window or task-view collection. Native thumbnail subviews
+remain measured but are not painted in this icon-only mode; these must be
+replaced outright when the renderer is ported into the ROM. With the
+experimental flag disabled, only stock Quickstep operates. The menu continues
+to forward Switch Application to the same native Recents command. Q25
+verification is pending. Vector handles the temporary integration; a future
+ROM port moves that bridge into native Launcher3/Quickstep source. See
 [the Recents plan](RECENTS_REPLACEMENT.md).
 
 ## Development status and next steps
