@@ -16,7 +16,6 @@ import android.os.Handler;
 import android.os.Looper;
 import android.database.ContentObserver;
 import android.view.KeyEvent;
-import android.content.pm.PackageManager;
 import android.widget.FrameLayout;
 import android.widget.Toast;
 import android.graphics.Color;
@@ -62,12 +61,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
     private static final String STATUS_BAR =
             "com.android.systemui.statusbar.phone.PhoneStatusBarView";
     private static final String ENABLE_PROP = "debug.bb7pulldown.enabled";
-    static final String RECENTS_VISIBILITY_ACTION =
-            "dev.q25.trackpad.action.RECENTS_VISIBILITY";
-    static final String RECENTS_VISIBILITY_EXTRA = "visible";
-    private static boolean recentsVisible;
     private static boolean nativeShadeExpanded;
-    private static BroadcastReceiver recentsVisibilityReceiver;
     // Intercept SystemUI's native Recents command before Quickstep changes activities.
     private static final String COMMAND_QUEUE = "com.android.systemui.statusbar.CommandQueue";
     // Android internal WindowManager.LayoutParams.TYPE_STATUS_BAR_SUB_PANEL
@@ -214,7 +208,6 @@ public final class PullDownHook implements IXposedHookLoadPackage {
                     if (param.thisObject instanceof View) {
                         View bar = (View) param.thisObject;
                         nativeStatusBar = new WeakReference<>(bar);
-                        registerRecentsVisibilityReceiver(bar.getContext());
                         bar.post(PullDownHook::updateStatusAppearance);
                     }
                 }
@@ -731,7 +724,7 @@ public final class PullDownHook implements IXposedHookLoadPackage {
             }
             // Popup focus never paints the native status bar.
             boolean decorated = shadeHost != null || openingOrClosing
-                    || recentsVisible || nativeShadeExpanded;
+                    || nativeShadeExpanded;
             if (!decorated) {
                 if (decoratedStatusBar == target) {
                     target.setBackground(originalStatusBackground);
@@ -748,44 +741,6 @@ public final class PullDownHook implements IXposedHookLoadPackage {
             // The real status bar retains its native clock and icons.
             target.setBackground(base);
         });
-    }
-
-    /** Quickstep sends only the native overview visibility transition. */
-    private static void registerRecentsVisibilityReceiver(Context context) {
-        if (recentsVisibilityReceiver != null) return;
-        BroadcastReceiver receiver = new BroadcastReceiver() {
-            @Override public void onReceive(Context receiverContext, Intent intent) {
-                if (!RECENTS_VISIBILITY_ACTION.equals(intent.getAction())) return;
-                // Do not accept untrusted apps spoofing launcher state.
-                int senderUid = getSentFromUid();
-                String[] packages = receiverContext.getPackageManager()
-                        .getPackagesForUid(senderUid);
-                boolean fromLauncher = false;
-                if (packages != null) {
-                    for (String name : packages) {
-                        if ("com.android.launcher3".equals(name)) {
-                            fromLauncher = true;
-                            break;
-                        }
-                    }
-                }
-                if (!fromLauncher) {
-                    Log.w(TAG, "Ignored overview visibility from non-launcher UID");
-                    return;
-                }
-                recentsVisible = intent.getBooleanExtra(RECENTS_VISIBILITY_EXTRA, false);
-                Log.i(TAG, "Native Quickstep overview visible=" + recentsVisible);
-                updateStatusAppearance();
-            }
-        };
-        try {
-            context.registerReceiver(receiver,
-                    new IntentFilter(RECENTS_VISIBILITY_ACTION),
-                    Context.RECEIVER_EXPORTED);
-            recentsVisibilityReceiver = receiver;
-        } catch (Throwable error) {
-            Log.e(TAG, "Cannot observe native Quickstep visibility", error);
-        }
     }
 
     /** Native Android shade state, including Quick Settings collapse. */
