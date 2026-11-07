@@ -8,6 +8,7 @@
     <application
         android:label="BB Music"
         android:allowBackup="false"
+        android:enableOnBackInvokedCallback="true"
         android:theme="@android:style/Theme.Material.NoActionBar">
         <activity
             android:name=".MusicActivity"
