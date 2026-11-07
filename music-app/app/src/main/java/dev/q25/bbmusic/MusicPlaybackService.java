@@ -4,6 +4,8 @@ import android.util.Log;
 
 import androidx.media3.common.AudioAttributes;
 import androidx.media3.common.C;
+import androidx.media3.datasource.DefaultDataSource;
+import androidx.media3.exoplayer.source.ProgressiveMediaSource;
 import androidx.media3.exoplayer.ExoPlayer;
 import androidx.media3.session.MediaSession;
 import androidx.media3.session.MediaSessionService;
@@ -21,7 +23,14 @@ public final class MusicPlaybackService extends MediaSessionService {
     @Override
     public void onCreate() {
         super.onCreate();
+        // All indexed tracks are local SAF content:// audio documents,
+        // not HLS/DASH/SS manifests. DefaultMediaSourceFactory can infer a
+        // streaming format from a document URI and then reflectively load
+        // an unbundled HLS module, leaving the queue empty. Use the actual
+        // progressive file source with Android's ContentResolver support.
         player = new ExoPlayer.Builder(this)
+                .setMediaSourceFactory(new ProgressiveMediaSource.Factory(
+                        new DefaultDataSource.Factory(this)))
                 .setAudioAttributes(new AudioAttributes.Builder()
                         .setUsage(C.USAGE_MEDIA)
                         .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
