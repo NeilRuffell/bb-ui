@@ -27,9 +27,40 @@ Home screen, in order:
 6. Shuffle Songs (first-party shuffled playback)
 7. Settings
 
-**Settings** provides **Add folders** and a live list of each authorized
-music folder, with a per-folder **Remove** control. Removing a folder does
-not delete the files on the device.
+**Settings** provides **Add folders**, **Refresh library**, and a live list
+of each saved music folder, with a per-folder **Remove** control. Removing a
+folder does not delete the files on the device.
+
+### Persistent offline catalog (Room)
+
+`MusicLibraryDatabase.java` uses AndroidX Room 2.8.5 (SQLite) to persist
+the scanned song catalog in app-private storage. Tracks store only their SAF
+`content://` URIs, source tree URI, tags, duration and track number; audio
+files remain in the user-selected folders. `LocalMusicSource` performs all
+database operations off the UI thread. On startup it:
+
+1. Determines the currently authorized trees using `MusicFolders.selectedTrees`.
+2. Checks the saved scan marker, which includes the exact authorized tree set.
+3. Loads tracks directly from Room when the marker matches, including a
+   successfully indexed but empty collection. No directory enumeration or
+   audio-tag extraction occurs on this fast path.
+4. Scans the selected folders only on first use, after a folder selection
+   changes, or when the user explicitly chooses **Settings > Refresh library**.
+
+The scanner replaces the catalog and scan marker in one transaction. If
+scanning fails, the previous database snapshot is retained. Previously
+indexed library data remains browseable while a manual refresh runs.
+Individual rows are checked against the current authorized folder list
+before display; stale rows from revoked/removed folder access cannot leak
+into the library. A changed permission/selection set invalidates the
+saved scan marker.
+
+This is **manual on-demand refresh**, not a periodic scanner. To find files
+added, moved, deleted or retagged outside BB Music, choose **Refresh library**.
+Force-stopping the app, restarting Android, or reopening the app does not
+normally rescan folders. A database is retained across app upgrades and
+`adb install -r`, but uninstalling or clearing app data erases it.
+Embedded artwork stays in the existing separate in-memory thumbnail cache.
 
 ### Original BBOS6 music menu icons
 
@@ -255,11 +286,12 @@ Settings has no child-count subtitle on the home menu, while retaining
 its Add folders entry. Playlists displays `0 Items` until the app supports
 playlists. Shuffle Songs is an action and has no child count.
 
-When the app opens, it loads counts from the user-selected folder trees
-only. With no folders selected the counters are zero **and no storage scan
-occurs**. While a scan runs, counters read `Scanning...`, and scan failures
-show `Unavailable` instead of a false zero. Adding a folder invalidates the
-previous snapshot and refreshes counts. Count updates rebind visible rows
+When the app opens, counts come from the saved Room catalog for the current
+authorized folder set. With no folders selected the counters are zero **and
+no storage scan occurs**. During initial database loading/indexing counters
+read `Loading...`; failures show `Unavailable` instead of a false zero.
+Adding a folder invalidates the previous snapshot and refreshes counts.
+Count updates rebind visible rows
 without adapter invalidation, preserving trackpad selection and scroll offset.
 
 ## Selected-folder-only device library
@@ -284,13 +316,15 @@ selections there are no media queries.
   `READ_EXTERNAL_STORAGE`, `MANAGE_EXTERNAL_STORAGE`, network access,
   or root permissions for this feature.
 - The scanner reads audio metadata inside allowed trees on a background
-  thread. Results are held in an in-memory snapshot. A newly selected folder
-  invalidates the snapshot, requiring a fresh scan of the updated allowlist.
+  thread. Results are stored in an app-private Room database and presented
+  through an in-memory snapshot. A newly selected folder invalidates the
+  snapshot and scans the updated allowlist; unchanged libraries load from
+  Room without rescanning.
 - All Songs, Artists, Albums and Genres use the same recycled list rows.
   Album/artist/genre grouping uses file metadata; untagged audio remains
   visible by filename with Unknown Artist/Album/Genre labels.
-- Songs retain their `content://` document URIs for the future local audio
-  engine. Selecting a track does not play it yet.
+- Songs retain their `content://` document URIs for the first-party Media3
+  player. Selecting a track opens Now Playing and starts playback.
 - The original Symfonium adapter is preserved but never automatically
   connects; it is optional and not needed for this local library.
 
@@ -322,7 +356,9 @@ Removing the final folder leaves an empty selected-folder library. Back
 retains normal page navigation, and Settings refreshes after Add folders
 returns from the Android folder picker. Re-selecting a saved folder that had
 lost its read grant restores authorization and triggers a new library scan.
-The scanner still reads **only** the intersection of saved folders and live
+**Refresh library** rebuilds the entire catalog on demand, without making
+the currently displayed cached library unavailable while it runs. The
+scanner still reads **only** the intersection of saved folders and live
 read grants. If a document provider cannot return a friendly folder name,
 the UI derives a label from its tree document ID.
 
@@ -339,6 +375,17 @@ opens Now Playing. The queue's source URIs are the `content://` documents
 obtained from **only the selected SAF folder trees**. Back returns to the
 previous library page without stopping playback. The root **Shuffle Songs**
 action starts a shuffled queue of selected-folder music.
+
+**Local-file media source:** `MusicPlaybackService` supplies
+`ProgressiveMediaSource.Factory(new DefaultDataSource.Factory(this))` to
+`ExoPlayer.Builder`. Selected-folder songs are regular SAF audio documents,
+not HLS/DASH streams. Do not revert to the default auto-detecting media-source
+factory without supporting its optional streaming modules. The device log on
+2026-11-07 confirmed that auto-detection attempted to instantiate the missing
+`androidx.media3.exoplayer.hls.HlsMediaSource$Factory`, resulting in an empty
+Now Playing queue after `setMediaItems`. The progressive source avoids that
+class lookup and uses Android's content URI resolver. This change does not
+grant additional storage access and does not affect the Room catalog.
 
 The Now Playing screen is a standalone presentation port of BB UI master
 `TwoColumnPanel.java` and `UnifiedShadeHost.java`, preserving:
@@ -426,6 +473,18 @@ adb -s 202512003630 install -r app/build/outputs/apk/debug/app-debug.apk
 15. Back should return to the same music list without pausing playback.
 16. Background the app and use system notification/headset media controls.
 17. Start Shuffle Songs from the home menu, and verify the shuffled queue.
+18. Force-stop the app with `adb shell am force-stop dev.q25.bbmusic`,
+    reopen it, and confirm that songs and counts load from Room rather than
+    scanning all selected folders. Check the `BBMusic-Local` log tag for
+    `Loaded persistent music index`.
+19. Reboot the device and verify the library persists, including an empty
+    indexed folder.
+20. Add a track to an existing selected folder outside BB Music; verify
+    **Settings > Refresh library** discovers it. Delete/retag a file and
+    repeat to confirm the transaction replaces removed/changed entries.
+21. Remove or revoke a selected tree grant and confirm its tracks do not
+    reappear from the saved database. A failed refresh must not destroy the
+    last successfully saved snapshot.
 18. Confirm tracks from unselected folders do not appear or enter a queue.
 19. Verify song and album rows display their own album cover; artist and
     genre rows select the first album in alphabetical album-title order.
@@ -490,8 +549,12 @@ BB Music APK (dev.q25.bbmusic)
         |
         v
   LocalMusicSource
-    DocumentsContract enumeration, selected trees only
-    Audio metadata -> songs/artists/albums/genres
+    Reads authorized song metadata from Room on startup
+    First-time/explicit refresh: DocumentsContract enumeration
+        |
+        v
+  MusicLibraryDatabase (Room / private SQLite)
+    Atomic song catalog + selected-tree scan marker
         |
         v
   Native Media3 playback -> MediaSessionService + ExoPlayer (implemented)

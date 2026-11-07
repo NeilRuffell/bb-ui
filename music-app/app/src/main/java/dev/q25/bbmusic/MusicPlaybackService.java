@@ -1,7 +1,11 @@
 package dev.q25.bbmusic;
 
+import android.util.Log;
+
 import androidx.media3.common.AudioAttributes;
 import androidx.media3.common.C;
+import androidx.media3.datasource.DefaultDataSource;
+import androidx.media3.exoplayer.source.ProgressiveMediaSource;
 import androidx.media3.exoplayer.ExoPlayer;
 import androidx.media3.session.MediaSession;
 import androidx.media3.session.MediaSessionService;
@@ -12,13 +16,21 @@ import androidx.media3.session.MediaSessionService;
  * Only the app's explicitly selected document-tree URIs enter its queue.
  */
 public final class MusicPlaybackService extends MediaSessionService {
+    private static final String TAG = "BBMusic-Service";
     private ExoPlayer player;
     private MediaSession session;
 
     @Override
     public void onCreate() {
         super.onCreate();
+        // All indexed tracks are local SAF content:// audio documents,
+        // not HLS/DASH/SS manifests. DefaultMediaSourceFactory can infer a
+        // streaming format from a document URI and then reflectively load
+        // an unbundled HLS module, leaving the queue empty. Use the actual
+        // progressive file source with Android's ContentResolver support.
         player = new ExoPlayer.Builder(this)
+                .setMediaSourceFactory(new ProgressiveMediaSource.Factory(
+                        new DefaultDataSource.Factory(this)))
                 .setAudioAttributes(new AudioAttributes.Builder()
                         .setUsage(C.USAGE_MEDIA)
                         .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
@@ -26,15 +38,18 @@ public final class MusicPlaybackService extends MediaSessionService {
                 .setHandleAudioBecomingNoisy(true)
                 .build();
         session = new MediaSession.Builder(this, player).build();
+        Log.i(TAG, "Media3 playback service created");
     }
 
     @Override
     public MediaSession onGetSession(MediaSession.ControllerInfo controllerInfo) {
+        Log.i(TAG, "Media3 playback session requested; available=" + (session != null));
         return session;
     }
 
     @Override
     public void onDestroy() {
+        Log.i(TAG, "Media3 playback service destroyed");
         if (session != null) {
             session.release();
             session = null;
