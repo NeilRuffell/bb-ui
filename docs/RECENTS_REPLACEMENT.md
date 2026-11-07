@@ -13,7 +13,7 @@ Branch: `feat/bbos6-recents-replacement`, based on `master`.
 - Deleted `app/src/main/java/dev/q25/trackpad/NativeRecentsGridHook.java` rather than disabling it behind `bb_ui_vertical_recents`.
 - Removed its `app/src/main/assets/xposed_init` entry, so BBUI no longer installs any old Recents grid hooks.
 - Removed the Launcher3-to-SystemUI `RECENTS_VISIBILITY` broadcast and stale status-bar appearance state; these existed solely for the retired Recents grid.
-- Left the existing SystemUI BlackBerry-key popup and its `showNativeRecents()` action unchanged. It is a command into Android's existing native Recents; it is **not** a renderer. Its behavior requires separate Q25 verification.
+- Preserved the SystemUI BlackBerry-key popup and changed its `showNativeRecents()` action to forward the existing `CommandQueue.toggleRecentApps()` native command, with a thread-local exception from our BB-key interception. The original `showRecentApps(false)` route could complete without entering Overview. The menu is **not** a Recents renderer. On-device confirmation is pending.
 - The active Recents presentation is now stock Quickstep **only**. This is a transitional baseline, not the final BBOS6 design.
 - The deprecated global setting `bb_ui_vertical_recents` is obsolete and can be deleted on the device.
 
@@ -29,7 +29,7 @@ The retired hook targeted these Q25 Quickstep classes:
 
 Those references verify which implementation the old code targeted, **not** that a replacement renderer has been tested on the current device build. Inspect installed Quickstep signatures and native layout ownership before implementing hooks.
 
-SystemUI receives the BlackBerry-key Recents command in `PullDownHook.installRecentsInterception()`; its popup's Switch Application action calls native `showRecentApps`/fallback `toggleRecentApps`. Keep this entry routing distinct from Quickstep's visual renderer. Do not add a competing Recents command path.
+SystemUI receives the BlackBerry-key Recents command in `PullDownHook.installRecentsInterception()`. Its popup's Switch Application action forwards the **same** native `toggleRecentApps()` command without recursively opening the BB menu. The CommandQueue owner is referenced from its constructor as well as native toggle callbacks. Keep this entry routing distinct from Quickstep's visual renderer. Do not add a competing Recents command path.
 
 ## Proposed replacement architecture
 
@@ -67,4 +67,4 @@ adb -s 202512003630 shell settings delete global bb_ui_vertical_recents && \
 adb -s 202512003630 reboot
 ```
 
-After boot, open Android Recents through a native available path and verify stock presentation; verify BB key still opens its existing menu. The menu's Switch Application action is not claimed to be repaired by this baseline. Confirm functionality on the physical Q25 before proceeding to a new Quickstep renderer. `master` remains unchanged.
+After boot, press the BlackBerry key, select **Switch Application**, and press Enter. Verify that Quickstep's *stock* Recents appears (no other task switcher or hidden view), selecting a task opens that same Android task, and Back/Home close Overview normally. Also reopen the BB popup to verify its Notifications and Quick Settings actions remain functional. If Overview still does not open, capture `adb -s 202512003630 logcat -d -s 'BB7-PullDown:I' 'BB7-PullDown:E' '*:S' | tail -100` and inspect the native Quickstep service state. The native menu action is only source-verified pending device test. `master` remains unchanged.
