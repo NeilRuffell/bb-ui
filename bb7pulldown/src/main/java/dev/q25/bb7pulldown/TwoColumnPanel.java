@@ -278,9 +278,9 @@ final class TwoColumnPanel extends FrameLayout {
         mediaRow.addView(mediaRepeatStatus, repeatStatusLayout);
 
         final int[] icons = {
-                android.R.drawable.ic_media_previous,
-                android.R.drawable.ic_media_play,
-                android.R.drawable.ic_media_next
+                R.drawable.bb_media_previous,
+                R.drawable.bb_media_play,
+                R.drawable.bb_media_next
         };
         final String[] descriptions = {"Previous", "Play or pause", "Next"};
         for (int i = 0; i < mediaButtons.length; i++) {
@@ -600,7 +600,7 @@ final class TwoColumnPanel extends FrameLayout {
         expandedMediaArtist.setText(entry.artist);
         expandedMediaArtist.setVisibility(entry.artist.isEmpty() ? View.GONE : View.VISIBLE);
         mediaButtons[NativeMediaSessions.PLAY_PAUSE].setImageResource(entry.playing
-                ? android.R.drawable.ic_media_pause : android.R.drawable.ic_media_play);
+                ? R.drawable.bb_media_pause : R.drawable.bb_media_play);
         mediaButtons[NativeMediaSessions.PLAY_PAUSE].setContentDescription(
                 entry.playing ? "Pause" : "Play");
         mediaIndex.setText(mediaSessions.size() > 1
