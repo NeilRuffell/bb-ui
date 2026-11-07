@@ -24,6 +24,26 @@ Home screen, in order:
 
 **Settings** currently has exactly one action: **Add folders**.
 
+### Shared list component
+
+The list implementation is extracted into `MusicListView.java`. This class
+extends Android's native `ListView` and owns one `BaseAdapter`, 55dp recycled
+rows, the full-width square-cornered BBOS6 selection gradient, cached album
+artwork binding, count/text presentation, and the same QS-derived Up/Down
+trackpad behavior. Every menu and library page uses **the same instance**;
+switching pages updates the adapter's data and preserves prior selection.
+
+`MusicActivity.java` owns only page data, album-art *selection policy*
+(which album's cover belongs to each entry), library counts, Back history,
+permissions, Settings and playback routing. It supplies platform-neutral
+`MusicListView.RowData` to the component through a small `DataSource`
+interface. No second list, independent adapter, separate selection style or
+custom touch scroll engine is introduced. The view owns its artwork cache
+lifecycle and releases it when the Activity is destroyed.
+
+The current standalone implementation still does not depend on BB UI,
+Vector/LSPosed, a custom ROM, or another music app.
+
 ### Artwork in music browse lists
 
 Songs, Artists, Albums and Genres now display 55dp square album covers
@@ -211,6 +231,9 @@ adb -s 202512003630 install -r app/build/outputs/apk/debug/app-debug.apk
     genre rows select the first album in alphabetical album-title order.
 18. Scroll quickly with touch, then select rows using the Q25 trackpad:
     artwork must not be cross-assigned by recycled ListView rows.
+    After the shared-list refactor, repeat this on the home menu, Settings,
+    All Songs, Artists, Albums, Genres and their nested song pages; Back must
+    still restore the previous selection and scroll position.
 19. Confirm coverless albums show a placeholder and that folder selection,
     existing counts, previous navigation, status bar and Now Playing
     remain functional.
